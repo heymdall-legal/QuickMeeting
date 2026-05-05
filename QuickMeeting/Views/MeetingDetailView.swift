@@ -9,6 +9,7 @@ import SwiftUI
 
 struct MeetingDetailView: View {
     let meeting: Meeting
+    @StateObject private var playback = MeetingAudioPlayback()
 
     var body: some View {
         ScrollView {
@@ -38,6 +39,21 @@ struct MeetingDetailView: View {
                     LabeledContent("Duration", value: durationText(duration))
                 }
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Audio Playback")
+                        .font(.headline)
+
+                    Button(action: playback.togglePlayback) {
+                        Label(playbackButtonTitle, systemImage: playbackButtonSystemImage)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!playback.isPlaybackAvailable)
+
+                    Text(playback.statusText)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Audio File")
                         .font(.headline)
@@ -51,6 +67,9 @@ struct MeetingDetailView: View {
             .padding(24)
         }
         .navigationTitle(meeting.title.isEmpty ? "Untitled Meeting" : meeting.title)
+        .task(id: meeting.id) {
+            try? playback.loadAudioFile(at: URL(fileURLWithPath: meeting.audioFilePath))
+        }
     }
 
     private var statusText: String {
@@ -78,5 +97,23 @@ struct MeetingDetailView: View {
         formatter.unitsStyle = .abbreviated
         formatter.zeroFormattingBehavior = .dropLeading
         return formatter.string(from: duration) ?? "\(Int(duration)) sec"
+    }
+
+    private var playbackButtonTitle: String {
+        switch playback.state {
+        case .playing:
+            return "Pause"
+        default:
+            return "Play"
+        }
+    }
+
+    private var playbackButtonSystemImage: String {
+        switch playback.state {
+        case .playing:
+            return "pause.fill"
+        default:
+            return "play.fill"
+        }
     }
 }

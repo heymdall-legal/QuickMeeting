@@ -115,4 +115,28 @@ struct MeetingStoreTests {
         #expect(meetingStatus == .recorded)
         #expect(meeting.updatedAt == endedAt)
     }
+
+    @Test
+    func createMeetingPersistsUnescapedFilesystemAudioPath() throws {
+        let schema = Schema([
+            Meeting.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let context = ModelContext(container)
+        let store = MeetingStore(modelContext: context)
+
+        let folderURL = URL(fileURLWithPath: "/tmp/Application Support/QuickMeeting/Meeting")
+        let audioFileURL = folderURL.appendingPathComponent("audio file.wav")
+
+        let meeting = try store.createMeeting(
+            title: "Design Review",
+            startedAt: Date(timeIntervalSince1970: 1_234_567_890),
+            folderURL: folderURL,
+            audioFileURL: audioFileURL
+        )
+
+        #expect(meeting.audioFilePath == "/tmp/Application Support/QuickMeeting/Meeting/audio file.wav")
+        #expect(!meeting.audioFilePath.contains("%20"))
+    }
 }

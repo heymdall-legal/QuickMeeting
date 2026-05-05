@@ -37,7 +37,7 @@ struct MeetingStore {
             title: title,
             startedAt: startedAt,
             status: .recording,
-            audioFilePath: normalizedAudioFileURL.path(),
+            audioFilePath: normalizedAudioFileURL.path(percentEncoded: false),
             createdAt: now,
             updatedAt: now
         )

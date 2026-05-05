@@ -8,6 +8,7 @@
 import AVFAudio
 import CoreMedia
 import Foundation
+import OSLog
 import ScreenCaptureKit
 
 protocol AudioCapturePipeline {
@@ -40,6 +41,25 @@ enum NativeAudioCapturePipelineError: LocalizedError {
 
 @MainActor
 final class NativeAudioCapturePipeline: AudioCapturePipeline {
+    enum RecordingDiagnosticEvent: Equatable {
+        case writerPrepared
+        case captureStarted
+        case captureStartFailed
+        case captureStopped
+        case captureStopFailed
+    }
+
+    struct RecordingDiagnostics: Equatable {
+        let event: RecordingDiagnosticEvent
+        let outputURL: URL
+        let sampleBufferCount: Int
+        let firstSampleSeconds: Double?
+        let lastSampleSeconds: Double?
+        let fileExists: Bool
+        let fileSizeBytes: UInt64?
+        let errorDescription: String?
+    }
+
     struct CaptureConfiguration: Equatable {
         let sampleRate: Double
         let channelCount: Int
@@ -77,10 +97,15 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
 
     private enum State {
         case idle
-        case capturing(session: any AudioCaptureStreamSession, outputSink: CaptureOutputSink)
+        case capturing(
+            session: any AudioCaptureStreamSession,
+            outputSink: CaptureOutputSink,
+            outputURL: URL
+        )
         case stopping(
             session: any AudioCaptureStreamSession,
             outputSink: CaptureOutputSink,
+            outputURL: URL,
             nativeStopCompleted: Bool
         )
     }
@@ -88,16 +113,20 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     private let shareableContentProvider: () async throws -> CaptureTarget
     private let writerFactory: (URL) throws -> any AudioFileWriting
     private let captureConfiguration: CaptureConfiguration
+    private let diagnosticHandler: @Sendable (RecordingDiagnostics) -> Void
     private var state: State = .idle
+    private let logger = Logger(subsystem: "info.akitov.QuickMeeting", category: "Recording")
 
     init(
         shareableContentProvider: @escaping () async throws -> CaptureTarget,
         writerFactory: @escaping (URL) throws -> any AudioFileWriting,
-        captureConfiguration: CaptureConfiguration
+        captureConfiguration: CaptureConfiguration,
+        diagnosticHandler: @escaping @Sendable (RecordingDiagnostics) -> Void = { _ in }
     ) {
         self.shareableContentProvider = shareableContentProvider
         self.writerFactory = writerFactory
         self.captureConfiguration = captureConfiguration
+        self.diagnosticHandler = diagnosticHandler
     }
 
     convenience init() {
@@ -114,6 +143,12 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         }
 
         let writer = try writerFactory(outputURL)
+        emitDiagnostics(
+            event: .writerPrepared,
+            outputURL: outputURL,
+            captureDiagnostics: nil,
+            error: nil
+        )
         var outputSink: CaptureOutputSink?
 
         do {
@@ -122,17 +157,39 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
             outputSink = createdOutputSink
             let session = try target.makeSession(captureConfiguration, createdOutputSink)
 
-            state = .capturing(session: session, outputSink: createdOutputSink)
+            state = .capturing(
+                session: session,
+                outputSink: createdOutputSink,
+                outputURL: outputURL
+            )
 
             try await session.start()
+            emitDiagnostics(
+                event: .captureStarted,
+                outputURL: outputURL,
+                captureDiagnostics: nil,
+                error: nil
+            )
         } catch {
             let currentOutputSink = outputSink ?? activeOutputSink
             state = .idle
 
             if let currentOutputSink {
-                try? await currentOutputSink.finish()
+                let captureDiagnostics = try? await currentOutputSink.finish()
+                emitDiagnostics(
+                    event: .captureStartFailed,
+                    outputURL: outputURL,
+                    captureDiagnostics: captureDiagnostics,
+                    error: error
+                )
             } else {
                 try? writer.finish()
+                emitDiagnostics(
+                    event: .captureStartFailed,
+                    outputURL: outputURL,
+                    captureDiagnostics: nil,
+                    error: error
+                )
             }
 
             throw error
@@ -143,10 +200,11 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         switch state {
         case .idle:
             return
-        case .capturing(let session, let outputSink):
+        case .capturing(let session, let outputSink, let outputURL):
             state = .stopping(
                 session: session,
                 outputSink: outputSink,
+                outputURL: outputURL,
                 nativeStopCompleted: false
             )
             try await continueStopping()
@@ -159,13 +217,13 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         switch state {
         case .idle:
             nil
-        case .capturing(_, let outputSink), .stopping(_, let outputSink, _):
+        case .capturing(_, let outputSink, _), .stopping(_, let outputSink, _, _):
             outputSink
         }
     }
 
     private func continueStopping() async throws {
-        guard case .stopping(let session, let outputSink, let nativeStopCompleted) = state else {
+        guard case .stopping(let session, let outputSink, let outputURL, let nativeStopCompleted) = state else {
             return
         }
 
@@ -174,12 +232,72 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
             state = .stopping(
                 session: session,
                 outputSink: outputSink,
+                outputURL: outputURL,
                 nativeStopCompleted: true
             )
         }
 
-        try await outputSink.finish()
-        state = .idle
+        do {
+            let captureDiagnostics = try await outputSink.finish()
+            state = .idle
+            emitDiagnostics(
+                event: .captureStopped,
+                outputURL: outputURL,
+                captureDiagnostics: captureDiagnostics,
+                error: nil
+            )
+        } catch {
+            let captureDiagnostics = await outputSink.currentDiagnostics()
+            emitDiagnostics(
+                event: .captureStopFailed,
+                outputURL: outputURL,
+                captureDiagnostics: captureDiagnostics,
+                error: error
+            )
+            throw error
+        }
+    }
+
+    private func emitDiagnostics(
+        event: RecordingDiagnosticEvent,
+        outputURL: URL,
+        captureDiagnostics: CaptureOutputDiagnostics?,
+        error: Error?
+    ) {
+        let fileMetadata = fileMetadata(for: outputURL)
+        let diagnostics = RecordingDiagnostics(
+            event: event,
+            outputURL: outputURL,
+            sampleBufferCount: captureDiagnostics?.sampleBufferCount ?? 0,
+            firstSampleSeconds: captureDiagnostics?.firstSampleSeconds,
+            lastSampleSeconds: captureDiagnostics?.lastSampleSeconds,
+            fileExists: fileMetadata.exists,
+            fileSizeBytes: fileMetadata.fileSizeBytes,
+            errorDescription: error?.localizedDescription ?? captureDiagnostics?.storedErrorDescription
+        )
+
+        logger.info(
+            """
+            event=\(String(describing: diagnostics.event), privacy: .public) outputURL=\(diagnostics.outputURL.path(), privacy: .public) \
+            sampleBufferCount=\(diagnostics.sampleBufferCount) firstSampleSeconds=\(String(describing: diagnostics.firstSampleSeconds), privacy: .public) \
+            lastSampleSeconds=\(String(describing: diagnostics.lastSampleSeconds), privacy: .public) fileExists=\(diagnostics.fileExists) \
+            fileSizeBytes=\(String(describing: diagnostics.fileSizeBytes), privacy: .public) error=\(diagnostics.errorDescription ?? "none", privacy: .public)
+            """
+        )
+        diagnosticHandler(diagnostics)
+    }
+
+    private func fileMetadata(for outputURL: URL) -> (exists: Bool, fileSizeBytes: UInt64?) {
+        let fileManager = FileManager.default
+        let path = outputURL.path()
+
+        guard fileManager.fileExists(atPath: path) else {
+            return (false, nil)
+        }
+
+        let attributes = try? fileManager.attributesOfItem(atPath: path)
+        let fileSize = attributes?[.size] as? NSNumber
+        return (true, fileSize?.uint64Value)
     }
 
     private static func makeLiveCaptureTarget() async throws -> CaptureTarget {
@@ -219,6 +337,13 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     }
 }
 
+struct CaptureOutputDiagnostics {
+    let sampleBufferCount: Int
+    let firstSampleSeconds: Double?
+    let lastSampleSeconds: Double?
+    let storedErrorDescription: String?
+}
+
 final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
     let sampleHandlerQueue = DispatchQueue(
         label: "info.akitov.QuickMeeting.NativeAudioCapturePipeline.audio-output"
@@ -226,6 +351,9 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private var writer: (any NativeAudioCapturePipeline.AudioFileWriting)?
     private var storedError: Error?
+    private var sampleBufferCount = 0
+    private var firstSampleSeconds: Double?
+    private var lastSampleSeconds: Double?
 
     init(writer: any NativeAudioCapturePipeline.AudioFileWriting) {
         self.writer = writer
@@ -246,6 +374,15 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
 
         do {
             try writer?.append(sampleBuffer)
+            sampleBufferCount += 1
+
+            let presentationTimeSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+            if presentationTimeSeconds.isFinite {
+                if firstSampleSeconds == nil {
+                    firstSampleSeconds = presentationTimeSeconds
+                }
+                lastSampleSeconds = presentationTimeSeconds
+            }
         } catch {
             storedError = error
         }
@@ -261,11 +398,21 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
-    func finish() async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+    func finish() async throws -> CaptureOutputDiagnostics {
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<CaptureOutputDiagnostics, Error>) in
             sampleHandlerQueue.async {
                 let completionError = self.storedError
+                let diagnostics = CaptureOutputDiagnostics(
+                    sampleBufferCount: self.sampleBufferCount,
+                    firstSampleSeconds: self.firstSampleSeconds,
+                    lastSampleSeconds: self.lastSampleSeconds,
+                    storedErrorDescription: completionError?.localizedDescription
+                )
                 self.storedError = nil
+                self.sampleBufferCount = 0
+                self.firstSampleSeconds = nil
+                self.lastSampleSeconds = nil
 
                 do {
                     try self.writer?.finish()
@@ -280,8 +427,23 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
                 if let completionError {
                     continuation.resume(throwing: completionError)
                 } else {
-                    continuation.resume()
+                    continuation.resume(returning: diagnostics)
                 }
+            }
+        }
+    }
+
+    func currentDiagnostics() async -> CaptureOutputDiagnostics {
+        await withCheckedContinuation { continuation in
+            sampleHandlerQueue.async {
+                continuation.resume(
+                    returning: CaptureOutputDiagnostics(
+                        sampleBufferCount: self.sampleBufferCount,
+                        firstSampleSeconds: self.firstSampleSeconds,
+                        lastSampleSeconds: self.lastSampleSeconds,
+                        storedErrorDescription: self.storedError?.localizedDescription
+                    )
+                )
             }
         }
     }

@@ -583,6 +583,56 @@ struct NativeAudioCapturePipelineTests {
         #expect(session.startCallCount == 1)
         #expect(writer.finishCallCount == 1)
     }
+
+    @Test
+    func stopEmitsDiagnosticsForMissingOutputAndZeroSamples() async throws {
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-missing-output.wav")
+        let session = AudioCaptureStreamSessionSpy()
+        let writer = AudioFileWriterSpy()
+        let diagnosticRecorder = RecordingDiagnosticRecorder()
+
+        let pipeline = NativeAudioCapturePipeline(
+            shareableContentProvider: {
+                NativeAudioCapturePipeline.CaptureTarget(width: 1512, height: 982) { _, _ in
+                    session
+                }
+            },
+            writerFactory: { _ in writer },
+            captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration(),
+            diagnosticHandler: { diagnosticRecorder.record($0) }
+        )
+
+        try await pipeline.start(outputURL: outputURL)
+        try await pipeline.stop()
+
+        let recordedDiagnostics = diagnosticRecorder.diagnostics
+        let stopDiagnostics = try #require(
+            recordedDiagnostics.last(where: { $0.event == .captureStopped })
+        )
+        #expect(stopDiagnostics.outputURL == outputURL)
+        #expect(stopDiagnostics.sampleBufferCount == 0)
+        #expect(stopDiagnostics.fileExists == false)
+        #expect(stopDiagnostics.fileSizeBytes == nil)
+        #expect(stopDiagnostics.errorDescription == nil)
+    }
+}
+
+private final class RecordingDiagnosticRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedDiagnostics: [NativeAudioCapturePipeline.RecordingDiagnostics] = []
+
+    func record(_ diagnostic: NativeAudioCapturePipeline.RecordingDiagnostics) {
+        lock.lock()
+        storedDiagnostics.append(diagnostic)
+        lock.unlock()
+    }
+
+    var diagnostics: [NativeAudioCapturePipeline.RecordingDiagnostics] {
+        lock.lock()
+        let diagnostics = storedDiagnostics
+        lock.unlock()
+        return diagnostics
+    }
 }
 
 @MainActor
