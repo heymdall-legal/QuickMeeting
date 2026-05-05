@@ -30,4 +30,28 @@ struct MeetingFileStoreTests {
         )
         #expect(artifacts.audioFileURL.lastPathComponent == "audio.wav")
     }
+
+    @Test
+    func deleteArtifactsRemovesMeetingFolderAndAudioFile() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = MeetingFileStore(fileManager: fileManager, rootURL: rootURL)
+        let meetingID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
+        let artifacts = try store.createArtifacts(for: meetingID, startedAt: startedAt)
+        fileManager.createFile(atPath: artifacts.audioFileURL.path, contents: Data("stub".utf8))
+        let meeting = Meeting(
+            id: meetingID,
+            title: "Delete Me",
+            startedAt: startedAt,
+            status: .recorded,
+            audioFilePath: artifacts.audioFileURL.path
+        )
+
+        try store.deleteArtifacts(for: meeting)
+
+        #expect(!fileManager.fileExists(atPath: artifacts.audioFileURL.path))
+        #expect(!fileManager.fileExists(atPath: artifacts.meetingFolderURL.path))
+    }
 }

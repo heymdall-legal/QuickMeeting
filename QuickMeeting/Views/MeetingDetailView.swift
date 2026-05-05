@@ -9,7 +9,11 @@ import SwiftUI
 
 struct MeetingDetailView: View {
     let meeting: Meeting
+    let canDelete: Bool
+    let onDelete: () -> Void
+
     @StateObject private var playback = MeetingAudioPlayback()
+    @State private var isShowingDeleteConfirmation = false
 
     var body: some View {
         ScrollView {
@@ -62,6 +66,11 @@ struct MeetingDetailView: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
+
+                Button("Delete Meeting", role: .destructive) {
+                    isShowingDeleteConfirmation = true
+                }
+                .disabled(!canDelete)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(24)
@@ -69,6 +78,15 @@ struct MeetingDetailView: View {
         .navigationTitle(meeting.title.isEmpty ? "Untitled Meeting" : meeting.title)
         .task(id: meeting.id) {
             try? playback.loadAudioFile(at: URL(fileURLWithPath: meeting.audioFilePath))
+        }
+        .alert(
+            "Delete Meeting?",
+            isPresented: $isShowingDeleteConfirmation
+        ) {
+            Button("Delete", role: .destructive, action: onDelete)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will remove the meeting and its recording file from this Mac.")
         }
     }
 

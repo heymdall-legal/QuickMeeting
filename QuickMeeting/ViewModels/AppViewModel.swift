@@ -11,6 +11,7 @@ import Foundation
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published private(set) var recordingState: RecordingState = .idle
+    @Published private(set) var deletionErrorMessage: String?
 
     private let meetingStore: MeetingStore
     private let meetingFileStore: MeetingFileStore
@@ -148,6 +149,28 @@ final class AppViewModel: ObservableObject {
         case .failed:
             return recoverableRecordingMeetingID
         }
+    }
+
+    func canDeleteMeeting(_ meeting: Meeting) -> Bool {
+        activeOrRecoverableMeetingID != meeting.id
+    }
+
+    func deleteMeeting(_ meeting: Meeting) {
+        guard canDeleteMeeting(meeting) else {
+            return
+        }
+
+        do {
+            try meetingFileStore.deleteArtifacts(for: meeting)
+            try meetingStore.deleteMeeting(meeting)
+            deletionErrorMessage = nil
+        } catch {
+            deletionErrorMessage = error.localizedDescription
+        }
+    }
+
+    func clearDeletionError() {
+        deletionErrorMessage = nil
     }
 
     private func rollbackFailedRecordingStart(

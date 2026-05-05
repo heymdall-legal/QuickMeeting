@@ -40,6 +40,36 @@ struct MeetingFileStore {
         )
     }
 
+    func deleteArtifacts(for meeting: Meeting) throws {
+        let audioFileURL = URL(fileURLWithPath: meeting.audioFilePath).standardizedFileURL
+        let meetingFolderURL = audioFileURL.deletingLastPathComponent().standardizedFileURL
+        let normalizedRootURL = rootURL.standardizedFileURL
+
+        guard Self.isFileURL(meetingFolderURL, inside: normalizedRootURL) else {
+            return
+        }
+
+        if fileManager.fileExists(atPath: meetingFolderURL.path) {
+            try fileManager.removeItem(at: meetingFolderURL)
+            return
+        }
+
+        if fileManager.fileExists(atPath: audioFileURL.path) {
+            try fileManager.removeItem(at: audioFileURL)
+        }
+    }
+
+    private static func isFileURL(_ fileURL: URL, inside directoryURL: URL) -> Bool {
+        let directoryComponents = directoryURL.pathComponents
+        let fileComponents = fileURL.pathComponents
+
+        guard fileComponents.count > directoryComponents.count else {
+            return false
+        }
+
+        return Array(fileComponents.prefix(directoryComponents.count)) == directoryComponents
+    }
+
     private static func defaultRootURL(fileManager: FileManager) -> URL {
         let applicationSupportURL = fileManager.urls(
             for: .applicationSupportDirectory,

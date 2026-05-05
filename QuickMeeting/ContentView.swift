@@ -20,7 +20,13 @@ struct ContentView: View {
                 .navigationTitle("Meetings")
         } detail: {
             if let selectedMeeting {
-                MeetingDetailView(meeting: selectedMeeting)
+                MeetingDetailView(
+                    meeting: selectedMeeting,
+                    canDelete: appViewModel.canDeleteMeeting(selectedMeeting),
+                    onDelete: {
+                        appViewModel.deleteMeeting(selectedMeeting)
+                    }
+                )
             } else {
                 ContentUnavailableView(
                     "Select a Meeting",
@@ -43,6 +49,18 @@ struct ContentView: View {
         .onChange(of: appViewModel.activeOrRecoverableMeetingID) { _, _ in
             syncSelection()
         }
+        .alert(
+            "Unable to Delete Meeting",
+            isPresented: deletionErrorIsPresented,
+            actions: {
+                Button("OK", role: .cancel) {
+                    appViewModel.clearDeletionError()
+                }
+            },
+            message: {
+                Text(appViewModel.deletionErrorMessage ?? "Unknown error.")
+            }
+        )
     }
 
     private var selectedMeeting: Meeting? {
@@ -93,6 +111,17 @@ struct ContentView: View {
         }
 
         self.selectedMeetingID = firstMeeting.id
+    }
+
+    private var deletionErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { appViewModel.deletionErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appViewModel.clearDeletionError()
+                }
+            }
+        )
     }
 }
 

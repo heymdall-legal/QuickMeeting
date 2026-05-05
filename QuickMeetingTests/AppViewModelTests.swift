@@ -267,6 +267,66 @@ struct AppViewModelTests {
         #expect(snapshot.startAttempts.count == 1)
         #expect(snapshot.stopAttempts == 1)
     }
+
+    @Test
+    func deleteMeetingRemovesPersistedMeetingAndArtifacts() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meetingID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
+        let artifacts = try harness.meetingFileStore.createArtifacts(for: meetingID, startedAt: startedAt)
+        harness.fileManager.createFile(atPath: artifacts.audioFileURL.path, contents: Data("stub".utf8))
+        let meeting = try harness.meetingStore.createMeeting(
+            id: meetingID,
+            title: "Delete Me",
+            startedAt: startedAt,
+            folderURL: artifacts.meetingFolderURL,
+            audioFileURL: artifacts.audioFileURL
+        )
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions
+        )
+
+        viewModel.deleteMeeting(meeting)
+
+        let persistedMeetings = try harness.context.fetch(FetchDescriptor<Meeting>())
+        #expect(persistedMeetings.isEmpty)
+        #expect(!harness.fileManager.fileExists(atPath: artifacts.audioFileURL.path))
+        #expect(!harness.fileManager.fileExists(atPath: artifacts.meetingFolderURL.path))
+        #expect(viewModel.deletionErrorMessage == nil)
+    }
+
+    @Test
+    func deleteMeetingIgnoresTheActiveOrRecoverableMeeting() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meetingID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
+        var dates = [startedAt]
+        var meetingIDs = [meetingID]
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions,
+            dateProvider: { dates.removeFirst() },
+            meetingIDProvider: { meetingIDs.removeFirst() }
+        )
+
+        await viewModel.startRecording()
+
+        let persistedMeetings = try harness.context.fetch(FetchDescriptor<Meeting>())
+        let meeting = try #require(persistedMeetings.first)
+        #expect(!viewModel.canDeleteMeeting(meeting))
+
+        viewModel.deleteMeeting(meeting)
+
+        let reloadedMeetings = try harness.context.fetch(FetchDescriptor<Meeting>())
+        #expect(reloadedMeetings.count == 1)
+        #expect(reloadedMeetings.first?.id == meetingID)
+        #expect(viewModel.deletionErrorMessage == nil)
+    }
 }
 
 @MainActor
