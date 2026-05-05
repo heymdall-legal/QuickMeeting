@@ -1,5 +1,6 @@
-import Foundation
+import AVFAudio
 import CoreMedia
+import Foundation
 import SwiftData
 import Testing
 @testable import QuickMeeting
@@ -615,6 +616,210 @@ struct NativeAudioCapturePipelineTests {
         #expect(stopDiagnostics.fileSizeBytes == nil)
         #expect(stopDiagnostics.errorDescription == nil)
     }
+
+    @Test
+    func captureOutputSinkMixesSystemAndMicrophoneAudioIntoSingleWriterStream() async throws {
+        let writer = AudioFileWriterSpy()
+        let sink = CaptureOutputSink(
+            writer: writer,
+            captureConfiguration: .init(capturesMicrophone: true)
+        )
+
+        try sink.appendForTesting(
+            makeTestPCMBuffer(
+                leftChannel: [0.25, 0.25],
+                rightChannel: [0.25, 0.25]
+            ),
+            presentationTimeSeconds: 0,
+            outputType: .audio
+        )
+        try sink.appendForTesting(
+            makeTestPCMBuffer(
+                leftChannel: [0.50, 0.50],
+                rightChannel: [0.50, 0.50]
+            ),
+            presentationTimeSeconds: 0,
+            outputType: .microphone
+        )
+
+        _ = try await sink.finish()
+
+        #expect(writer.finishCallCount == 1)
+        #expect(writer.appendedBuffers.count == 1)
+
+        let mixedBuffer = try #require(writer.appendedBuffers.first)
+        #expect(mixedBuffer.frameLength == 2)
+        #expect(mixedBuffer.floatChannelData?[0][0] == 0.75)
+        #expect(mixedBuffer.floatChannelData?[0][1] == 0.75)
+        #expect(mixedBuffer.floatChannelData?[1][0] == 0.75)
+        #expect(mixedBuffer.floatChannelData?[1][1] == 0.75)
+    }
+
+    @Test
+    func captureOutputSinkMixesSlightlyOffsetSystemAndMicrophoneBuffersIntoSingleWriterStream() async throws {
+        let writer = AudioFileWriterSpy()
+        let sink = CaptureOutputSink(
+            writer: writer,
+            captureConfiguration: .init(capturesMicrophone: true)
+        )
+
+        try sink.appendForTesting(
+            makeTestPCMBuffer(
+                leftChannel: [0.20, 0.20],
+                rightChannel: [0.20, 0.20]
+            ),
+            presentationTimeSeconds: 1.000,
+            outputType: .audio
+        )
+        try sink.appendForTesting(
+            makeTestPCMBuffer(
+                leftChannel: [0.30, 0.30],
+                rightChannel: [0.30, 0.30]
+            ),
+            presentationTimeSeconds: 1.005,
+            outputType: .microphone
+        )
+
+        _ = try await sink.finish()
+
+        #expect(writer.appendedBuffers.count == 1)
+        let mixedBuffer = try #require(writer.appendedBuffers.first)
+        #expect(mixedBuffer.floatChannelData?[0][0] == 0.50)
+        #expect(mixedBuffer.floatChannelData?[1][0] == 0.50)
+    }
+
+    @Test
+    func captureOutputSinkConvertsMicrophoneBufferFromDifferentInputFormat() async throws {
+        let writer = AudioFileWriterSpy()
+        let sink = CaptureOutputSink(
+            writer: writer,
+            captureConfiguration: .init(capturesMicrophone: true)
+        )
+
+        try sink.appendForTesting(
+            makeTestPCMBuffer(
+                leftChannel: [0.10, 0.10],
+                rightChannel: [0.10, 0.10]
+            ),
+            presentationTimeSeconds: 2.000,
+            outputType: .audio
+        )
+        try sink.appendForTesting(
+            makeMonoTestPCMBuffer(
+                samples: [0.40, 0.40],
+                sampleRate: 44_100
+            ),
+            presentationTimeSeconds: 2.005,
+            outputType: .microphone
+        )
+
+        _ = try await sink.finish()
+
+        #expect(writer.appendedBuffers.count == 1)
+        let mixedBuffer = try #require(writer.appendedBuffers.first)
+        #expect(mixedBuffer.frameLength > 0)
+        #expect((mixedBuffer.floatChannelData?[0][0] ?? 0) > 0.10)
+        #expect((mixedBuffer.floatChannelData?[1][0] ?? 0) > 0.10)
+    }
+
+    @Test
+    func captureOutputSinkPreservesLongerSystemBufferTailAfterMixing() async throws {
+        let writer = AudioFileWriterSpy()
+        let sink = CaptureOutputSink(
+            writer: writer,
+            captureConfiguration: .init(capturesMicrophone: true)
+        )
+
+        try sink.appendForTesting(
+            makeTestPCMBuffer(
+                leftChannel: [0.20, 0.20, 0.20, 0.20],
+                rightChannel: [0.20, 0.20, 0.20, 0.20]
+            ),
+            presentationTimeSeconds: 3.000,
+            outputType: .audio
+        )
+        try sink.appendForTesting(
+            makeTestPCMBuffer(
+                leftChannel: [0.30, 0.30],
+                rightChannel: [0.30, 0.30]
+            ),
+            presentationTimeSeconds: 3.000,
+            outputType: .microphone
+        )
+
+        _ = try await sink.finish()
+
+        #expect(writer.appendedBuffers.count == 2)
+
+        let mixedPrefix = try #require(writer.appendedBuffers.first)
+        #expect(mixedPrefix.frameLength == 2)
+        #expect(mixedPrefix.floatChannelData?[0][0] == 0.50)
+
+        let preservedTail = try #require(writer.appendedBuffers.last)
+        #expect(preservedTail.frameLength == 2)
+        #expect(preservedTail.floatChannelData?[0][0] == 0.20)
+        #expect(preservedTail.floatChannelData?[1][0] == 0.20)
+    }
+
+    private func makeTestPCMBuffer(
+        leftChannel: [Float],
+        rightChannel: [Float]
+    ) throws -> AVAudioPCMBuffer {
+        let format = try #require(
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: 48_000,
+                channels: 2,
+                interleaved: false
+            )
+        )
+        let frameCount = min(leftChannel.count, rightChannel.count)
+        let buffer = try #require(
+            AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(frameCount)
+            )
+        )
+
+        buffer.frameLength = AVAudioFrameCount(frameCount)
+        let channelData = try #require(buffer.floatChannelData)
+
+        for index in 0 ..< frameCount {
+            channelData[0][index] = leftChannel[index]
+            channelData[1][index] = rightChannel[index]
+        }
+
+        return buffer
+    }
+
+    private func makeMonoTestPCMBuffer(
+        samples: [Float],
+        sampleRate: Double
+    ) throws -> AVAudioPCMBuffer {
+        let format = try #require(
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: 1,
+                interleaved: false
+            )
+        )
+        let buffer = try #require(
+            AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(samples.count)
+            )
+        )
+
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        let channelData = try #require(buffer.floatChannelData)
+
+        for index in 0 ..< samples.count {
+            channelData[0][index] = samples[index]
+        }
+
+        return buffer
+    }
 }
 
 private final class RecordingDiagnosticRecorder: @unchecked Sendable {
@@ -841,11 +1046,11 @@ private final class AudioCaptureStreamSessionSpy: NativeAudioCapturePipeline.Aud
 
 private final class AudioFileWriterSpy: NativeAudioCapturePipeline.AudioFileWriting {
     var createdOutputURLs: [URL] = []
-    private(set) var appendedSampleBuffers: [CMSampleBuffer] = []
+    private(set) var appendedBuffers: [AVAudioPCMBuffer] = []
     private(set) var finishCallCount = 0
 
-    func append(_ sampleBuffer: CMSampleBuffer) throws {
-        appendedSampleBuffers.append(sampleBuffer)
+    func append(_ buffer: AVAudioPCMBuffer) throws {
+        appendedBuffers.append(buffer)
     }
 
     func finish() throws {

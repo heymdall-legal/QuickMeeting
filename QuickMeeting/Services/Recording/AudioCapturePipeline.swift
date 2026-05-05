@@ -16,6 +16,11 @@ protocol AudioCapturePipeline {
     func stop() async throws
 }
 
+private enum CapturedAudioSource {
+    case system
+    case microphone
+}
+
 enum NativeAudioCapturePipelineError: LocalizedError {
     case captureAlreadyRunning
     case noShareableDisplay
@@ -91,7 +96,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     }
 
     protocol AudioFileWriting: AnyObject {
-        func append(_ sampleBuffer: CMSampleBuffer) throws
+        func append(_ buffer: AVAudioPCMBuffer) throws
         func finish() throws
     }
 
@@ -133,7 +138,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         self.init(
             shareableContentProvider: { try await Self.makeLiveCaptureTarget() },
             writerFactory: { try CanonicalWAVAudioFileWriter(outputURL: $0) },
-            captureConfiguration: CaptureConfiguration()
+            captureConfiguration: CaptureConfiguration(capturesMicrophone: true)
         )
     }
 
@@ -153,7 +158,10 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
 
         do {
             let target = try await shareableContentProvider()
-            let createdOutputSink = CaptureOutputSink(writer: writer)
+            let createdOutputSink = CaptureOutputSink(
+                writer: writer,
+                captureConfiguration: captureConfiguration
+            )
             outputSink = createdOutputSink
             let session = try target.makeSession(captureConfiguration, createdOutputSink)
 
@@ -350,13 +358,22 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
     )
 
     private var writer: (any NativeAudioCapturePipeline.AudioFileWriting)?
+    private let mixer: CapturedAudioMixer
     private var storedError: Error?
     private var sampleBufferCount = 0
     private var firstSampleSeconds: Double?
     private var lastSampleSeconds: Double?
 
-    init(writer: any NativeAudioCapturePipeline.AudioFileWriting) {
+    init(
+        writer: any NativeAudioCapturePipeline.AudioFileWriting,
+        captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration = .init()
+    ) {
         self.writer = writer
+        mixer = CapturedAudioMixer(
+            writer: writer,
+            capturesSystemAudio: captureConfiguration.capturesSystemAudio,
+            capturesMicrophone: captureConfiguration.capturesMicrophone
+        )
     }
 
     func stream(
@@ -364,7 +381,7 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of outputType: SCStreamOutputType
     ) {
-        guard outputType == .audio else {
+        guard let source = capturedAudioSource(for: outputType) else {
             return
         }
 
@@ -373,7 +390,11 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
         }
 
         do {
-            try writer?.append(sampleBuffer)
+            try mixer.append(
+                sampleBuffer,
+                presentationTimeSeconds: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds,
+                source: source
+            )
             sampleBufferCount += 1
 
             let presentationTimeSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
@@ -386,6 +407,28 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
         } catch {
             storedError = error
         }
+    }
+
+    func appendForTesting(
+        _ buffer: AVAudioPCMBuffer,
+        presentationTimeSeconds: Double,
+        outputType: SCStreamOutputType
+    ) throws {
+        guard let source = capturedAudioSource(for: outputType) else {
+            return
+        }
+
+        try mixer.append(
+            buffer,
+            presentationTimeSeconds: presentationTimeSeconds,
+            source: source
+        )
+        sampleBufferCount += 1
+
+        if firstSampleSeconds == nil {
+            firstSampleSeconds = presentationTimeSeconds
+        }
+        lastSampleSeconds = presentationTimeSeconds
     }
 
     func stream(_: SCStream, didStopWithError error: any Error) {
@@ -415,7 +458,7 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
                 self.lastSampleSeconds = nil
 
                 do {
-                    try self.writer?.finish()
+                    try self.mixer.finish()
                 } catch {
                     self.writer = nil
                     continuation.resume(throwing: error)
@@ -447,6 +490,386 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
             }
         }
     }
+
+    private func capturedAudioSource(for outputType: SCStreamOutputType) -> CapturedAudioSource? {
+        switch outputType {
+        case .audio:
+            .system
+        case .microphone:
+            .microphone
+        default:
+            nil
+        }
+    }
+}
+
+private final class CapturedAudioMixer {
+    private static let mixAlignmentToleranceSeconds = 0.01
+
+    private let writer: any NativeAudioCapturePipeline.AudioFileWriting
+    private let capturesSystemAudio: Bool
+    private let capturesMicrophone: Bool
+    private let converter = CanonicalAudioBufferConverter()
+    private var systemQueue: [TimestampedPCMBuffer] = []
+    private var microphoneQueue: [TimestampedPCMBuffer] = []
+    private var latestSystemEndTimeSeconds: Double?
+    private var latestMicrophoneEndTimeSeconds: Double?
+
+    init(
+        writer: any NativeAudioCapturePipeline.AudioFileWriting,
+        capturesSystemAudio: Bool,
+        capturesMicrophone: Bool
+    ) {
+        self.writer = writer
+        self.capturesSystemAudio = capturesSystemAudio
+        self.capturesMicrophone = capturesMicrophone
+    }
+
+    func append(
+        _ sampleBuffer: CMSampleBuffer,
+        presentationTimeSeconds: Double,
+        source: CapturedAudioSource
+    ) throws {
+        guard CMSampleBufferDataIsReady(sampleBuffer) else {
+            return
+        }
+
+        try append(
+            sampleBuffer.makePCMBuffer(),
+            presentationTimeSeconds: presentationTimeSeconds,
+            source: source
+        )
+    }
+
+    func append(
+        _ buffer: AVAudioPCMBuffer,
+        presentationTimeSeconds: Double,
+        source: CapturedAudioSource
+    ) throws {
+        let canonicalBuffer = try converter.canonicalBuffer(from: buffer)
+
+        if shouldPassthroughSoloSource(for: source) {
+            try writer.append(canonicalBuffer)
+            return
+        }
+
+        let timestampedBuffer = TimestampedPCMBuffer(
+            presentationTimeSeconds: presentationTimeSeconds,
+            buffer: canonicalBuffer
+        )
+        enqueue(timestampedBuffer, for: source)
+        try flushReadyBuffers(force: false)
+    }
+
+    func finish() throws {
+        try flushReadyBuffers(force: true)
+        try writer.finish()
+    }
+
+    private func shouldPassthroughSoloSource(for source: CapturedAudioSource) -> Bool {
+        switch source {
+        case .system:
+            capturesSystemAudio && !capturesMicrophone
+        case .microphone:
+            capturesMicrophone && !capturesSystemAudio
+        }
+    }
+
+    private func enqueue(
+        _ timestampedBuffer: TimestampedPCMBuffer,
+        for source: CapturedAudioSource
+    ) {
+        switch source {
+        case .system:
+            systemQueue.append(timestampedBuffer)
+            latestSystemEndTimeSeconds = max(
+                latestSystemEndTimeSeconds ?? timestampedBuffer.endTimeSeconds,
+                timestampedBuffer.endTimeSeconds
+            )
+        case .microphone:
+            microphoneQueue.append(timestampedBuffer)
+            latestMicrophoneEndTimeSeconds = max(
+                latestMicrophoneEndTimeSeconds ?? timestampedBuffer.endTimeSeconds,
+                timestampedBuffer.endTimeSeconds
+            )
+        }
+    }
+
+    private func flushReadyBuffers(force: Bool) throws {
+        while true {
+            let systemHead = systemQueue.first
+            let microphoneHead = microphoneQueue.first
+
+            switch (systemHead, microphoneHead) {
+            case (nil, nil):
+                return
+            case let (systemHead?, nil):
+                guard force || canFlushSolo(
+                    systemHead,
+                    otherLatestEndTimeSeconds: latestMicrophoneEndTimeSeconds
+                ) else {
+                    return
+                }
+
+                try writer.append(systemHead.buffer)
+                systemQueue.removeFirst()
+            case let (nil, microphoneHead?):
+                guard force || canFlushSolo(
+                    microphoneHead,
+                    otherLatestEndTimeSeconds: latestSystemEndTimeSeconds
+                ) else {
+                    return
+                }
+
+                try writer.append(microphoneHead.buffer)
+                microphoneQueue.removeFirst()
+            case let (systemHead?, microphoneHead?):
+                if systemHead.presentationTimeSeconds + Self.mixAlignmentToleranceSeconds
+                    < microphoneHead.presentationTimeSeconds {
+                    let splitTime = min(microphoneHead.presentationTimeSeconds, systemHead.endTimeSeconds)
+                    let prefix = try splitPrefix(
+                        from: systemHead,
+                        until: splitTime
+                    )
+
+                    if prefix.consumedAllFrames {
+                        if force || canFlushSolo(
+                            systemHead,
+                            otherLatestEndTimeSeconds: latestMicrophoneEndTimeSeconds
+                        ) {
+                            try writer.append(prefix.prefixBuffer)
+                            systemQueue.removeFirst()
+                            continue
+                        }
+
+                        return
+                    }
+
+                    try writer.append(prefix.prefixBuffer)
+                    systemQueue[0] = prefix.remainder
+                    continue
+                }
+
+                if microphoneHead.presentationTimeSeconds + Self.mixAlignmentToleranceSeconds
+                    < systemHead.presentationTimeSeconds {
+                    let splitTime = min(systemHead.presentationTimeSeconds, microphoneHead.endTimeSeconds)
+                    let prefix = try splitPrefix(
+                        from: microphoneHead,
+                        until: splitTime
+                    )
+
+                    if prefix.consumedAllFrames {
+                        if force || canFlushSolo(
+                            microphoneHead,
+                            otherLatestEndTimeSeconds: latestSystemEndTimeSeconds
+                        ) {
+                            try writer.append(prefix.prefixBuffer)
+                            microphoneQueue.removeFirst()
+                            continue
+                        }
+
+                        return
+                    }
+
+                    try writer.append(prefix.prefixBuffer)
+                    microphoneQueue[0] = prefix.remainder
+                    continue
+                }
+
+                let overlappedFrameCount = min(
+                    systemHead.buffer.frameLength,
+                    microphoneHead.buffer.frameLength
+                )
+                let mixedBuffer = try mix(
+                    systemBuffer: systemHead.buffer,
+                    microphoneBuffer: microphoneHead.buffer,
+                    frameCount: overlappedFrameCount
+                )
+                try writer.append(mixedBuffer)
+
+                updateQueueAfterConsumingFrames(
+                    for: &systemQueue,
+                    consumedFrameCount: overlappedFrameCount
+                )
+                updateQueueAfterConsumingFrames(
+                    for: &microphoneQueue,
+                    consumedFrameCount: overlappedFrameCount
+                )
+            }
+        }
+    }
+
+    private func canFlushSolo(
+        _ buffer: TimestampedPCMBuffer,
+        otherLatestEndTimeSeconds: Double?
+    ) -> Bool {
+        guard let otherLatestEndTimeSeconds else {
+            return false
+        }
+
+        return buffer.endTimeSeconds <= otherLatestEndTimeSeconds + Self.mixAlignmentToleranceSeconds
+    }
+
+    private func splitPrefix(
+        from timestampedBuffer: TimestampedPCMBuffer,
+        until splitTimeSeconds: Double
+    ) throws -> BufferSplitResult {
+        let secondsToConsume = max(0, splitTimeSeconds - timestampedBuffer.presentationTimeSeconds)
+        let frameCount = min(
+            AVAudioFrameCount(
+                floor(secondsToConsume * CanonicalAudioBufferConverter.canonicalFormat.sampleRate)
+            ),
+            timestampedBuffer.buffer.frameLength
+        )
+
+        if frameCount == 0 {
+            return BufferSplitResult(
+                prefixBuffer: try sliceBuffer(
+                    timestampedBuffer.buffer,
+                    offsetFrames: 0,
+                    frameCount: timestampedBuffer.buffer.frameLength
+                ),
+                remainder: timestampedBuffer,
+                consumedAllFrames: false
+            )
+        }
+
+        let prefixBuffer = try sliceBuffer(
+            timestampedBuffer.buffer,
+            offsetFrames: 0,
+            frameCount: frameCount
+        )
+
+        guard frameCount < timestampedBuffer.buffer.frameLength else {
+            return BufferSplitResult(
+                prefixBuffer: prefixBuffer,
+                remainder: timestampedBuffer,
+                consumedAllFrames: true
+            )
+        }
+
+        let remainderBuffer = try sliceBuffer(
+            timestampedBuffer.buffer,
+            offsetFrames: frameCount,
+            frameCount: timestampedBuffer.buffer.frameLength - frameCount
+        )
+        let remainder = TimestampedPCMBuffer(
+            presentationTimeSeconds: timestampedBuffer.presentationTimeSeconds
+                + Double(frameCount) / CanonicalAudioBufferConverter.canonicalFormat.sampleRate,
+            buffer: remainderBuffer
+        )
+
+        return BufferSplitResult(
+            prefixBuffer: prefixBuffer,
+            remainder: remainder,
+            consumedAllFrames: false
+        )
+    }
+
+    private func updateQueueAfterConsumingFrames(
+        for queue: inout [TimestampedPCMBuffer],
+        consumedFrameCount: AVAudioFrameCount
+    ) {
+        guard let head = queue.first else {
+            return
+        }
+
+        if consumedFrameCount >= head.buffer.frameLength {
+            queue.removeFirst()
+            return
+        }
+
+        do {
+            let remainderBuffer = try sliceBuffer(
+                head.buffer,
+                offsetFrames: consumedFrameCount,
+                frameCount: head.buffer.frameLength - consumedFrameCount
+            )
+            queue[0] = TimestampedPCMBuffer(
+                presentationTimeSeconds: head.presentationTimeSeconds
+                    + Double(consumedFrameCount) / CanonicalAudioBufferConverter.canonicalFormat.sampleRate,
+                buffer: remainderBuffer
+            )
+        } catch {
+            queue.removeFirst()
+        }
+    }
+
+    private func mix(
+        systemBuffer: AVAudioPCMBuffer,
+        microphoneBuffer: AVAudioPCMBuffer,
+        frameCount: AVAudioFrameCount
+    ) throws -> AVAudioPCMBuffer {
+        guard let mixedBuffer = AVAudioPCMBuffer(
+            pcmFormat: CanonicalAudioBufferConverter.canonicalFormat,
+            frameCapacity: frameCount
+        ) else {
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+
+        mixedBuffer.frameLength = frameCount
+
+        guard let mixedChannelData = mixedBuffer.floatChannelData,
+              let systemChannelData = systemBuffer.floatChannelData,
+              let microphoneChannelData = microphoneBuffer.floatChannelData else {
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+
+        for channelIndex in 0 ..< Int(CanonicalAudioBufferConverter.canonicalFormat.channelCount) {
+            for frameIndex in 0 ..< Int(frameCount) {
+                let mixedSample = systemChannelData[channelIndex][frameIndex]
+                    + microphoneChannelData[channelIndex][frameIndex]
+                mixedChannelData[channelIndex][frameIndex] = min(max(mixedSample, -1), 1)
+            }
+        }
+
+        return mixedBuffer
+    }
+
+    private func sliceBuffer(
+        _ buffer: AVAudioPCMBuffer,
+        offsetFrames: AVAudioFrameCount,
+        frameCount: AVAudioFrameCount
+    ) throws -> AVAudioPCMBuffer {
+        guard let slicedBuffer = AVAudioPCMBuffer(
+            pcmFormat: CanonicalAudioBufferConverter.canonicalFormat,
+            frameCapacity: frameCount
+        ) else {
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+
+        slicedBuffer.frameLength = frameCount
+
+        guard let sourceChannelData = buffer.floatChannelData,
+              let slicedChannelData = slicedBuffer.floatChannelData else {
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+
+        for channelIndex in 0 ..< Int(CanonicalAudioBufferConverter.canonicalFormat.channelCount) {
+            for frameIndex in 0 ..< Int(frameCount) {
+                slicedChannelData[channelIndex][frameIndex] =
+                    sourceChannelData[channelIndex][Int(offsetFrames) + frameIndex]
+            }
+        }
+
+        return slicedBuffer
+    }
+}
+
+private struct BufferSplitResult {
+    let prefixBuffer: AVAudioPCMBuffer
+    let remainder: TimestampedPCMBuffer
+    let consumedAllFrames: Bool
+}
+
+private struct TimestampedPCMBuffer {
+    let presentationTimeSeconds: Double
+    let buffer: AVAudioPCMBuffer
+
+    var endTimeSeconds: Double {
+        presentationTimeSeconds
+            + Double(buffer.frameLength) / CanonicalAudioBufferConverter.canonicalFormat.sampleRate
+    }
 }
 
 private final class ScreenCaptureAudioStreamSession: NativeAudioCapturePipeline.AudioCaptureStreamSession {
@@ -475,11 +898,21 @@ private final class ScreenCaptureAudioStreamSession: NativeAudioCapturePipeline.
             delegate: outputSink
         )
 
-        try stream.addStreamOutput(
-            outputSink,
-            type: .audio,
-            sampleHandlerQueue: outputSink.sampleHandlerQueue
-        )
+        if captureConfiguration.capturesSystemAudio {
+            try stream.addStreamOutput(
+                outputSink,
+                type: .audio,
+                sampleHandlerQueue: outputSink.sampleHandlerQueue
+            )
+        }
+
+        if captureConfiguration.capturesMicrophone {
+            try stream.addStreamOutput(
+                outputSink,
+                type: .microphone,
+                sampleHandlerQueue: outputSink.sampleHandlerQueue
+            )
+        }
 
         self.stream = stream
     }
@@ -510,14 +943,8 @@ private final class ScreenCaptureAudioStreamSession: NativeAudioCapturePipeline.
 }
 
 private final class CanonicalWAVAudioFileWriter: NativeAudioCapturePipeline.AudioFileWriting {
-    private static let canonicalFormat = AVAudioFormat(
-        standardFormatWithSampleRate: 48_000,
-        channels: 2
-    )!
-
     private let outputURL: URL
     private var audioFile: AVAudioFile?
-    private var converter: AVAudioConverter?
 
     init(outputURL: URL) throws {
         self.outputURL = outputURL
@@ -534,33 +961,34 @@ private final class CanonicalWAVAudioFileWriter: NativeAudioCapturePipeline.Audi
 
         audioFile = try AVAudioFile(
             forWriting: outputURL,
-            settings: Self.canonicalFormat.settings,
-            commonFormat: Self.canonicalFormat.commonFormat,
-            interleaved: Self.canonicalFormat.isInterleaved
+            settings: CanonicalAudioBufferConverter.canonicalFormat.settings,
+            commonFormat: CanonicalAudioBufferConverter.canonicalFormat.commonFormat,
+            interleaved: CanonicalAudioBufferConverter.canonicalFormat.isInterleaved
         )
     }
 
-    func append(_ sampleBuffer: CMSampleBuffer) throws {
-        guard CMSampleBufferDataIsReady(sampleBuffer) else {
+    func append(_ buffer: AVAudioPCMBuffer) throws {
+        guard buffer.frameLength > 0 else {
             return
         }
 
-        let sourceBuffer = try sampleBuffer.makePCMBuffer()
-        let bufferToWrite = try canonicalBuffer(from: sourceBuffer)
-
-        guard bufferToWrite.frameLength > 0 else {
-            return
-        }
-
-        try audioFile?.write(from: bufferToWrite)
+        try audioFile?.write(from: buffer)
     }
 
     func finish() throws {
         audioFile = nil
-        converter = nil
     }
+}
 
-    private func canonicalBuffer(from sourceBuffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer {
+private final class CanonicalAudioBufferConverter {
+    static let canonicalFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: 48_000,
+        channels: 2,
+        interleaved: false
+    )!
+
+    func canonicalBuffer(from sourceBuffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer {
         guard sourceBuffer.frameLength > 0 else {
             return sourceBuffer
         }
@@ -569,11 +997,9 @@ private final class CanonicalWAVAudioFileWriter: NativeAudioCapturePipeline.Audi
             return sourceBuffer
         }
 
-        guard let converter = converter ?? AVAudioConverter(from: sourceBuffer.format, to: Self.canonicalFormat) else {
+        guard let converter = AVAudioConverter(from: sourceBuffer.format, to: Self.canonicalFormat) else {
             throw NativeAudioCapturePipelineError.audioConversionFailed
         }
-
-        self.converter = converter
 
         let frameCapacity = max(
             AVAudioFrameCount(
