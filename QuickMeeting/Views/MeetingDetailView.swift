@@ -53,6 +53,23 @@ struct MeetingDetailView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(!playback.isPlaybackAvailable)
 
+                    Slider(
+                        value: Binding(
+                            get: { playback.currentTime },
+                            set: { playback.seek(to: $0) }
+                        ),
+                        in: 0...max(playback.duration, 0.1)
+                    )
+                    .disabled(!playback.isPlaybackAvailable)
+
+                    HStack {
+                        Text(playback.elapsedTimeText)
+                        Spacer()
+                        Text(playback.durationText)
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+
                     Text(playback.statusText)
                         .font(.callout)
                         .foregroundStyle(.secondary)
