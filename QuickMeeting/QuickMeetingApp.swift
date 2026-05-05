@@ -10,22 +10,44 @@ import SwiftData
 
 @main
 struct QuickMeetingApp: App {
-    var sharedModelContainer: ModelContainer = {
+    private let sharedModelContainer: ModelContainer
+    @StateObject private var appViewModel: AppViewModel
+    @State private var menuBarController: MenuBarController?
+
+    init() {
         let schema = Schema([
-            Item.self,
+            Meeting.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            let modelContainer = try ModelContainer(
+                for: schema,
+                configurations: [modelConfiguration]
+            )
+            sharedModelContainer = modelContainer
+            _appViewModel = StateObject(
+                wrappedValue: AppViewModel(
+                    meetingStore: MeetingStore(modelContext: modelContainer.mainContext),
+                    meetingFileStore: MeetingFileStore(),
+                    recordingService: DefaultRecordingService(
+                        audioCapturePipeline: NativeAudioCapturePipeline()
+                    )
+                )
+            )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
-    }()
+    }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(appViewModel: appViewModel)
+                .task {
+                    if menuBarController == nil {
+                        menuBarController = MenuBarController(viewModel: appViewModel)
+                    }
+                }
         }
         .modelContainer(sharedModelContainer)
     }
