@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		4BDEC0902FAA88360037F703 /* SpeakerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4BDEC08F2FAA88360037F703 /* SpeakerKit */; };
+		4BDEC0922FAA88360037F703 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4BDEC0912FAA88360037F703 /* WhisperKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		4BD12A0D2FA91C3400DC589F /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -39,6 +44,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4BDEC0922FAA88360037F703 /* WhisperKit in Frameworks */,
+				4BDEC0902FAA88360037F703 /* SpeakerKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -90,6 +97,8 @@
 			);
 			name = QuickMeeting;
 			packageProductDependencies = (
+				4BDEC08F2FAA88360037F703 /* SpeakerKit */,
+				4BDEC0912FAA88360037F703 /* WhisperKit */,
 			);
 			productName = QuickMeeting;
 			productReference = 4BD1296B2FA9197200DC589F /* QuickMeeting.app */;
@@ -146,6 +155,9 @@
 			);
 			mainGroup = 4BD129622FA9197200DC589F;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				4BDEC08E2FAA88360037F703 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4BD1296C2FA9197200DC589F /* Products */;
 			projectDirPath = "";
@@ -475,6 +487,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		4BDEC08E2FAA88360037F703 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/argmaxinc/argmax-oss-swift";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4BDEC08F2FAA88360037F703 /* SpeakerKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4BDEC08E2FAA88360037F703 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */;
+			productName = SpeakerKit;
+		};
+		4BDEC0912FAA88360037F703 /* WhisperKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4BDEC08E2FAA88360037F703 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */;
+			productName = WhisperKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 4BD129632FA9197200DC589F /* Project object */;
 }

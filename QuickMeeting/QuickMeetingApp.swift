@@ -12,6 +12,7 @@ import SwiftData
 struct QuickMeetingApp: App {
     private let sharedModelContainer: ModelContainer
     @StateObject private var appViewModel: AppViewModel
+    @StateObject private var modelsSettingsViewModel: ModelsSettingsViewModel
     @State private var menuBarController: MenuBarController?
 
     init() {
@@ -26,6 +27,10 @@ struct QuickMeetingApp: App {
                 configurations: [modelConfiguration]
             )
             sharedModelContainer = modelContainer
+            let transcriptionModelManager = TranscriptionModelManager(
+                modelStore: ArgmaxWhisperModelStore(),
+                settingsStore: ModelSettingsStore()
+            )
             _appViewModel = StateObject(
                 wrappedValue: AppViewModel(
                     meetingStore: MeetingStore(modelContext: modelContainer.mainContext),
@@ -34,6 +39,9 @@ struct QuickMeetingApp: App {
                         audioCapturePipeline: NativeAudioCapturePipeline()
                     )
                 )
+            )
+            _modelsSettingsViewModel = StateObject(
+                wrappedValue: ModelsSettingsViewModel(manager: transcriptionModelManager)
             )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
@@ -50,5 +58,9 @@ struct QuickMeetingApp: App {
                 }
         }
         .modelContainer(sharedModelContainer)
+
+        Settings {
+            SettingsView(modelsViewModel: modelsSettingsViewModel)
+        }
     }
 }
