@@ -8,6 +8,7 @@
 
 /* Begin PBXFileReference section */
 		4BD1296B2FA9197200DC589F /* QuickMeeting.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuickMeeting.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4BD12A092FA91C3400DC589F /* QuickMeetingTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuickMeetingTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +17,32 @@
 			path = QuickMeeting;
 			sourceTree = "<group>";
 		};
+		4BD12A082FA91C3400DC589F /* QuickMeetingTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = QuickMeetingTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXContainerItemProxy section */
+		4BD12A0D2FA91C3400DC589F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4BD129632FA9197200DC589F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4BD1296A2FA9197200DC589F;
+			remoteInfo = QuickMeeting;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		4BD129682FA9197200DC589F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4BD12A042FA91C3400DC589F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				4BD1296D2FA9197200DC589F /* QuickMeeting */,
+				4BD12A082FA91C3400DC589F /* QuickMeetingTests */,
 				4BD1296C2FA9197200DC589F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				4BD1296B2FA9197200DC589F /* QuickMeeting.app */,
+				4BD12A092FA91C3400DC589F /* QuickMeetingTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +95,29 @@
 			productReference = 4BD1296B2FA9197200DC589F /* QuickMeeting.app */;
 			productType = "com.apple.product-type.application";
 		};
+		4BD12A0A2FA91C3400DC589F /* QuickMeetingTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4BD12A122FA91C3400DC589F /* Build configuration list for PBXNativeTarget "QuickMeetingTests" */;
+			buildPhases = (
+				4BD12A032FA91C3400DC589F /* Sources */,
+				4BD12A042FA91C3400DC589F /* Frameworks */,
+				4BD12A052FA91C3400DC589F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4BD12A0E2FA91C3400DC589F /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				4BD12A082FA91C3400DC589F /* QuickMeetingTests */,
+			);
+			name = QuickMeetingTests;
+			packageProductDependencies = (
+			);
+			productName = QuickMeetingTests;
+			productReference = 4BD12A092FA91C3400DC589F /* QuickMeetingTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +130,10 @@
 				TargetAttributes = {
 					4BD1296A2FA9197200DC589F = {
 						CreatedOnToolsVersion = 26.1.1;
+					};
+					4BD12A0A2FA91C3400DC589F = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = 4BD1296A2FA9197200DC589F;
 					};
 				};
 			};
@@ -100,12 +152,20 @@
 			projectRoot = "";
 			targets = (
 				4BD1296A2FA9197200DC589F /* QuickMeeting */,
+				4BD12A0A2FA91C3400DC589F /* QuickMeetingTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		4BD129692FA9197200DC589F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4BD12A052FA91C3400DC589F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +182,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		4BD12A032FA91C3400DC589F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4BD12A0E2FA91C3400DC589F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4BD1296A2FA9197200DC589F /* QuickMeeting */;
+			targetProxy = 4BD12A0D2FA91C3400DC589F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		4BD129762FA9197400DC589F /* Debug */ = {
@@ -309,6 +384,44 @@
 			};
 			name = Release;
 		};
+		4BD12A102FA91C3400DC589F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2392UG2TSP;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = info.akitov.QuickMeetingTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/QuickMeeting.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/QuickMeeting";
+			};
+			name = Debug;
+		};
+		4BD12A112FA91C3400DC589F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2392UG2TSP;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = info.akitov.QuickMeetingTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/QuickMeeting.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/QuickMeeting";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -326,6 +439,15 @@
 			buildConfigurations = (
 				4BD129792FA9197400DC589F /* Debug */,
 				4BD1297A2FA9197400DC589F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4BD12A122FA91C3400DC589F /* Build configuration list for PBXNativeTarget "QuickMeetingTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4BD12A102FA91C3400DC589F /* Debug */,
+				4BD12A112FA91C3400DC589F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
