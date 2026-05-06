@@ -21,4 +21,22 @@ struct WhisperKitTranscriptionBackendTests {
 
         #expect(reported == [0.25, 0.7, 1.0])
     }
+
+    @Test
+    func cleanedTranscriptTextRemovesWhisperControlTokensAndTimestamps() {
+        let rawText = "<|startoftranscript|><|ru|><|transcribe|><|0.00|> общались и поняли, что<|1.96|>"
+
+        let cleanedText = cleanWhisperTranscriptText(rawText)
+
+        #expect(cleanedText == "общались и поняли, что")
+    }
+
+    @Test
+    func cleanedTranscriptTextPreservesNormalTranscriptContent() {
+        let rawText = "Привет, команда.\nОбсудим план."
+
+        let cleanedText = cleanWhisperTranscriptText(rawText)
+
+        #expect(cleanedText == "Привет, команда.\nОбсудим план.")
+    }
 }

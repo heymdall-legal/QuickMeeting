@@ -9,6 +9,28 @@ import Combine
 import Foundation
 import WhisperKit
 
+func cleanWhisperTranscriptText(_ text: String) -> String {
+    let tokenPattern = #"<\|[^>]+?\|>"#
+    let withoutTokens = text.replacingOccurrences(
+        of: tokenPattern,
+        with: " ",
+        options: .regularExpression
+    )
+
+    return withoutTokens
+        .components(separatedBy: .newlines)
+        .map { line in
+            line.replacingOccurrences(
+                of: #"\s+"#,
+                with: " ",
+                options: .regularExpression
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n")
+}
+
 func observeTranscriptionProgress(
     _ progress: Progress,
     onProgress: @escaping @Sendable (Double) -> Void
@@ -52,13 +74,20 @@ struct WhisperKitTranscriptionBackend: WhisperTranscriptionBackend {
         )
         let text = results
             .map(\.text)
+            .map(cleanWhisperTranscriptText)
+            .filter { !$0.isEmpty }
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let segments = results
             .flatMap(\.segments)
-            .map { segment in
-                TranscriptSegment(
-                    text: segment.text,
+            .compactMap { segment -> TranscriptSegment? in
+                let cleanedText = cleanWhisperTranscriptText(segment.text)
+                guard !cleanedText.isEmpty else {
+                    return nil
+                }
+
+                return TranscriptSegment(
+                    text: cleanedText,
                     startTime: TimeInterval(segment.start),
                     endTime: TimeInterval(segment.end)
                 )
