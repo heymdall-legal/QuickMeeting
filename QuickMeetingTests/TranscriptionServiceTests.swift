@@ -73,6 +73,51 @@ struct TranscriptionServiceTests {
         let request = try await #require(harness.backend.snapshot().requests.first)
         #expect(request.modelFolderURL == modelFolderURL)
     }
+
+    @Test
+    func transcribePassesProgressCallbackToBackend() async throws {
+        let harness = try TranscriptionServiceHarness()
+        let meeting = try harness.createRecordedMeeting()
+        await harness.installDefaultModel(.small)
+        await harness.backend.setResult(.success(TranscriptionResult(fullText: "Transcript body", segments: [])))
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let snapshot = await harness.backend.snapshot()
+        #expect(snapshot.requestHasProgressCallback == [true])
+    }
+
+    @Test
+    func transcribeTracksProgressAndClearsItAfterSuccess() async throws {
+        let harness = try TranscriptionServiceHarness()
+        let meeting = try harness.createRecordedMeeting()
+        await harness.installDefaultModel(.small)
+        await harness.backend.setProgressUpdates([0.2, 0.6, 1.0])
+        await harness.backend.setResult(.success(TranscriptionResult(fullText: "Done", segments: [])))
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let snapshot = await harness.backend.snapshot()
+        #expect(snapshot.reportedProgress == [0.2, 0.6, 1.0])
+        #expect(harness.progressCenter.progress(for: meeting.id) == nil)
+    }
+
+    @Test
+    func transcribeClearsProgressAfterFailure() async throws {
+        let harness = try TranscriptionServiceHarness()
+        let meeting = try harness.createRecordedMeeting()
+        await harness.installDefaultModel(.small)
+        await harness.backend.setProgressUpdates([0.35])
+        await harness.backend.setResult(.failure(TestTranscriptionError.failed))
+
+        await #expect(throws: TestTranscriptionError.failed) {
+            try await harness.service.transcribe(meetingID: meeting.id)
+        }
+
+        let snapshot = await harness.backend.snapshot()
+        #expect(snapshot.reportedProgress == [0.35])
+        #expect(harness.progressCenter.progress(for: meeting.id) == nil)
+    }
 }
 
 @MainActor
@@ -83,6 +128,7 @@ private struct TranscriptionServiceHarness {
     let settingsStore: ModelSettingsStore
     let modelStore: FakeWhisperModelStore
     let backend: SuspendedWhisperTranscriptionBackend
+    let progressCenter: TranscriptionProgressCenter
     let fileManager: FileManager
     let meetingFileStore: MeetingFileStore
     let service: TranscriptionService
@@ -98,6 +144,7 @@ private struct TranscriptionServiceHarness {
         settingsStore = ModelSettingsStore(userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         modelStore = FakeWhisperModelStore()
         backend = SuspendedWhisperTranscriptionBackend()
+        progressCenter = TranscriptionProgressCenter()
         fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
@@ -107,6 +154,7 @@ private struct TranscriptionServiceHarness {
             modelStore: modelStore,
             modelSettingsStore: settingsStore,
             backend: backend,
+            progressCenter: progressCenter,
             artifactWriter: TranscriptionArtifactWriter(fileManager: fileManager),
             fileManager: fileManager,
             dateProvider: Date.init
@@ -186,6 +234,8 @@ private actor SuspendedWhisperTranscriptionBackend: WhisperTranscriptionBackend 
     struct Snapshot {
         let pendingRequestCount: Int
         let requests: [TranscriptionRequest]
+        let requestHasProgressCallback: [Bool]
+        let reportedProgress: [Double]
     }
 
     private var result: Result<TranscriptionResult, Error> = .success(
@@ -195,9 +245,16 @@ private actor SuspendedWhisperTranscriptionBackend: WhisperTranscriptionBackend 
     private var pendingContinuation: CheckedContinuation<TranscriptionResult, Error>?
     private var pendingRequestCount = 0
     private var requests = [TranscriptionRequest]()
+    private var requestHasProgressCallback = [Bool]()
+    private var progressUpdates = [Double]()
+    private var reportedProgress = [Double]()
 
     func setResult(_ result: Result<TranscriptionResult, Error>) {
         self.result = result
+    }
+
+    func setProgressUpdates(_ progressUpdates: [Double]) {
+        self.progressUpdates = progressUpdates
     }
 
     func suspendNextRequest() {
@@ -205,7 +262,12 @@ private actor SuspendedWhisperTranscriptionBackend: WhisperTranscriptionBackend 
     }
 
     func snapshot() -> Snapshot {
-        Snapshot(pendingRequestCount: pendingRequestCount, requests: requests)
+        Snapshot(
+            pendingRequestCount: pendingRequestCount,
+            requests: requests,
+            requestHasProgressCallback: requestHasProgressCallback,
+            reportedProgress: reportedProgress
+        )
     }
 
     func waitForSuspendedRequest() async {
@@ -216,6 +278,11 @@ private actor SuspendedWhisperTranscriptionBackend: WhisperTranscriptionBackend 
 
     func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult {
         requests.append(request)
+        requestHasProgressCallback.append(request.onProgress != nil)
+        for progress in progressUpdates {
+            request.onProgress?(progress)
+            reportedProgress.append(progress)
+        }
         if shouldSuspendNextRequest {
             shouldSuspendNextRequest = false
             pendingRequestCount += 1
@@ -231,5 +298,16 @@ private actor SuspendedWhisperTranscriptionBackend: WhisperTranscriptionBackend 
         pendingRequestCount = max(0, pendingRequestCount - 1)
         pendingContinuation?.resume(with: result)
         pendingContinuation = nil
+    }
+}
+
+private enum TestTranscriptionError: LocalizedError {
+    case failed
+
+    var errorDescription: String? {
+        switch self {
+        case .failed:
+            return "Transcription failed"
+        }
     }
 }

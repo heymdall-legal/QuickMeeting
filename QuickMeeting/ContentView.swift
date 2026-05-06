@@ -28,6 +28,7 @@ struct ContentView: View {
                 if let selectedMeeting = meetings.first(where: { $0.id == meetingID }) {
                     MeetingDetailView(
                         meeting: selectedMeeting,
+                        transcriptionProgress: appViewModel.transcriptionProgress(for: selectedMeeting.id),
                         canDelete: appViewModel.canDeleteMeeting(selectedMeeting),
                         canTranscribe: appViewModel.canTranscribeMeeting(selectedMeeting),
                         onTranscribe: {

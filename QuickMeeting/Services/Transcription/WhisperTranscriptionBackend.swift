@@ -7,12 +7,13 @@
 
 import Foundation
 
-struct TranscriptionRequest: Equatable, Sendable {
+struct TranscriptionRequest: Sendable {
     let audioFileURL: URL
     let model: TranscriptionModel
     let modelFolderURL: URL
+    let onProgress: (@Sendable (Double) -> Void)?
 }
 
 protocol WhisperTranscriptionBackend: Sendable {
-func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult
+    func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult
 }

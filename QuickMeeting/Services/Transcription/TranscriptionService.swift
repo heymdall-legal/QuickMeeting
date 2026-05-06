@@ -37,6 +37,7 @@ final class TranscriptionService: TranscriptionServicing {
     private let modelStore: any WhisperModelStore
     private let modelSettingsStore: ModelSettingsStore
     private let backend: any WhisperTranscriptionBackend
+    private let progressCenter: TranscriptionProgressCenter
     private let artifactWriter: TranscriptionArtifactWriter
     private let fileManager: FileManager
     private let dateProvider: () -> Date
@@ -47,7 +48,8 @@ final class TranscriptionService: TranscriptionServicing {
         modelStore: any WhisperModelStore,
         modelSettingsStore: ModelSettingsStore,
         backend: any WhisperTranscriptionBackend,
-        artifactWriter: TranscriptionArtifactWriter = .init(),
+        progressCenter: TranscriptionProgressCenter,
+        artifactWriter: TranscriptionArtifactWriter? = nil,
         fileManager: FileManager = .default,
         dateProvider: @escaping () -> Date = Date.init
     ) {
@@ -55,7 +57,8 @@ final class TranscriptionService: TranscriptionServicing {
         self.modelStore = modelStore
         self.modelSettingsStore = modelSettingsStore
         self.backend = backend
-        self.artifactWriter = artifactWriter
+        self.progressCenter = progressCenter
+        self.artifactWriter = artifactWriter ?? TranscriptionArtifactWriter(fileManager: fileManager)
         self.fileManager = fileManager
         self.dateProvider = dateProvider
     }
@@ -88,13 +91,24 @@ final class TranscriptionService: TranscriptionServicing {
 
         activeMeetingID = meetingID
         try meetingStore.startTranscription(meetingID: meetingID, updatedAt: dateProvider())
+        progressCenter.startTracking(meetingID: meetingID)
+
+        defer {
+            progressCenter.finishTracking(meetingID: meetingID)
+            activeMeetingID = nil
+        }
 
         do {
             let result = try await backend.transcribe(
                 TranscriptionRequest(
                     audioFileURL: audioFileURL,
                     model: model,
-                    modelFolderURL: modelFolderURL
+                    modelFolderURL: modelFolderURL,
+                    onProgress: { [progressCenter] progress in
+                        Task { @MainActor in
+                            progressCenter.updateProgress(progress, for: meetingID)
+                        }
+                    }
                 )
             )
             let artifacts = try artifactWriter.writeArtifacts(
@@ -107,10 +121,8 @@ final class TranscriptionService: TranscriptionServicing {
                 transcriptPreview: artifacts.previewText,
                 updatedAt: dateProvider()
             )
-            activeMeetingID = nil
         } catch {
             try? meetingStore.failTranscription(meetingID: meetingID, updatedAt: dateProvider())
-            activeMeetingID = nil
             throw error
         }
     }

@@ -14,6 +14,7 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var deletionErrorMessage: String?
     @Published private(set) var transcriptionErrorMessage: String?
 
+    let transcriptionProgressCenter: TranscriptionProgressCenter
     private let meetingStore: MeetingStore
     private let meetingFileStore: MeetingFileStore
     private let recordingService: any RecordingService
@@ -28,16 +29,18 @@ final class AppViewModel: ObservableObject {
         meetingStore: MeetingStore,
         meetingFileStore: MeetingFileStore,
         recordingService: any RecordingService,
-        transcriptionService: any TranscriptionServicing = NoopTranscriptionService(),
+        transcriptionService: (any TranscriptionServicing)? = nil,
+        transcriptionProgressCenter: TranscriptionProgressCenter? = nil,
         recordingPermissions: (any RecordingPermissions)? = nil,
         dateProvider: @escaping () -> Date = Date.init,
         meetingIDProvider: @escaping () -> UUID = UUID.init,
         meetingTitleProvider: @escaping (Date) -> String = { _ in "Untitled Meeting" }
     ) {
+        self.transcriptionProgressCenter = transcriptionProgressCenter ?? TranscriptionProgressCenter()
         self.meetingStore = meetingStore
         self.meetingFileStore = meetingFileStore
         self.recordingService = recordingService
-        self.transcriptionService = transcriptionService
+        self.transcriptionService = transcriptionService ?? NoopTranscriptionService()
         self.recordingPermissions = recordingPermissions ?? NativeRecordingPermissions()
         self.dateProvider = dateProvider
         self.meetingIDProvider = meetingIDProvider
@@ -202,6 +205,10 @@ final class AppViewModel: ObservableObject {
 
     func clearTranscriptionError() {
         transcriptionErrorMessage = nil
+    }
+
+    func transcriptionProgress(for meetingID: UUID) -> Double? {
+        transcriptionProgressCenter.progress(for: meetingID)
     }
 
     private func rollbackFailedRecordingStart(

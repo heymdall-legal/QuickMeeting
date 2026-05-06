@@ -34,11 +34,13 @@ struct QuickMeetingApp: App {
             )
             let modelSettingsStore = ModelSettingsStore()
             let modelStore = ArgmaxWhisperModelStore()
+            let transcriptionProgressCenter = TranscriptionProgressCenter()
             let transcriptionService = TranscriptionService(
                 meetingStore: meetingStore,
                 modelStore: modelStore,
                 modelSettingsStore: modelSettingsStore,
-                backend: WhisperKitTranscriptionBackend()
+                backend: WhisperKitTranscriptionBackend(),
+                progressCenter: transcriptionProgressCenter
             )
             let transcriptionModelManager = TranscriptionModelManager(
                 modelStore: modelStore,
@@ -49,7 +51,8 @@ struct QuickMeetingApp: App {
                     meetingStore: meetingStore,
                     meetingFileStore: meetingFileStore,
                     recordingService: recordingService,
-                    transcriptionService: transcriptionService
+                    transcriptionService: transcriptionService,
+                    transcriptionProgressCenter: transcriptionProgressCenter
                 )
             )
             _modelsSettingsViewModel = StateObject(

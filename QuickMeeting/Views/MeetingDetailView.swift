@@ -9,6 +9,7 @@ import SwiftUI
 
 struct MeetingDetailView: View {
     let meeting: Meeting
+    let transcriptionProgress: Double?
     let canDelete: Bool
     let canTranscribe: Bool
     let onTranscribe: () -> Void
@@ -55,22 +56,37 @@ struct MeetingDetailView: View {
 
     private var transcriptPane: some View {
         VStack(alignment: .leading, spacing: 20) {
-            switch transcriptContent {
-            case .text(let transcript):
-                ScrollView {
-                    Text(transcript)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                        .lineSpacing(6)
-                }
-            case .notAvailable:
+            switch currentTranscriptPaneState {
+            case .empty:
                 transcriptEmptyState
-            case .unavailable(let message):
-                transcriptUnavailableState(message: message)
+            case .transcribing(let progress):
+                transcriptionProgressState(progress: progress)
+            case .transcriptFile:
+                switch transcriptContent {
+                case .text(let transcript):
+                    ScrollView {
+                        Text(transcript)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                            .lineSpacing(6)
+                    }
+                case .notAvailable:
+                    transcriptEmptyState
+                case .unavailable(let message):
+                    transcriptUnavailableState(message: message)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(24)
+    }
+
+    private var currentTranscriptPaneState: TranscriptPaneState {
+        transcriptPaneState(
+            meetingStatus: (try? meeting.status) ?? .recorded,
+            transcriptFilePath: meeting.transcriptFilePath,
+            progress: transcriptionProgress
+        )
     }
 
     private var transcriptEmptyState: some View {
@@ -103,6 +119,21 @@ struct MeetingDetailView: View {
             Button("Transcribe", action: onTranscribe)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canTranscribe)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func transcriptionProgressState(progress: Double) -> some View {
+        VStack(spacing: 12) {
+            Text("Transcribing...")
+                .font(.title3)
+                .fontWeight(.semibold)
+
+            ProgressView(value: progress)
+                .frame(maxWidth: 280)
+
+            Text(transcriptionProgressText(progress))
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

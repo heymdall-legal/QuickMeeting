@@ -352,6 +352,18 @@ struct AppViewModelTests {
 
         #expect(viewModel.transcriptionErrorMessage == "Transcription failed")
     }
+
+    @Test
+    func transcriptionProgressForMeetingReturnsLiveValue() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meetingID = UUID()
+        let viewModel = harness.makeViewModel()
+
+        harness.progressCenter.startTracking(meetingID: meetingID)
+        harness.progressCenter.updateProgress(0.48, for: meetingID)
+
+        #expect(viewModel.transcriptionProgress(for: meetingID) == 0.48)
+    }
 }
 
 @MainActor
@@ -1152,6 +1164,7 @@ private struct AppViewModelTestHarness {
     let recordingService: RecordingServiceSpy
     let recordingPermissions: RecordingPermissionsSpy
     let transcriptionService: TranscriptionServiceSpy
+    let progressCenter: TranscriptionProgressCenter
     let rootURL: URL
 
     init(
@@ -1180,6 +1193,7 @@ private struct AppViewModelTestHarness {
         )
         self.recordingPermissions = RecordingPermissionsSpy(result: permissionResult)
         self.transcriptionService = TranscriptionServiceSpy(queuedResults: transcriptionResults)
+        self.progressCenter = TranscriptionProgressCenter()
         self.rootURL = rootURL
     }
 
@@ -1214,6 +1228,7 @@ private struct AppViewModelTestHarness {
             meetingFileStore: meetingFileStore,
             recordingService: recordingService,
             transcriptionService: transcriptionService,
+            transcriptionProgressCenter: progressCenter,
             recordingPermissions: recordingPermissions
         )
     }

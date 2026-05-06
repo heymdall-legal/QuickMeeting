@@ -5,8 +5,19 @@
 //  Created by Codex on 05.05.2026.
 //
 
+import Combine
 import Foundation
 import WhisperKit
+
+func observeTranscriptionProgress(
+    _ progress: Progress,
+    onProgress: @escaping @Sendable (Double) -> Void
+) -> AnyCancellable {
+    progress.publisher(for: \.fractionCompleted)
+        .removeDuplicates()
+        .drop(while: { $0 <= 0 })
+        .sink(receiveValue: onProgress)
+}
 
 struct WhisperKitTranscriptionBackend: WhisperTranscriptionBackend {
     let downloadBaseURL: URL
@@ -25,8 +36,19 @@ struct WhisperKitTranscriptionBackend: WhisperTranscriptionBackend {
             modelFolder: request.modelFolderURL.path,
             download: false
         )
+        let progressObserver = request.onProgress.map { onProgress in
+            observeTranscriptionProgress(whisperKit.progress, onProgress: onProgress)
+        }
+        defer {
+            progressObserver?.cancel()
+        }
 
-        let results = try await whisperKit.transcribe(audioPath: request.audioFileURL.path, decodeOptions: DecodingOptions(language: "RU"))
+        let results = try await whisperKit.transcribe(
+            audioPath: request.audioFileURL.path,
+            callback: { _ in
+                return nil
+            }
+        )
         let text = results
             .map(\.text)
             .joined(separator: "\n")
