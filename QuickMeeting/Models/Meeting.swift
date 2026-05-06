@@ -77,6 +77,27 @@ final class Meeting {
         touch(updatedAt: updatedAt)
     }
 
+    func beginTranscription(updatedAt: Date = Date()) {
+        statusRawValue = MeetingStatus.transcribing.rawValue
+        touch(updatedAt: updatedAt)
+    }
+
+    func completeTranscription(
+        transcriptFilePath: String,
+        transcriptPreview: String,
+        updatedAt: Date = Date()
+    ) {
+        self.transcriptFilePath = transcriptFilePath
+        self.transcriptPreview = transcriptPreview
+        statusRawValue = MeetingStatus.completed.rawValue
+        touch(updatedAt: updatedAt)
+    }
+
+    func failTranscription(updatedAt: Date = Date()) {
+        statusRawValue = MeetingStatus.failed.rawValue
+        touch(updatedAt: updatedAt)
+    }
+
     private func touch(updatedAt: Date) {
         self.updatedAt = updatedAt
     }

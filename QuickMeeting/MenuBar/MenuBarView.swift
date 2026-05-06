@@ -15,7 +15,7 @@ struct MenuBarView: View {
             Text("QuickMeeting")
                 .font(.headline)
 
-            Text(statusText)
+            Text(recordingStatusText(for: viewModel.recordingState))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -40,21 +40,6 @@ struct MenuBarView: View {
             await viewModel.startRecording()
         } else if viewModel.canStopRecording {
             await viewModel.stopRecording()
-        }
-    }
-
-    private var statusText: String {
-        switch viewModel.recordingState {
-        case .idle:
-            return "Ready"
-        case .starting:
-            return "Starting recording..."
-        case .recording:
-            return "Recording in progress"
-        case .stopping:
-            return "Stopping recording..."
-        case .failed(let message):
-            return message
         }
     }
 }

@@ -108,6 +108,15 @@ private actor FakeWhisperModelStore: WhisperModelStore {
         installed
     }
 
+    func installedModelURL(for model: TranscriptionModel) async throws -> URL? {
+        let modelID = await model.id
+        guard installed[modelID] != nil else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: "/tmp/\(model.argmaxModelID)")
+    }
+
     func downloadModel(
         _ model: TranscriptionModel,
         onProgress _: @escaping @Sendable (Double?) -> Void
@@ -116,11 +125,13 @@ private actor FakeWhisperModelStore: WhisperModelStore {
             throw downloadError
         }
 
-        installed[model.id] = InstalledTranscriptionModel(sizeInBytes: 1_024, installedAt: nil)
+        let modelID = await model.id
+        installed[modelID] = InstalledTranscriptionModel(sizeInBytes: 1_024, installedAt: nil)
     }
 
     func deleteModel(_ model: TranscriptionModel) async throws {
-        installed.removeValue(forKey: model.id)
+        let modelID = await model.id
+        installed.removeValue(forKey: modelID)
     }
 }
 

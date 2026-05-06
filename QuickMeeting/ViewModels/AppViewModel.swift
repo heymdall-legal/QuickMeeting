@@ -12,10 +12,12 @@ import Foundation
 final class AppViewModel: ObservableObject {
     @Published private(set) var recordingState: RecordingState = .idle
     @Published private(set) var deletionErrorMessage: String?
+    @Published private(set) var transcriptionErrorMessage: String?
 
     private let meetingStore: MeetingStore
     private let meetingFileStore: MeetingFileStore
     private let recordingService: any RecordingService
+    private let transcriptionService: any TranscriptionServicing
     private let recordingPermissions: any RecordingPermissions
     private let dateProvider: () -> Date
     private let meetingIDProvider: () -> UUID
@@ -26,6 +28,7 @@ final class AppViewModel: ObservableObject {
         meetingStore: MeetingStore,
         meetingFileStore: MeetingFileStore,
         recordingService: any RecordingService,
+        transcriptionService: any TranscriptionServicing = NoopTranscriptionService(),
         recordingPermissions: (any RecordingPermissions)? = nil,
         dateProvider: @escaping () -> Date = Date.init,
         meetingIDProvider: @escaping () -> UUID = UUID.init,
@@ -34,6 +37,7 @@ final class AppViewModel: ObservableObject {
         self.meetingStore = meetingStore
         self.meetingFileStore = meetingFileStore
         self.recordingService = recordingService
+        self.transcriptionService = transcriptionService
         self.recordingPermissions = recordingPermissions ?? NativeRecordingPermissions()
         self.dateProvider = dateProvider
         self.meetingIDProvider = meetingIDProvider
@@ -171,6 +175,33 @@ final class AppViewModel: ObservableObject {
 
     func clearDeletionError() {
         deletionErrorMessage = nil
+    }
+
+    func canTranscribeMeeting(_ meeting: Meeting) -> Bool {
+        guard let status = try? meeting.status else {
+            return false
+        }
+
+        switch status {
+        case .recorded, .failed:
+            return true
+        case .recording, .transcribing, .completed:
+            return false
+        }
+    }
+
+    func transcribeMeeting(_ meeting: Meeting) async {
+        transcriptionErrorMessage = nil
+
+        do {
+            try await transcriptionService.transcribe(meetingID: meeting.id)
+        } catch {
+            transcriptionErrorMessage = error.localizedDescription
+        }
+    }
+
+    func clearTranscriptionError() {
+        transcriptionErrorMessage = nil
     }
 
     private func rollbackFailedRecordingStart(

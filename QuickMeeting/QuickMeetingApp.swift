@@ -27,17 +27,29 @@ struct QuickMeetingApp: App {
                 configurations: [modelConfiguration]
             )
             sharedModelContainer = modelContainer
+            let meetingStore = MeetingStore(modelContext: modelContainer.mainContext)
+            let meetingFileStore = MeetingFileStore()
+            let recordingService = DefaultRecordingService(
+                audioCapturePipeline: NativeAudioCapturePipeline()
+            )
+            let modelSettingsStore = ModelSettingsStore()
+            let modelStore = ArgmaxWhisperModelStore()
+            let transcriptionService = TranscriptionService(
+                meetingStore: meetingStore,
+                modelStore: modelStore,
+                modelSettingsStore: modelSettingsStore,
+                backend: WhisperKitTranscriptionBackend()
+            )
             let transcriptionModelManager = TranscriptionModelManager(
-                modelStore: ArgmaxWhisperModelStore(),
-                settingsStore: ModelSettingsStore()
+                modelStore: modelStore,
+                settingsStore: modelSettingsStore
             )
             _appViewModel = StateObject(
                 wrappedValue: AppViewModel(
-                    meetingStore: MeetingStore(modelContext: modelContainer.mainContext),
-                    meetingFileStore: MeetingFileStore(),
-                    recordingService: DefaultRecordingService(
-                        audioCapturePipeline: NativeAudioCapturePipeline()
-                    )
+                    meetingStore: meetingStore,
+                    meetingFileStore: meetingFileStore,
+                    recordingService: recordingService,
+                    transcriptionService: transcriptionService
                 )
             )
             _modelsSettingsViewModel = StateObject(
@@ -50,7 +62,10 @@ struct QuickMeetingApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(appViewModel: appViewModel)
+            ContentView(
+                appViewModel: appViewModel,
+                modelsViewModel: modelsSettingsViewModel
+            )
                 .task {
                     if menuBarController == nil {
                         menuBarController = MenuBarController(viewModel: appViewModel)

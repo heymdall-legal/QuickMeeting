@@ -10,6 +10,8 @@ import SwiftUI
 struct MeetingDetailView: View {
     let meeting: Meeting
     let canDelete: Bool
+    let canTranscribe: Bool
+    let onTranscribe: () -> Void
     let onDelete: () -> Void
 
     @StateObject private var playback = MeetingAudioPlayback()
@@ -83,6 +85,21 @@ struct MeetingDetailView: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
+
+                if let transcriptFilePath = meeting.transcriptFilePath {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Transcript File")
+                            .font(.headline)
+                        Text(transcriptFilePath)
+                            .font(.callout.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                Button("Transcribe", action: onTranscribe)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canTranscribe)
 
                 Button("Delete Meeting", role: .destructive) {
                     isShowingDeleteConfirmation = true

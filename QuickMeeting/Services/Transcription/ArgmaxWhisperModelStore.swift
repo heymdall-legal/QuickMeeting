@@ -16,6 +16,7 @@ struct InstalledTranscriptionModel: Equatable {
 
 protocol WhisperModelStore {
     func installedModels() async throws -> [TranscriptionModelID: InstalledTranscriptionModel]
+    func installedModelURL(for model: TranscriptionModel) async throws -> URL?
     func downloadModel(
         _ model: TranscriptionModel,
         onProgress: @escaping @Sendable (Double?) -> Void
@@ -74,6 +75,10 @@ struct ArgmaxWhisperModelStore: WhisperModelStore {
         }
 
         try fileManager.removeItem(at: modelURL)
+    }
+
+    func installedModelURL(for model: TranscriptionModel) async throws -> URL? {
+        try findInstalledModelURL(for: model)
     }
 
     private func findInstalledModelURL(for model: TranscriptionModel) throws -> URL? {

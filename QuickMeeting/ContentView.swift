@@ -10,43 +10,44 @@ import SwiftData
 
 struct ContentView: View {
     @ObservedObject var appViewModel: AppViewModel
+    @ObservedObject var modelsViewModel: ModelsSettingsViewModel
     @Query(sort: \Meeting.startedAt, order: .reverse) private var meetings: [Meeting]
-    @State private var selectedMeetingID: UUID?
+    @State private var selection = defaultSidebarSelection()
 
     var body: some View {
         NavigationSplitView {
-            MeetingListView(meetings: meetings, selection: selectionBinding)
-                .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-                .navigationTitle("Meetings")
+            AppSidebarView(meetings: meetings, selection: $selection)
+                .navigationSplitViewColumnWidth(min: 180, ideal: 220)
         } detail: {
-            if let selectedMeeting {
-                MeetingDetailView(
-                    meeting: selectedMeeting,
-                    canDelete: appViewModel.canDeleteMeeting(selectedMeeting),
-                    onDelete: {
-                        appViewModel.deleteMeeting(selectedMeeting)
-                    }
-                )
-            } else {
-                ContentUnavailableView(
-                    "Select a Meeting",
-                    systemImage: "rectangle.stack",
-                    description: Text("Choose a meeting from the library to review its recording details.")
-                )
-            }
-        }
-        .toolbar {
-            ToolbarItemGroup {
-                RecordingToolbarControls(appViewModel: appViewModel)
+            switch selection {
+            case .home:
+                HomeView(appViewModel: appViewModel)
+            case .settings:
+                ModelsSettingsView(viewModel: modelsViewModel)
+            case .meeting(let meetingID):
+                if let selectedMeeting = meetings.first(where: { $0.id == meetingID }) {
+                    MeetingDetailView(
+                        meeting: selectedMeeting,
+                        canDelete: appViewModel.canDeleteMeeting(selectedMeeting),
+                        canTranscribe: appViewModel.canTranscribeMeeting(selectedMeeting),
+                        onTranscribe: {
+                            Task {
+                                await appViewModel.transcribeMeeting(selectedMeeting)
+                            }
+                        },
+                        onDelete: {
+                            appViewModel.deleteMeeting(selectedMeeting)
+                        }
+                    )
+                } else {
+                    HomeView(appViewModel: appViewModel)
+                }
             }
         }
         .onAppear {
             syncSelection()
         }
         .onChange(of: meetings.map(\.id)) { _, _ in
-            syncSelection()
-        }
-        .onChange(of: appViewModel.activeOrRecoverableMeetingID) { _, _ in
             syncSelection()
         }
         .alert(
@@ -61,56 +62,25 @@ struct ContentView: View {
                 Text(appViewModel.deletionErrorMessage ?? "Unknown error.")
             }
         )
-    }
-
-    private var selectedMeeting: Meeting? {
-        guard let selectedMeetingID = effectiveSelectedMeetingID else {
-            return nil
-        }
-
-        return meetings.first { $0.id == selectedMeetingID }
-    }
-
-    private var selectionBinding: Binding<UUID?> {
-        Binding(
-            get: { effectiveSelectedMeetingID },
-            set: { newValue in
-                if let pinnedMeetingID = appViewModel.activeOrRecoverableMeetingID {
-                    selectedMeetingID = pinnedMeetingID
-                    return
+        .alert(
+            "Unable to Transcribe Meeting",
+            isPresented: transcriptionErrorIsPresented,
+            actions: {
+                Button("OK", role: .cancel) {
+                    appViewModel.clearTranscriptionError()
                 }
-
-                selectedMeetingID = newValue
+            },
+            message: {
+                Text(appViewModel.transcriptionErrorMessage ?? "Unknown error.")
             }
         )
     }
 
-    private var effectiveSelectedMeetingID: UUID? {
-        appViewModel.activeOrRecoverableMeetingID ?? selectedMeetingID
-    }
-
     private func syncSelection() {
-        if let pinnedMeetingID = appViewModel.activeOrRecoverableMeetingID,
-           meetings.contains(where: { $0.id == pinnedMeetingID }) {
-            selectedMeetingID = pinnedMeetingID
-            return
-        }
-
-        guard let firstMeeting = meetings.first else {
-            selectedMeetingID = nil
-            return
-        }
-
-        guard let selectedMeetingID else {
-            self.selectedMeetingID = firstMeeting.id
-            return
-        }
-
-        if meetings.contains(where: { $0.id == selectedMeetingID }) {
-            return
-        }
-
-        self.selectedMeetingID = firstMeeting.id
+        selection = reconciledSidebarSelection(
+            currentSelection: selection,
+            availableMeetingIDs: meetings.map(\.id)
+        )
     }
 
     private var deletionErrorIsPresented: Binding<Bool> {
@@ -123,12 +93,26 @@ struct ContentView: View {
             }
         )
     }
+
+    private var transcriptionErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { appViewModel.transcriptionErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appViewModel.clearTranscriptionError()
+                }
+            }
+        )
+    }
 }
 
 #Preview {
     let container = previewModelContainer()
 
-    ContentView(appViewModel: previewAppViewModel(container: container))
+    ContentView(
+        appViewModel: previewAppViewModel(container: container),
+        modelsViewModel: previewModelsSettingsViewModel()
+    )
         .modelContainer(container)
 }
 
@@ -159,6 +143,16 @@ private func previewAppViewModel(container: ModelContainer) -> AppViewModel {
                 .appendingPathComponent("QuickMeetingPreview", isDirectory: true)
         ),
         recordingService: PreviewRecordingService()
+    )
+}
+
+@MainActor
+private func previewModelsSettingsViewModel() -> ModelsSettingsViewModel {
+    ModelsSettingsViewModel(
+        manager: TranscriptionModelManager(
+            modelStore: ArgmaxWhisperModelStore(),
+            settingsStore: ModelSettingsStore()
+        )
     )
 }
 

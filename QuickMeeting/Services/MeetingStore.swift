@@ -64,10 +64,10 @@ struct MeetingStore {
         try modelContext.save()
     }
 
-    func finishRecording(meetingID: UUID, endedAt: Date) throws {
+    func fetchMeeting(id: UUID) throws -> Meeting {
         let descriptor = FetchDescriptor<Meeting>(
             predicate: #Predicate { meeting in
-                meeting.id == meetingID
+                meeting.id == id
             }
         )
 
@@ -75,11 +75,43 @@ struct MeetingStore {
             throw MeetingStoreError.meetingNotFound
         }
 
+        return meeting
+    }
+
+    func finishRecording(meetingID: UUID, endedAt: Date) throws {
+        let meeting = try fetchMeeting(id: meetingID)
         meeting.finishRecording(
             endedAt: endedAt,
             duration: endedAt.timeIntervalSince(meeting.startedAt),
             updatedAt: endedAt
         )
+        try modelContext.save()
+    }
+
+    func startTranscription(meetingID: UUID, updatedAt: Date) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.beginTranscription(updatedAt: updatedAt)
+        try modelContext.save()
+    }
+
+    func completeTranscription(
+        meetingID: UUID,
+        transcriptFileURL: URL,
+        transcriptPreview: String,
+        updatedAt: Date
+    ) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.completeTranscription(
+            transcriptFilePath: transcriptFileURL.standardizedFileURL.path(),
+            transcriptPreview: transcriptPreview,
+            updatedAt: updatedAt
+        )
+        try modelContext.save()
+    }
+
+    func failTranscription(meetingID: UUID, updatedAt: Date) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.failTranscription(updatedAt: updatedAt)
         try modelContext.save()
     }
 }

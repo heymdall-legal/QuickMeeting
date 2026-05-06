@@ -327,6 +327,31 @@ struct AppViewModelTests {
         #expect(reloadedMeetings.first?.id == meetingID)
         #expect(viewModel.deletionErrorMessage == nil)
     }
+
+    @Test
+    func transcribeMeetingDelegatesToServiceAndClearsPreviousError() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let viewModel = harness.makeViewModel()
+
+        await viewModel.transcribeMeeting(meeting)
+
+        #expect(harness.transcriptionService.snapshot().transcribedMeetingIDs == [meeting.id])
+        #expect(viewModel.transcriptionErrorMessage == nil)
+    }
+
+    @Test
+    func transcribeMeetingStoresTheFailureMessageForUI() async throws {
+        let harness = try AppViewModelTestHarness(
+            transcriptionResults: [.failure(TranscriptionActionTestError.failed)]
+        )
+        let meeting = try harness.createRecordedMeeting()
+        let viewModel = harness.makeViewModel()
+
+        await viewModel.transcribeMeeting(meeting)
+
+        #expect(viewModel.transcriptionErrorMessage == "Transcription failed")
+    }
 }
 
 @MainActor
@@ -1126,12 +1151,14 @@ private struct AppViewModelTestHarness {
     let meetingFileStore: MeetingFileStore
     let recordingService: RecordingServiceSpy
     let recordingPermissions: RecordingPermissionsSpy
+    let transcriptionService: TranscriptionServiceSpy
     let rootURL: URL
 
     init(
         queuedResults: [Result<Void, Error>] = [.success(())],
         stopResults: [Result<Void, Error>] = [.success(())],
-        permissionResult: RecordingPermissionResult = .granted
+        permissionResult: RecordingPermissionResult = .granted,
+        transcriptionResults: [Result<Void, Error>] = [.success(())]
     ) throws {
         let schema = Schema([
             Meeting.self,
@@ -1152,6 +1179,7 @@ private struct AppViewModelTestHarness {
             stopResults: stopResults
         )
         self.recordingPermissions = RecordingPermissionsSpy(result: permissionResult)
+        self.transcriptionService = TranscriptionServiceSpy(queuedResults: transcriptionResults)
         self.rootURL = rootURL
     }
 
@@ -1161,6 +1189,32 @@ private struct AppViewModelTestHarness {
         return MeetingArtifacts(
             meetingFolderURL: meetingFolderURL,
             audioFileURL: meetingFolderURL.appendingPathComponent("audio.wav")
+        )
+    }
+
+    func createRecordedMeeting() throws -> Meeting {
+        let meetingID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
+        let artifacts = try meetingFileStore.createArtifacts(for: meetingID, startedAt: startedAt)
+        fileManager.createFile(atPath: artifacts.audioFileURL.path, contents: Data("audio".utf8))
+        let meeting = try meetingStore.createMeeting(
+            id: meetingID,
+            title: "Recorded Meeting",
+            startedAt: startedAt,
+            folderURL: artifacts.meetingFolderURL,
+            audioFileURL: artifacts.audioFileURL
+        )
+        try meetingStore.finishRecording(meetingID: meeting.id, endedAt: startedAt.addingTimeInterval(60))
+        return meeting
+    }
+
+    func makeViewModel() -> AppViewModel {
+        AppViewModel(
+            meetingStore: meetingStore,
+            meetingFileStore: meetingFileStore,
+            recordingService: recordingService,
+            transcriptionService: transcriptionService,
+            recordingPermissions: recordingPermissions
         )
     }
 }
@@ -1187,6 +1241,17 @@ private enum StopRecordingTestError: LocalizedError {
     }
 }
 
+private enum TranscriptionActionTestError: LocalizedError {
+    case failed
+
+    var errorDescription: String? {
+        switch self {
+        case .failed:
+            "Transcription failed"
+        }
+    }
+}
+
 private struct Snapshot {
     let startAttempts: [StartAttempt]
     let stopAttempts: Int
@@ -1195,6 +1260,38 @@ private struct Snapshot {
 private struct StartAttempt {
     let meetingID: UUID
     let outputURL: URL
+}
+
+@MainActor
+private final class TranscriptionServiceSpy: TranscriptionServicing {
+    private var queuedResults: [Result<Void, Error>]
+    private var transcribedMeetingIDs = [UUID]()
+
+    init(queuedResults: [Result<Void, Error>] = [.success(())]) {
+        self.queuedResults = queuedResults
+    }
+
+    func transcribe(meetingID: UUID) async throws {
+        transcribedMeetingIDs.append(meetingID)
+        guard !queuedResults.isEmpty else {
+            return
+        }
+
+        switch queuedResults.removeFirst() {
+        case .success:
+            return
+        case .failure(let error):
+            throw error
+        }
+    }
+
+    func snapshot() -> TranscriptionServiceSnapshot {
+        TranscriptionServiceSnapshot(transcribedMeetingIDs: transcribedMeetingIDs)
+    }
+}
+
+private struct TranscriptionServiceSnapshot {
+    let transcribedMeetingIDs: [UUID]
 }
 
 @MainActor

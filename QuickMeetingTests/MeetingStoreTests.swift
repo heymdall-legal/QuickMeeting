@@ -139,4 +139,104 @@ struct MeetingStoreTests {
         #expect(meeting.audioFilePath == "/tmp/Application Support/QuickMeeting/Meeting/audio file.wav")
         #expect(!meeting.audioFilePath.contains("%20"))
     }
+
+    @Test
+    func startTranscriptionMarksMeetingAsTranscribing() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let updatedAt = Date(timeIntervalSince1970: 1_234_568_000)
+
+        try harness.store.startTranscription(meetingID: meeting.id, updatedAt: updatedAt)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .transcribing)
+        #expect(reloaded.updatedAt == updatedAt)
+    }
+
+    @Test
+    func completeTranscriptionPersistsTranscriptPathAndPreview() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let transcriptURL = harness.folderURL(for: meeting.id).appendingPathComponent("transcript.txt")
+        let updatedAt = Date(timeIntervalSince1970: 1_234_568_100)
+
+        try harness.store.completeTranscription(
+            meetingID: meeting.id,
+            transcriptFileURL: transcriptURL,
+            transcriptPreview: "First line of transcript",
+            updatedAt: updatedAt
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .completed)
+        #expect(reloaded.transcriptFilePath == transcriptURL.standardizedFileURL.path())
+        #expect(reloaded.transcriptPreview == "First line of transcript")
+        #expect(reloaded.updatedAt == updatedAt)
+    }
+
+    @Test
+    func failTranscriptionMarksMeetingAsFailedWithoutRemovingTranscriptMetadata() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let transcriptURL = harness.folderURL(for: meeting.id).appendingPathComponent("transcript.txt")
+
+        try harness.store.completeTranscription(
+            meetingID: meeting.id,
+            transcriptFileURL: transcriptURL,
+            transcriptPreview: "Existing transcript",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_150)
+        )
+
+        let failedAt = Date(timeIntervalSince1970: 1_234_568_200)
+        try harness.store.failTranscription(meetingID: meeting.id, updatedAt: failedAt)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .failed)
+        #expect(reloaded.transcriptFilePath == transcriptURL.standardizedFileURL.path())
+        #expect(reloaded.transcriptPreview == "Existing transcript")
+        #expect(reloaded.updatedAt == failedAt)
+    }
+}
+
+private struct MeetingStoreHarness {
+    let container: ModelContainer
+    let store: MeetingStore
+
+    init() throws {
+        let schema = Schema([
+            Meeting.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        container = try ModelContainer(for: schema, configurations: [configuration])
+        store = MeetingStore(modelContext: ModelContext(container))
+    }
+
+    func createRecordedMeeting() throws -> Meeting {
+        let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
+        let endedAt = startedAt.addingTimeInterval(60)
+        let folderURL = URL(fileURLWithPath: "/tmp/meeting-\(UUID().uuidString)")
+        let audioFileURL = folderURL.appendingPathComponent("audio.wav")
+        let meeting = try store.createMeeting(
+            title: "Design Review",
+            startedAt: startedAt,
+            folderURL: folderURL,
+            audioFileURL: audioFileURL
+        )
+        try store.finishRecording(meetingID: meeting.id, endedAt: endedAt)
+        return try reloadMeeting(id: meeting.id)
+    }
+
+    func reloadMeeting(id: UUID) throws -> Meeting {
+        let context = ModelContext(container)
+        let descriptor = FetchDescriptor<Meeting>(
+            predicate: #Predicate { meeting in
+                meeting.id == id
+            }
+        )
+        return try #require(context.fetch(descriptor).first)
+    }
+
+    func folderURL(for meetingID: UUID) -> URL {
+        URL(fileURLWithPath: "/tmp/meeting-\(meetingID.uuidString)")
+    }
 }
