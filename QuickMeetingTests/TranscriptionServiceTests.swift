@@ -9,10 +9,7 @@ struct TranscriptionServiceTests {
     func transcribeRecordedMeetingWritesTranscriptAndCompletesMeeting() async throws {
         let harness = try TranscriptionServiceHarness()
         let meeting = try harness.createRecordedMeeting()
-        harness.settingsStore.defaultModelID = .small
-        await harness.modelStore.setInstalledModels([
-            .small: InstalledTranscriptionModel(sizeInBytes: 1, installedAt: nil),
-        ])
+        await harness.installDefaultModel(.small)
         await harness.backend.setResult(.success(
             TranscriptionResult(
                 fullText: "Transcript body",
@@ -45,19 +42,14 @@ struct TranscriptionServiceTests {
         let harness = try TranscriptionServiceHarness()
         let firstMeeting = try harness.createRecordedMeeting()
         let secondMeeting = try harness.createRecordedMeeting()
-        harness.settingsStore.defaultModelID = .small
-        await harness.modelStore.setInstalledModels([
-            .small: InstalledTranscriptionModel(sizeInBytes: 1, installedAt: nil),
-        ])
+        await harness.installDefaultModel(.small)
         await harness.backend.suspendNextRequest()
 
         let firstTask = Task {
             try await harness.service.transcribe(meetingID: firstMeeting.id)
         }
 
-        while await harness.backend.snapshot().pendingRequestCount == 0 {
-            await Task.yield()
-        }
+        await harness.backend.waitForSuspendedRequest()
 
         await #expect(throws: TranscriptionServiceError.transcriptionAlreadyActive) {
             try await harness.service.transcribe(meetingID: secondMeeting.id)
@@ -71,13 +63,9 @@ struct TranscriptionServiceTests {
     func transcribePassesResolvedInstalledModelFolderToBackend() async throws {
         let harness = try TranscriptionServiceHarness()
         let meeting = try harness.createRecordedMeeting()
-        harness.settingsStore.defaultModelID = .small
         let modelFolderURL = harness.fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        await harness.modelStore.setInstalledModels([
-            .small: InstalledTranscriptionModel(sizeInBytes: 1, installedAt: nil),
-        ])
-        await harness.modelStore.setResolvedModelURL(modelFolderURL, for: .small)
+        await harness.installDefaultModel(.small, modelFolderURL: modelFolderURL)
         await harness.backend.setResult(.success(TranscriptionResult(fullText: "Transcript body", segments: [])))
 
         try await harness.service.transcribe(meetingID: meeting.id)
@@ -149,6 +137,20 @@ private struct TranscriptionServiceHarness {
         )
         return try #require(verificationContext.fetch(descriptor).first)
     }
+
+    func installDefaultModel(
+        _ modelID: TranscriptionModelID,
+        modelFolderURL: URL? = nil
+    ) async {
+        settingsStore.defaultModelID = modelID
+        await modelStore.setInstalledModels([
+            modelID: InstalledTranscriptionModel(sizeInBytes: 1, installedAt: nil),
+        ])
+
+        let resolvedModelFolderURL = modelFolderURL ?? fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        await modelStore.setResolvedModelURL(resolvedModelFolderURL, for: modelID)
+    }
 }
 
 private actor FakeWhisperModelStore: WhisperModelStore {
@@ -204,6 +206,12 @@ private actor SuspendedWhisperTranscriptionBackend: WhisperTranscriptionBackend 
 
     func snapshot() -> Snapshot {
         Snapshot(pendingRequestCount: pendingRequestCount, requests: requests)
+    }
+
+    func waitForSuspendedRequest() async {
+        while pendingRequestCount == 0 {
+            await Task.yield()
+        }
     }
 
     func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult {
