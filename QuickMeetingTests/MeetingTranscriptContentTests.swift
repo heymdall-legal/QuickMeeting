@@ -1,24 +1,45 @@
 import Foundation
 import Testing
 @testable import QuickMeeting
+#if canImport(AppKit)
+import AppKit
+#endif
 
 struct MeetingTranscriptContentTests {
     @Test
-    func detailReloadKeyChangesWhenTranscriptPathChanges() throws {
+    func transcriptReloadKeyChangesWhenTranscriptPathChanges() throws {
         let meeting = Meeting(
             title: "Sync",
             startedAt: Date(timeIntervalSince1970: 1_714_561_200),
             status: .recorded,
             audioFilePath: "/tmp/audio.wav"
         )
-        let initialKey = meetingDetailReloadKey(for: meeting)
+        let initialKey = meetingTranscriptReloadKey(for: meeting)
 
         meeting.completeTranscription(
             transcriptFilePath: "/tmp/transcript.md",
             transcriptPreview: "Transcript"
         )
 
-        #expect(meetingDetailReloadKey(for: meeting) != initialKey)
+        #expect(meetingTranscriptReloadKey(for: meeting) != initialKey)
+    }
+
+    @Test
+    func audioReloadKeyDoesNotChangeWhenOnlyTranscriptChanges() throws {
+        let meeting = Meeting(
+            title: "Sync",
+            startedAt: Date(timeIntervalSince1970: 1_714_561_200),
+            status: .recorded,
+            audioFilePath: "/tmp/audio.wav"
+        )
+        let initialKey = meetingAudioReloadKey(for: meeting)
+
+        meeting.completeTranscription(
+            transcriptFilePath: "/tmp/transcript.md",
+            transcriptPreview: "Transcript"
+        )
+
+        #expect(meetingAudioReloadKey(for: meeting) == initialKey)
     }
 
     @Test
@@ -88,4 +109,25 @@ struct MeetingTranscriptContentTests {
 
         #expect(speakers == .available([TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")]))
     }
+
+    #if canImport(AppKit)
+    @Test
+    func transcriptAttributedStringPreservesTranscriptText() {
+        let transcript = "## Speaker 1\nLine one\nLine two"
+
+        let attributedString = makeTranscriptAttributedString(from: transcript)
+
+        #expect(attributedString.string == transcript)
+    }
+
+    @Test
+    func transcriptAttributedStringAppliesReadableLineSpacing() throws {
+        let attributedString = makeTranscriptAttributedString(from: "Line one\nLine two")
+        let paragraphStyle = try #require(
+            attributedString.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        )
+
+        #expect(paragraphStyle.lineSpacing == 6)
+    }
+    #endif
 }

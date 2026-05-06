@@ -42,7 +42,7 @@ struct MeetingDetailView: View {
                 .background(.background)
         }
         .navigationTitle(meeting.title.isEmpty ? "Untitled Meeting" : meeting.title)
-        .task(id: meetingDetailReloadKey(for: meeting)) {
+        .task(id: meetingTranscriptReloadKey(for: meeting)) {
             transcriptContent = (try? loadMeetingTranscriptContent(from: meeting.transcriptFilePath))
                 ?? .unavailable(message: "Transcript file is unavailable.")
             switch loadMeetingTranscriptSpeakers(from: meeting.transcriptFilePath) {
@@ -51,7 +51,9 @@ struct MeetingDetailView: View {
             case .unavailable:
                 transcriptSpeakers = []
             }
-            try? playback.loadAudioFile(at: URL(fileURLWithPath: meeting.audioFilePath))
+        }
+        .task(id: meetingAudioReloadKey(for: meeting)) {
+            await playback.loadAudioFileDeferred(at: URL(fileURLWithPath: meeting.audioFilePath))
         }
         .alert(
             "Delete Meeting?",
@@ -87,12 +89,7 @@ struct MeetingDetailView: View {
             case .transcriptFile:
                 switch transcriptContent {
                 case .text(let transcript):
-                    ScrollView {
-                        Text(transcript)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                            .lineSpacing(6)
-                    }
+                    TranscriptTextView(text: transcript)
                 case .notAvailable:
                     transcriptEmptyState
                 case .unavailable(let message):

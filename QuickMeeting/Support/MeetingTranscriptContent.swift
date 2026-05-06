@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
 
 enum MeetingTranscriptContent: Equatable {
     case text(String)
@@ -11,12 +14,18 @@ enum MeetingTranscriptSpeakersContent: Equatable {
     case unavailable
 }
 
-func meetingDetailReloadKey(for meeting: Meeting) -> String {
+func meetingTranscriptReloadKey(for meeting: Meeting) -> String {
     [
         meeting.id.uuidString,
-        meeting.audioFilePath,
         meeting.transcriptFilePath ?? "",
         String(meeting.updatedAt.timeIntervalSinceReferenceDate)
+    ].joined(separator: "|")
+}
+
+func meetingAudioReloadKey(for meeting: Meeting) -> String {
+    [
+        meeting.id.uuidString,
+        meeting.audioFilePath
     ].joined(separator: "|")
 }
 
@@ -88,3 +97,19 @@ private func resolveTranscriptFilePath(
 
     return nil
 }
+
+#if canImport(AppKit)
+func makeTranscriptAttributedString(from transcript: String) -> NSAttributedString {
+    let paragraphStyle = NSMutableParagraphStyle()
+    paragraphStyle.lineSpacing = 6
+
+    return NSAttributedString(
+        string: transcript,
+        attributes: [
+            .font: NSFont.preferredFont(forTextStyle: .body),
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: paragraphStyle
+        ]
+    )
+}
+#endif

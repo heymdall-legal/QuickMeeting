@@ -4,6 +4,22 @@ import Testing
 
 @MainActor
 struct MeetingAudioPlaybackTests {
+    actor DeferredLoadGate {
+        private var continuations = [CheckedContinuation<Void, Never>]()
+
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                continuations.append(continuation)
+            }
+        }
+
+        func open() {
+            let pendingContinuations = continuations
+            continuations.removeAll()
+            pendingContinuations.forEach { $0.resume() }
+        }
+    }
+
     final class NativeAudioPlayerSpy: NativeAudioPlaying {
         private(set) var loadedURL: URL?
         private(set) var playCallCount = 0
@@ -64,6 +80,46 @@ struct MeetingAudioPlaybackTests {
         #expect(nativePlayer.prepareToPlayCallCount == 1)
         #expect(playback.duration == 0)
         #expect(playback.currentTime == 0)
+    }
+
+    @Test
+    func deferredLoadWaitsUntilGateOpensBeforePreparingPlayer() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let audioURL = rootURL.appendingPathComponent("audio.wav")
+        fileManager.createFile(atPath: audioURL.path, contents: Data("stub".utf8))
+
+        let gate = DeferredLoadGate()
+        let nativePlayer = NativeAudioPlayerSpy()
+        let playback = MeetingAudioPlayback(
+            fileManager: fileManager,
+            nativePlayerFactory: { url in
+                nativePlayer.markLoaded(url: url)
+                return nativePlayer
+            },
+            deferredLoadHook: {
+                await gate.wait()
+            }
+        )
+
+        let loadingTask = Task {
+            await playback.loadAudioFileDeferred(at: audioURL)
+        }
+
+        await Task.yield()
+
+        #expect(nativePlayer.loadedURL == nil)
+        #expect(nativePlayer.prepareToPlayCallCount == 0)
+        #expect(playback.state == .idle)
+
+        await gate.open()
+        await loadingTask.value
+
+        #expect(nativePlayer.loadedURL == audioURL)
+        #expect(nativePlayer.prepareToPlayCallCount == 1)
+        #expect(playback.state == .ready)
     }
 
     @Test

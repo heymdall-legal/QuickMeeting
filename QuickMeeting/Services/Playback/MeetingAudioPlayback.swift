@@ -28,6 +28,7 @@ final class MeetingAudioPlayback: ObservableObject {
 
     private let fileManager: FileManager
     private let nativePlayerFactory: @MainActor (URL) throws -> NativeAudioPlaying
+    private let deferredLoadHook: @Sendable () async -> Void
     private var nativePlayer: NativeAudioPlaying?
     private var progressTimer: Timer?
 
@@ -35,10 +36,14 @@ final class MeetingAudioPlayback: ObservableObject {
         fileManager: FileManager = .default,
         nativePlayerFactory: @escaping @MainActor (URL) throws -> NativeAudioPlaying = { url in
             try AVAudioPlayerAdapter(contentsOf: url)
+        },
+        deferredLoadHook: @escaping @Sendable () async -> Void = {
+            await Task.yield()
         }
     ) {
         self.fileManager = fileManager
         self.nativePlayerFactory = nativePlayerFactory
+        self.deferredLoadHook = deferredLoadHook
     }
 
     var isPlaybackAvailable: Bool {
@@ -94,6 +99,22 @@ final class MeetingAudioPlayback: ObservableObject {
         duration = player.duration
         currentTime = player.currentTime
         state = .ready
+    }
+
+    func loadAudioFileDeferred(at fileURL: URL) async {
+        await deferredLoadHook()
+        guard !Task.isCancelled else {
+            return
+        }
+
+        do {
+            try loadAudioFile(at: fileURL)
+        } catch {
+            nativePlayer = nil
+            duration = 0
+            currentTime = 0
+            state = .failed(message: error.localizedDescription)
+        }
     }
 
     func togglePlayback() {
