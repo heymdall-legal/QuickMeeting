@@ -6,7 +6,7 @@ import Testing
 @MainActor
 struct TranscriptionServiceTests {
     @Test
-    func transcribeRecordedMeetingWritesTranscriptAndCompletesMeeting() async throws {
+    func transcribeRecordedMeetingWritesMarkdownTranscriptAndCompletesMeeting() async throws {
         let harness = try TranscriptionServiceHarness()
         let meeting = try harness.createRecordedMeeting()
         await harness.installDefaultModel(.small)
@@ -16,15 +16,23 @@ struct TranscriptionServiceTests {
                 segments: [TranscriptSegment(text: "Transcript body", startTime: 0, endTime: 1)]
             )
         ))
+        await harness.diarizer.setResult(.success(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "Transcript body", startTime: 0, endTime: 1, speakerID: "speaker-1")]
+            )
+        ))
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
         let reloaded = try harness.reloadMeeting(id: meeting.id)
         #expect(try reloaded.status == .completed)
         #expect(reloaded.transcriptPreview == "Transcript body")
-        #expect(reloaded.transcriptFilePath?.hasSuffix("/transcript.txt") == true)
+        #expect(reloaded.transcriptFilePath?.hasSuffix("/transcript.md") == true)
         let transcriptPath = try #require(reloaded.transcriptFilePath)
-        #expect(try String(contentsOfFile: transcriptPath) == "Transcript body")
+        #expect(try String(contentsOfFile: transcriptPath, encoding: .utf8) == "## Speaker 1\nTranscript body")
+        let diarizerSnapshot = await harness.diarizer.snapshot()
+        #expect(diarizerSnapshot.requests.count == 1)
     }
 
     @Test
@@ -41,6 +49,12 @@ struct TranscriptionServiceTests {
                 segments: [TranscriptSegment(text: "New transcript", startTime: 0, endTime: 1)]
             )
         ))
+        await harness.diarizer.setResult(.success(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "New transcript", startTime: 0, endTime: 1, speakerID: "speaker-1")]
+            )
+        ))
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
@@ -48,7 +62,7 @@ struct TranscriptionServiceTests {
         #expect(try reloaded.status == .completed)
         #expect(reloaded.transcriptPreview == "New transcript")
         let transcriptPath = try #require(reloaded.transcriptFilePath)
-        #expect(try String(contentsOfFile: transcriptPath) == "New transcript")
+        #expect(try String(contentsOfFile: transcriptPath, encoding: .utf8) == "## Speaker 1\nNew transcript")
     }
 
     @Test
@@ -86,6 +100,12 @@ struct TranscriptionServiceTests {
         let secondMeeting = try harness.createRecordedMeeting()
         await harness.installDefaultModel(.small)
         await harness.backend.suspendNextRequest()
+        await harness.diarizer.setResult(.success(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "Done", speakerID: "speaker-1")]
+            )
+        ))
 
         let firstTask = Task {
             try await harness.service.transcribe(meetingID: firstMeeting.id)
@@ -109,6 +129,12 @@ struct TranscriptionServiceTests {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         await harness.installDefaultModel(.small, modelFolderURL: modelFolderURL)
         await harness.backend.setResult(.success(TranscriptionResult(fullText: "Transcript body", segments: [])))
+        await harness.diarizer.setResult(.success(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: []
+            )
+        ))
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
@@ -122,6 +148,12 @@ struct TranscriptionServiceTests {
         let meeting = try harness.createRecordedMeeting()
         await harness.installDefaultModel(.small)
         await harness.backend.setResult(.success(TranscriptionResult(fullText: "Transcript body", segments: [])))
+        await harness.diarizer.setResult(.success(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: []
+            )
+        ))
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
@@ -136,6 +168,12 @@ struct TranscriptionServiceTests {
         await harness.installDefaultModel(.small)
         await harness.backend.setProgressUpdates([0.2, 0.6, 1.0])
         await harness.backend.setResult(.success(TranscriptionResult(fullText: "Done", segments: [])))
+        await harness.diarizer.setResult(.success(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: []
+            )
+        ))
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
@@ -160,6 +198,27 @@ struct TranscriptionServiceTests {
         #expect(snapshot.reportedProgress == [0.35])
         #expect(harness.progressCenter.progress(for: meeting.id) == nil)
     }
+
+    @Test
+    func transcribeMarksMeetingFailedWhenDiarizationFails() async throws {
+        let harness = try TranscriptionServiceHarness()
+        let meeting = try harness.createRecordedMeeting()
+        await harness.installDefaultModel(.small)
+        await harness.backend.setResult(.success(
+            TranscriptionResult(
+                fullText: "Transcript body",
+                segments: [TranscriptSegment(text: "Transcript body", startTime: 0, endTime: 1)]
+            )
+        ))
+        await harness.diarizer.setResult(.failure(TestTranscriptionError.failed))
+
+        await #expect(throws: TestTranscriptionError.failed) {
+            try await harness.service.transcribe(meetingID: meeting.id)
+        }
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .failed)
+    }
 }
 
 @MainActor
@@ -170,6 +229,7 @@ private struct TranscriptionServiceHarness {
     let settingsStore: ModelSettingsStore
     let modelStore: FakeWhisperModelStore
     let backend: SuspendedWhisperTranscriptionBackend
+    let diarizer: SuspendedTranscriptDiarizer
     let progressCenter: TranscriptionProgressCenter
     let fileManager: FileManager
     let meetingFileStore: MeetingFileStore
@@ -186,6 +246,7 @@ private struct TranscriptionServiceHarness {
         settingsStore = ModelSettingsStore(userDefaults: UserDefaults(suiteName: UUID().uuidString)!)
         modelStore = FakeWhisperModelStore()
         backend = SuspendedWhisperTranscriptionBackend()
+        diarizer = SuspendedTranscriptDiarizer()
         progressCenter = TranscriptionProgressCenter()
         fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -196,6 +257,7 @@ private struct TranscriptionServiceHarness {
             modelStore: modelStore,
             modelSettingsStore: settingsStore,
             backend: backend,
+            diarizer: diarizer,
             progressCenter: progressCenter,
             artifactWriter: TranscriptionArtifactWriter(fileManager: fileManager),
             fileManager: fileManager,
@@ -225,7 +287,7 @@ private struct TranscriptionServiceHarness {
         let meeting = try createRecordedMeeting()
         let transcriptURL = meetingFileStore.rootURL
             .appendingPathComponent(meeting.id.uuidString, isDirectory: true)
-            .appendingPathComponent("transcript.txt")
+            .appendingPathComponent("transcript.md")
         fileManager.createFile(atPath: transcriptURL.path, contents: Data(transcriptText.utf8))
         try meetingStore.completeTranscription(
             meetingID: meeting.id,
@@ -358,6 +420,33 @@ private actor SuspendedWhisperTranscriptionBackend: WhisperTranscriptionBackend 
         pendingRequestCount = max(0, pendingRequestCount - 1)
         pendingContinuation?.resume(with: result)
         pendingContinuation = nil
+    }
+}
+
+private actor SuspendedTranscriptDiarizer: TranscriptDiarizing {
+    struct Snapshot {
+        let requests: [TranscriptDiarizationRequest]
+    }
+
+    private var result: Result<StoredTranscript, Error> = .success(
+        StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: []
+        )
+    )
+    private var requests = [TranscriptDiarizationRequest]()
+
+    func setResult(_ result: Result<StoredTranscript, Error>) {
+        self.result = result
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(requests: requests)
+    }
+
+    func diarize(_ request: TranscriptDiarizationRequest) async throws -> StoredTranscript {
+        requests.append(request)
+        return try result.get()
     }
 }
 

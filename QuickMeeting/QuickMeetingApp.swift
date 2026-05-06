@@ -40,6 +40,7 @@ struct QuickMeetingApp: App {
                 modelStore: modelStore,
                 modelSettingsStore: modelSettingsStore,
                 backend: WhisperKitTranscriptionBackend(),
+                diarizer: DefaultTranscriptDiarizer(),
                 progressCenter: transcriptionProgressCenter
             )
             let transcriptionModelManager = TranscriptionModelManager(

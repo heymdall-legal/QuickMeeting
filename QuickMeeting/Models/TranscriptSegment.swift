@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct TranscriptSegment: Identifiable, Equatable, Sendable {
+struct TranscriptSegment: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let text: String
     let startTime: TimeInterval?

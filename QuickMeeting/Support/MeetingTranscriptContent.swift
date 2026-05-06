@@ -6,6 +6,11 @@ enum MeetingTranscriptContent: Equatable {
     case unavailable(message: String)
 }
 
+enum MeetingTranscriptSpeakersContent: Equatable {
+    case available([TranscriptSpeaker])
+    case unavailable
+}
+
 func meetingDetailReloadKey(for meeting: Meeting) -> String {
     [
         meeting.id.uuidString,
@@ -35,6 +40,31 @@ func loadMeetingTranscriptContent(
         return .text(transcriptText)
     } catch {
         return .unavailable(message: "Transcript file is unavailable.")
+    }
+}
+
+func loadMeetingTranscriptSpeakers(
+    from transcriptFilePath: String?,
+    fileManager: FileManager = .default
+) -> MeetingTranscriptSpeakersContent {
+    guard let transcriptFilePath,
+          let resolvedTranscriptPath = resolveTranscriptFilePath(
+              transcriptFilePath,
+              fileManager: fileManager
+          )
+    else {
+        return .unavailable
+    }
+
+    let transcriptURL = URL(fileURLWithPath: resolvedTranscriptPath)
+    let meetingFolderURL = transcriptURL.deletingLastPathComponent()
+    let transcriptStore = MeetingTranscriptStore(fileManager: fileManager)
+
+    do {
+        let transcript = try transcriptStore.loadTranscript(in: meetingFolderURL)
+        return .available(transcript.speakers)
+    } catch {
+        return .unavailable
     }
 }
 

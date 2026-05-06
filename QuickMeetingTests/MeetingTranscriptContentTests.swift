@@ -14,7 +14,7 @@ struct MeetingTranscriptContentTests {
         let initialKey = meetingDetailReloadKey(for: meeting)
 
         meeting.completeTranscription(
-            transcriptFilePath: "/tmp/transcript.txt",
+            transcriptFilePath: "/tmp/transcript.md",
             transcriptPreview: "Transcript"
         )
 
@@ -29,17 +29,17 @@ struct MeetingTranscriptContentTests {
     }
 
     @Test
-    func readableTranscriptFileReturnsText() throws {
+    func readableMarkdownTranscriptFileReturnsText() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        let transcriptURL = rootURL.appendingPathComponent("transcript.txt")
-        try "Line one\nLine two".write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptURL = rootURL.appendingPathComponent("transcript.md")
+        try "## Speaker 1\nLine one".write(to: transcriptURL, atomically: true, encoding: .utf8)
 
         let content = try loadMeetingTranscriptContent(from: transcriptURL.path)
 
-        #expect(content == .text("Line one\nLine two"))
+        #expect(content == .text("## Speaker 1\nLine one"))
     }
 
     @Test
@@ -48,7 +48,7 @@ struct MeetingTranscriptContentTests {
         let rootURL = fileManager.temporaryDirectory
             .appendingPathComponent("Quick Meeting \(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        let transcriptURL = rootURL.appendingPathComponent("transcript file.txt")
+        let transcriptURL = rootURL.appendingPathComponent("transcript file.md")
         try "Transcript body".write(to: transcriptURL, atomically: true, encoding: .utf8)
 
         let content = try loadMeetingTranscriptContent(
@@ -63,11 +63,29 @@ struct MeetingTranscriptContentTests {
         let fileManager = FileManager.default
         let missingPath = fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            .appendingPathComponent("missing-transcript.txt")
+            .appendingPathComponent("missing-transcript.md")
             .path
 
         let content = try loadMeetingTranscriptContent(from: missingPath)
 
         #expect(content == .unavailable(message: "Transcript file is unavailable."))
+    }
+
+    @Test
+    func loadMeetingTranscriptSpeakersReturnsAvailableSpeakersWhenSidecarExists() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let writer = TranscriptionArtifactWriter(fileManager: fileManager)
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "Hello", speakerID: "speaker-1")]
+        )
+        let artifacts = try writer.writeArtifacts(for: transcript, in: rootURL)
+
+        let speakers = loadMeetingTranscriptSpeakers(from: artifacts.transcriptFileURL.path, fileManager: fileManager)
+
+        #expect(speakers == .available([TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")]))
     }
 }

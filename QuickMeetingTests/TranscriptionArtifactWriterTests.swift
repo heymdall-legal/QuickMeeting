@@ -4,7 +4,7 @@ import Testing
 
 struct TranscriptionArtifactWriterTests {
     @Test
-    func writeArtifactsPersistsTranscriptTextNextToMeetingAudio() throws {
+    func writeArtifactsPersistsStructuredAndMarkdownTranscript() throws {
         let fileManager = FileManager.default
         let meetingFolderURL = fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -12,29 +12,30 @@ struct TranscriptionArtifactWriterTests {
         defer { try? fileManager.removeItem(at: meetingFolderURL) }
 
         let writer = TranscriptionArtifactWriter(fileManager: fileManager)
-        let result = TranscriptionResult(
-            fullText: "Hello world",
-            segments: [
-                TranscriptSegment(text: "Hello"),
-                TranscriptSegment(text: "world"),
-            ]
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "Hello world", speakerID: "speaker-1")]
         )
 
-        let artifacts = try writer.writeArtifacts(for: result, in: meetingFolderURL)
+        let artifacts = try writer.writeArtifacts(for: transcript, in: meetingFolderURL)
 
-        #expect(artifacts.transcriptFileURL == meetingFolderURL.appendingPathComponent("transcript.txt"))
-        #expect(try String(contentsOf: artifacts.transcriptFileURL) == "Hello world")
+        #expect(artifacts.transcriptFileURL == meetingFolderURL.appendingPathComponent("transcript.md"))
+        #expect(artifacts.sidecarFileURL == meetingFolderURL.appendingPathComponent("transcript.json"))
+        #expect(try String(contentsOf: artifacts.transcriptFileURL, encoding: .utf8) == "## Speaker 1\nHello world")
         #expect(artifacts.previewText == "Hello world")
     }
 
     @Test
-    func previewIsTrimmedFromStructuredResultText() {
+    func previewIsTrimmedFromStructuredTranscriptText() {
         let writer = TranscriptionArtifactWriter()
-        let result = TranscriptionResult(
-            fullText: "  First sentence.\nSecond sentence.  ",
-            segments: []
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [
+                TranscriptSegment(text: "  First sentence.  ", speakerID: "speaker-1"),
+                TranscriptSegment(text: "Second sentence.", speakerID: "speaker-1"),
+            ]
         )
 
-        #expect(writer.makePreviewText(from: result) == "First sentence.\nSecond sentence.")
+        #expect(writer.makePreviewText(from: transcript) == "First sentence.\nSecond sentence.")
     }
 }

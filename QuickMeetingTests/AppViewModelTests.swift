@@ -366,12 +366,69 @@ struct AppViewModelTests {
     }
 
     @Test
+    func transcriptionProgressUpdatesNotifyObservedViews() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meetingID = UUID()
+        let viewModel = harness.makeViewModel()
+        var changeCount = 0
+
+        harness.progressCenter.startTracking(meetingID: meetingID)
+
+        let cancellable = viewModel.objectWillChange.sink {
+            changeCount += 1
+        }
+        defer { cancellable.cancel() }
+
+        harness.progressCenter.updateProgress(0.48, for: meetingID)
+
+        #expect(changeCount == 1)
+    }
+
+    @Test
     func canTranscribeMeetingReturnsTrueForCompletedMeeting() async throws {
         let harness = try AppViewModelTestHarness()
         let meeting = try harness.createCompletedMeeting()
         let viewModel = harness.makeViewModel()
 
         #expect(viewModel.canTranscribeMeeting(meeting))
+    }
+
+    @Test
+    func renameSpeakerDelegatesToTranscriptStoreAndClearsPreviousError() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meeting = try harness.createCompletedMeetingWithTranscript()
+        let viewModel = harness.makeViewModel()
+
+        try await viewModel.renameSpeaker(
+            meetingID: meeting.id,
+            speakerID: "speaker-1",
+            displayName: "Masha"
+        )
+
+        let snapshot = harness.meetingTranscriptStore.snapshot()
+        #expect(snapshot.renames.count == 1)
+        #expect(snapshot.renames.first?.speakerID == "speaker-1")
+        #expect(snapshot.renames.first?.displayName == "Masha")
+        #expect(viewModel.renameSpeakerErrorMessage == nil)
+    }
+
+    @Test
+    func renameSpeakerStoresTheFailureMessageForUI() async throws {
+        let harness = try AppViewModelTestHarness(
+            renameResults: [.failure(MeetingTranscriptActionTestError.failed)]
+        )
+        let meeting = try harness.createCompletedMeetingWithTranscript()
+        let viewModel = harness.makeViewModel()
+
+        await #expect(throws: MeetingTranscriptActionTestError.failed) {
+            try await viewModel.renameSpeaker(
+                meetingID: meeting.id,
+                speakerID: "speaker-1",
+                displayName: "Masha"
+            )
+        }
+
+        #expect(viewModel.renameSpeakerErrorMessage == "Speaker rename failed")
     }
 }
 
@@ -1173,6 +1230,7 @@ private struct AppViewModelTestHarness {
     let recordingService: RecordingServiceSpy
     let recordingPermissions: RecordingPermissionsSpy
     let transcriptionService: TranscriptionServiceSpy
+    let meetingTranscriptStore: MeetingTranscriptStoreSpy
     let progressCenter: TranscriptionProgressCenter
     let rootURL: URL
 
@@ -1180,7 +1238,8 @@ private struct AppViewModelTestHarness {
         queuedResults: [Result<Void, Error>] = [.success(())],
         stopResults: [Result<Void, Error>] = [.success(())],
         permissionResult: RecordingPermissionResult = .granted,
-        transcriptionResults: [Result<Void, Error>] = [.success(())]
+        transcriptionResults: [Result<Void, Error>] = [.success(())],
+        renameResults: [Result<Void, Error>] = [.success(())]
     ) throws {
         let schema = Schema([
             Meeting.self,
@@ -1202,6 +1261,7 @@ private struct AppViewModelTestHarness {
         )
         self.recordingPermissions = RecordingPermissionsSpy(result: permissionResult)
         self.transcriptionService = TranscriptionServiceSpy(queuedResults: transcriptionResults)
+        self.meetingTranscriptStore = MeetingTranscriptStoreSpy(queuedResults: renameResults)
         self.progressCenter = TranscriptionProgressCenter()
         self.rootURL = rootURL
     }
@@ -1233,11 +1293,29 @@ private struct AppViewModelTestHarness {
 
     func createCompletedMeeting() throws -> Meeting {
         let meeting = try createRecordedMeeting()
-        let transcriptURL = artifactsURL(for: meeting.id).meetingFolderURL.appendingPathComponent("transcript.txt")
+        let transcriptURL = artifactsURL(for: meeting.id).meetingFolderURL.appendingPathComponent("transcript.md")
         try meetingStore.completeTranscription(
             meetingID: meeting.id,
             transcriptFileURL: transcriptURL,
             transcriptPreview: "Existing transcript",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_150)
+        )
+        return try meetingStore.fetchMeeting(id: meeting.id)
+    }
+
+    func createCompletedMeetingWithTranscript() throws -> Meeting {
+        let meeting = try createRecordedMeeting()
+        let meetingFolderURL = artifactsURL(for: meeting.id).meetingFolderURL
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "Hello world", speakerID: "speaker-1")]
+        )
+        let artifacts = try TranscriptionArtifactWriter(fileManager: fileManager)
+            .writeArtifacts(for: transcript, in: meetingFolderURL)
+        try meetingStore.completeTranscription(
+            meetingID: meeting.id,
+            transcriptFileURL: artifacts.transcriptFileURL,
+            transcriptPreview: artifacts.previewText,
             updatedAt: Date(timeIntervalSince1970: 1_234_568_150)
         )
         return try meetingStore.fetchMeeting(id: meeting.id)
@@ -1250,7 +1328,8 @@ private struct AppViewModelTestHarness {
             recordingService: recordingService,
             transcriptionService: transcriptionService,
             transcriptionProgressCenter: progressCenter,
-            recordingPermissions: recordingPermissions
+            recordingPermissions: recordingPermissions,
+            meetingTranscriptStore: meetingTranscriptStore
         )
     }
 }
@@ -1284,6 +1363,17 @@ private enum TranscriptionActionTestError: LocalizedError {
         switch self {
         case .failed:
             "Transcription failed"
+        }
+    }
+}
+
+private enum MeetingTranscriptActionTestError: LocalizedError {
+    case failed
+
+    var errorDescription: String? {
+        switch self {
+        case .failed:
+            "Speaker rename failed"
         }
     }
 }
@@ -1328,6 +1418,55 @@ private final class TranscriptionServiceSpy: TranscriptionServicing {
 
 private struct TranscriptionServiceSnapshot {
     let transcribedMeetingIDs: [UUID]
+}
+
+private struct RenameAttempt {
+    let meetingFolderURL: URL
+    let speakerID: String
+    let displayName: String
+}
+
+private struct MeetingTranscriptStoreSnapshot {
+    let renames: [RenameAttempt]
+}
+
+@MainActor
+private final class MeetingTranscriptStoreSpy: MeetingTranscriptStoring {
+    private var queuedResults: [Result<Void, Error>]
+    private var renames = [RenameAttempt]()
+
+    init(queuedResults: [Result<Void, Error>] = [.success(())]) {
+        self.queuedResults = queuedResults
+    }
+
+    @discardableResult
+    func renameSpeaker(id: String, to displayName: String, in meetingFolderURL: URL) throws -> StoredTranscript {
+        renames.append(
+            RenameAttempt(
+                meetingFolderURL: meetingFolderURL,
+                speakerID: id,
+                displayName: displayName
+            )
+        )
+
+        if !queuedResults.isEmpty {
+            switch queuedResults.removeFirst() {
+            case .success:
+                break
+            case .failure(let error):
+                throw error
+            }
+        }
+
+        return StoredTranscript(
+            speakers: [TranscriptSpeaker(id: id, displayName: displayName)],
+            segments: [TranscriptSegment(text: "Hello world", speakerID: id)]
+        )
+    }
+
+    func snapshot() -> MeetingTranscriptStoreSnapshot {
+        MeetingTranscriptStoreSnapshot(renames: renames)
+    }
 }
 
 @MainActor

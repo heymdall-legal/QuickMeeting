@@ -37,6 +37,7 @@ final class TranscriptionService: TranscriptionServicing {
     private let modelStore: any WhisperModelStore
     private let modelSettingsStore: ModelSettingsStore
     private let backend: any WhisperTranscriptionBackend
+    private let diarizer: any TranscriptDiarizing
     private let progressCenter: TranscriptionProgressCenter
     private let artifactWriter: TranscriptionArtifactWriter
     private let fileManager: FileManager
@@ -48,6 +49,7 @@ final class TranscriptionService: TranscriptionServicing {
         modelStore: any WhisperModelStore,
         modelSettingsStore: ModelSettingsStore,
         backend: any WhisperTranscriptionBackend,
+        diarizer: (any TranscriptDiarizing)? = nil,
         progressCenter: TranscriptionProgressCenter,
         artifactWriter: TranscriptionArtifactWriter? = nil,
         fileManager: FileManager = .default,
@@ -57,6 +59,7 @@ final class TranscriptionService: TranscriptionServicing {
         self.modelStore = modelStore
         self.modelSettingsStore = modelSettingsStore
         self.backend = backend
+        self.diarizer = diarizer ?? DefaultTranscriptDiarizer()
         self.progressCenter = progressCenter
         self.artifactWriter = artifactWriter ?? TranscriptionArtifactWriter(fileManager: fileManager)
         self.fileManager = fileManager
@@ -111,8 +114,11 @@ final class TranscriptionService: TranscriptionServicing {
                     }
                 )
             )
+            let storedTranscript = try await diarizer.diarize(
+                TranscriptDiarizationRequest(audioFileURL: audioFileURL, result: result)
+            )
             let artifacts = try artifactWriter.writeArtifacts(
-                for: result,
+                for: storedTranscript,
                 in: audioFileURL.deletingLastPathComponent()
             )
             try meetingStore.completeTranscription(

@@ -14,9 +14,11 @@ struct MeetingDetailView: View {
     let canTranscribe: Bool
     let onTranscribe: () -> Void
     let onDelete: () -> Void
+    let onRenameSpeaker: (String, String) -> Void
 
     @StateObject private var playback = MeetingAudioPlayback()
     @State private var transcriptContent: MeetingTranscriptContent = .notAvailable
+    @State private var transcriptSpeakers = [TranscriptSpeaker]()
     @State private var isShowingDeleteConfirmation = false
     @State private var isShowingRetranscriptionConfirmation = false
 
@@ -42,6 +44,12 @@ struct MeetingDetailView: View {
         .task(id: meetingDetailReloadKey(for: meeting)) {
             transcriptContent = (try? loadMeetingTranscriptContent(from: meeting.transcriptFilePath))
                 ?? .unavailable(message: "Transcript file is unavailable.")
+            switch loadMeetingTranscriptSpeakers(from: meeting.transcriptFilePath) {
+            case .available(let speakers):
+                transcriptSpeakers = speakers
+            case .unavailable:
+                transcriptSpeakers = []
+            }
             try? playback.loadAudioFile(at: URL(fileURLWithPath: meeting.audioFilePath))
         }
         .alert(
@@ -155,6 +163,7 @@ struct MeetingDetailView: View {
             VStack(alignment: .leading, spacing: 24) {
                 detailSection
                 actionSection
+                speakersSection
                 filesSection
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -230,6 +239,31 @@ struct MeetingDetailView: View {
                         .font(.callout.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private var speakersSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Speakers")
+                .font(.headline)
+
+            if transcriptSpeakers.isEmpty {
+                Text("Speaker data unavailable")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(transcriptSpeakers) { speaker in
+                    TextField(
+                        "Speaker name",
+                        text: Binding(
+                            get: { resolvedDisplayName(for: speaker.id) },
+                            set: { newValue in
+                                updateSpeakerName(newValue, for: speaker.id)
+                            }
+                        )
+                    )
+                    .textFieldStyle(.roundedBorder)
                 }
             }
         }
@@ -319,5 +353,18 @@ struct MeetingDetailView: View {
         default:
             return "play.fill"
         }
+    }
+
+    private func resolvedDisplayName(for speakerID: String) -> String {
+        transcriptSpeakers.first(where: { $0.id == speakerID })?.displayName ?? ""
+    }
+
+    private func updateSpeakerName(_ newValue: String, for speakerID: String) {
+        guard let speakerIndex = transcriptSpeakers.firstIndex(where: { $0.id == speakerID }) else {
+            return
+        }
+
+        transcriptSpeakers[speakerIndex].displayName = newValue
+        onRenameSpeaker(speakerID, newValue)
     }
 }

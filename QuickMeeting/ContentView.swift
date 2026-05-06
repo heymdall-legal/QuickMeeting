@@ -38,6 +38,15 @@ struct ContentView: View {
                         },
                         onDelete: {
                             appViewModel.deleteMeeting(selectedMeeting)
+                        },
+                        onRenameSpeaker: { speakerID, displayName in
+                            Task {
+                                try? await appViewModel.renameSpeaker(
+                                    meetingID: selectedMeeting.id,
+                                    speakerID: speakerID,
+                                    displayName: displayName
+                                )
+                            }
                         }
                     )
                 } else {
@@ -75,6 +84,18 @@ struct ContentView: View {
                 Text(appViewModel.transcriptionErrorMessage ?? "Unknown error.")
             }
         )
+        .alert(
+            "Unable to Rename Speaker",
+            isPresented: renameSpeakerErrorIsPresented,
+            actions: {
+                Button("OK", role: .cancel) {
+                    appViewModel.clearRenameSpeakerError()
+                }
+            },
+            message: {
+                Text(appViewModel.renameSpeakerErrorMessage ?? "Unknown error.")
+            }
+        )
     }
 
     private func syncSelection() {
@@ -105,6 +126,17 @@ struct ContentView: View {
             }
         )
     }
+
+    private var renameSpeakerErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { appViewModel.renameSpeakerErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appViewModel.clearRenameSpeakerError()
+                }
+            }
+        )
+    }
 }
 
 #Preview {
@@ -126,8 +158,7 @@ private func previewModelContainer() -> ModelContainer {
     let transcriptURL = previewRootURL.appendingPathComponent("transcript.txt")
     try? FileManager.default.createDirectory(at: previewRootURL, withIntermediateDirectories: true)
     try? """
-    Weekly product sync transcript
-
+    ## Speaker 1
     We aligned on the launch checklist, reviewed open bugs, and agreed to ship the beta on Friday.
     """.write(to: transcriptURL, atomically: true, encoding: .utf8)
     let sampleMeeting = Meeting(

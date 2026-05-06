@@ -13,17 +13,20 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var recordingState: RecordingState = .idle
     @Published private(set) var deletionErrorMessage: String?
     @Published private(set) var transcriptionErrorMessage: String?
+    @Published private(set) var renameSpeakerErrorMessage: String?
 
     let transcriptionProgressCenter: TranscriptionProgressCenter
     private let meetingStore: MeetingStore
     private let meetingFileStore: MeetingFileStore
     private let recordingService: any RecordingService
     private let transcriptionService: any TranscriptionServicing
+    private let meetingTranscriptStore: any MeetingTranscriptStoring
     private let recordingPermissions: any RecordingPermissions
     private let dateProvider: () -> Date
     private let meetingIDProvider: () -> UUID
     private let meetingTitleProvider: (Date) -> String
     private var recoverableRecordingMeetingID: UUID?
+    private var cancellables = Set<AnyCancellable>()
 
     init(
         meetingStore: MeetingStore,
@@ -32,6 +35,7 @@ final class AppViewModel: ObservableObject {
         transcriptionService: (any TranscriptionServicing)? = nil,
         transcriptionProgressCenter: TranscriptionProgressCenter? = nil,
         recordingPermissions: (any RecordingPermissions)? = nil,
+        meetingTranscriptStore: (any MeetingTranscriptStoring)? = nil,
         dateProvider: @escaping () -> Date = Date.init,
         meetingIDProvider: @escaping () -> UUID = UUID.init,
         meetingTitleProvider: @escaping (Date) -> String = { _ in "Untitled Meeting" }
@@ -42,9 +46,16 @@ final class AppViewModel: ObservableObject {
         self.recordingService = recordingService
         self.transcriptionService = transcriptionService ?? NoopTranscriptionService()
         self.recordingPermissions = recordingPermissions ?? NativeRecordingPermissions()
+        self.meetingTranscriptStore = meetingTranscriptStore ?? MeetingTranscriptStore()
         self.dateProvider = dateProvider
         self.meetingIDProvider = meetingIDProvider
         self.meetingTitleProvider = meetingTitleProvider
+
+        self.transcriptionProgressCenter.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
     }
 
     func startRecording() async {
@@ -205,6 +216,31 @@ final class AppViewModel: ObservableObject {
 
     func clearTranscriptionError() {
         transcriptionErrorMessage = nil
+    }
+
+    func renameSpeaker(
+        meetingID: UUID,
+        speakerID: String,
+        displayName: String
+    ) async throws {
+        let meeting = try meetingStore.fetchMeeting(id: meetingID)
+        let meetingFolderURL = URL(fileURLWithPath: meeting.audioFilePath).deletingLastPathComponent()
+
+        do {
+            _ = try meetingTranscriptStore.renameSpeaker(
+                id: speakerID,
+                to: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
+                in: meetingFolderURL
+            )
+            renameSpeakerErrorMessage = nil
+        } catch {
+            renameSpeakerErrorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    func clearRenameSpeakerError() {
+        renameSpeakerErrorMessage = nil
     }
 
     func transcriptionProgress(for meetingID: UUID) -> Double? {
