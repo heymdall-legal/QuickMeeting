@@ -28,6 +28,30 @@ struct TranscriptionServiceTests {
     }
 
     @Test
+    func transcribeCompletedMeetingClearsAndReplacesTranscript() async throws {
+        let harness = try TranscriptionServiceHarness()
+        let meeting = try harness.createCompletedMeeting(
+            transcriptText: "Old transcript",
+            preview: "Old transcript"
+        )
+        await harness.installDefaultModel(.small)
+        await harness.backend.setResult(.success(
+            TranscriptionResult(
+                fullText: "New transcript",
+                segments: [TranscriptSegment(text: "New transcript", startTime: 0, endTime: 1)]
+            )
+        ))
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .completed)
+        #expect(reloaded.transcriptPreview == "New transcript")
+        let transcriptPath = try #require(reloaded.transcriptFilePath)
+        #expect(try String(contentsOfFile: transcriptPath) == "New transcript")
+    }
+
+    @Test
     func transcribeRejectsWhenNoDefaultInstalledModelExists() async throws {
         let harness = try TranscriptionServiceHarness()
         let meeting = try harness.createRecordedMeeting()
@@ -35,6 +59,24 @@ struct TranscriptionServiceTests {
         await #expect(throws: TranscriptionServiceError.noInstalledDefaultModel) {
             try await harness.service.transcribe(meetingID: meeting.id)
         }
+    }
+
+    @Test
+    func transcribeCompletedMeetingWithMissingModelDoesNotClearExistingTranscript() async throws {
+        let harness = try TranscriptionServiceHarness()
+        let meeting = try harness.createCompletedMeeting(
+            transcriptText: "Existing transcript",
+            preview: "Existing transcript"
+        )
+
+        await #expect(throws: TranscriptionServiceError.noInstalledDefaultModel) {
+            try await harness.service.transcribe(meetingID: meeting.id)
+        }
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .completed)
+        #expect(reloaded.transcriptPreview == "Existing transcript")
+        #expect(reloaded.transcriptFilePath != nil)
     }
 
     @Test
@@ -173,6 +215,24 @@ private struct TranscriptionServiceHarness {
             audioFileURL: artifacts.audioFileURL
         )
         try meetingStore.finishRecording(meetingID: meeting.id, endedAt: startedAt.addingTimeInterval(60))
+        return try reloadMeeting(id: meeting.id)
+    }
+
+    func createCompletedMeeting(
+        transcriptText: String,
+        preview: String
+    ) throws -> Meeting {
+        let meeting = try createRecordedMeeting()
+        let transcriptURL = meetingFileStore.rootURL
+            .appendingPathComponent(meeting.id.uuidString, isDirectory: true)
+            .appendingPathComponent("transcript.txt")
+        fileManager.createFile(atPath: transcriptURL.path, contents: Data(transcriptText.utf8))
+        try meetingStore.completeTranscription(
+            meetingID: meeting.id,
+            transcriptFileURL: transcriptURL,
+            transcriptPreview: preview,
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_150)
+        )
         return try reloadMeeting(id: meeting.id)
     }
 

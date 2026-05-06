@@ -154,6 +154,24 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func startTranscriptionClearsExistingTranscriptMetadata() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createCompletedMeeting(
+            transcriptFileName: "transcript.txt",
+            transcriptPreview: "Existing transcript"
+        )
+        let updatedAt = Date(timeIntervalSince1970: 1_234_568_250)
+
+        try harness.store.startTranscription(meetingID: meeting.id, updatedAt: updatedAt)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .transcribing)
+        #expect(reloaded.transcriptFilePath == nil)
+        #expect(reloaded.transcriptPreview == nil)
+        #expect(reloaded.updatedAt == updatedAt)
+    }
+
+    @Test
     func completeTranscriptionPersistsTranscriptPathAndPreview() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()
@@ -223,6 +241,21 @@ private struct MeetingStoreHarness {
             audioFileURL: audioFileURL
         )
         try store.finishRecording(meetingID: meeting.id, endedAt: endedAt)
+        return try reloadMeeting(id: meeting.id)
+    }
+
+    func createCompletedMeeting(
+        transcriptFileName: String,
+        transcriptPreview: String
+    ) throws -> Meeting {
+        let meeting = try createRecordedMeeting()
+        let transcriptURL = folderURL(for: meeting.id).appendingPathComponent(transcriptFileName)
+        try store.completeTranscription(
+            meetingID: meeting.id,
+            transcriptFileURL: transcriptURL,
+            transcriptPreview: transcriptPreview,
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_150)
+        )
         return try reloadMeeting(id: meeting.id)
     }
 

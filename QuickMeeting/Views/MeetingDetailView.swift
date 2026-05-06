@@ -18,6 +18,7 @@ struct MeetingDetailView: View {
     @StateObject private var playback = MeetingAudioPlayback()
     @State private var transcriptContent: MeetingTranscriptContent = .notAvailable
     @State private var isShowingDeleteConfirmation = false
+    @State private var isShowingRetranscriptionConfirmation = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,6 +52,17 @@ struct MeetingDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will remove the meeting and its recording file from this Mac.")
+        }
+        .alert(
+            "Replace Transcript?",
+            isPresented: $isShowingRetranscriptionConfirmation
+        ) {
+            Button("Replace", role: .destructive) {
+                onTranscribe()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Starting transcription again will overwrite the existing transcript for this meeting.")
         }
     }
 
@@ -99,7 +111,7 @@ struct MeetingDetailView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Button("Transcribe", action: onTranscribe)
+            Button("Transcribe", action: handleTranscribeAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canTranscribe)
         }
@@ -116,7 +128,7 @@ struct MeetingDetailView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Button("Transcribe", action: onTranscribe)
+            Button("Transcribe", action: handleTranscribeAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canTranscribe)
         }
@@ -183,7 +195,7 @@ struct MeetingDetailView: View {
             Text("Actions")
                 .font(.headline)
 
-            Button("Transcribe", action: onTranscribe)
+            Button("Transcribe", action: handleTranscribeAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canTranscribe)
 
@@ -255,6 +267,22 @@ struct MeetingDetailView: View {
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 92, alignment: .trailing)
         }
+    }
+
+    private func handleTranscribeAction() {
+        if shouldConfirmRetranscription {
+            isShowingRetranscriptionConfirmation = true
+        } else {
+            onTranscribe()
+        }
+    }
+
+    private var shouldConfirmRetranscription: Bool {
+        guard let status = try? meeting.status else {
+            return false
+        }
+
+        return status == .completed
     }
 
     private var statusText: String {

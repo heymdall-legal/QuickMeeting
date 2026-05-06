@@ -70,7 +70,7 @@ final class TranscriptionService: TranscriptionServicing {
 
         let meeting = try meetingStore.fetchMeeting(id: meetingID)
         let status = try meeting.status
-        guard status == .recorded || status == .failed else {
+        guard status == .recorded || status == .failed || status == .completed else {
             throw TranscriptionServiceError.meetingNotTranscribable
         }
 

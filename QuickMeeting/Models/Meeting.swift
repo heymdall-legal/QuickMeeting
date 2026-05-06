@@ -78,6 +78,8 @@ final class Meeting {
     }
 
     func beginTranscription(updatedAt: Date = Date()) {
+        transcriptFilePath = nil
+        transcriptPreview = nil
         statusRawValue = MeetingStatus.transcribing.rawValue
         touch(updatedAt: updatedAt)
     }

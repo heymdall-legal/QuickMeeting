@@ -364,6 +364,15 @@ struct AppViewModelTests {
 
         #expect(viewModel.transcriptionProgress(for: meetingID) == 0.48)
     }
+
+    @Test
+    func canTranscribeMeetingReturnsTrueForCompletedMeeting() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meeting = try harness.createCompletedMeeting()
+        let viewModel = harness.makeViewModel()
+
+        #expect(viewModel.canTranscribeMeeting(meeting))
+    }
 }
 
 @MainActor
@@ -1220,6 +1229,18 @@ private struct AppViewModelTestHarness {
         )
         try meetingStore.finishRecording(meetingID: meeting.id, endedAt: startedAt.addingTimeInterval(60))
         return meeting
+    }
+
+    func createCompletedMeeting() throws -> Meeting {
+        let meeting = try createRecordedMeeting()
+        let transcriptURL = artifactsURL(for: meeting.id).meetingFolderURL.appendingPathComponent("transcript.txt")
+        try meetingStore.completeTranscription(
+            meetingID: meeting.id,
+            transcriptFileURL: transcriptURL,
+            transcriptPreview: "Existing transcript",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_150)
+        )
+        return try meetingStore.fetchMeeting(id: meeting.id)
     }
 
     func makeViewModel() -> AppViewModel {

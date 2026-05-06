@@ -186,9 +186,9 @@ final class AppViewModel: ObservableObject {
         }
 
         switch status {
-        case .recorded, .failed:
+        case .recorded, .failed, .completed:
             return true
-        case .recording, .transcribing, .completed:
+        case .recording, .transcribing:
             return false
         }
     }
