@@ -120,12 +120,23 @@ struct ContentView: View {
 private func previewModelContainer() -> ModelContainer {
     let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
     let container = try! ModelContainer(for: Meeting.self, configurations: configuration)
+    let previewRootURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("QuickMeetingPreview", isDirectory: true)
+    let transcriptURL = previewRootURL.appendingPathComponent("transcript.txt")
+    try? FileManager.default.createDirectory(at: previewRootURL, withIntermediateDirectories: true)
+    try? """
+    Weekly product sync transcript
+
+    We aligned on the launch checklist, reviewed open bugs, and agreed to ship the beta on Friday.
+    """.write(to: transcriptURL, atomically: true, encoding: .utf8)
     let sampleMeeting = Meeting(
         title: "Weekly Product Sync",
         startedAt: Date(timeIntervalSince1970: 1_714_561_200),
         endedAt: Date(timeIntervalSince1970: 1_714_564_800),
-        status: .recorded,
-        audioFilePath: "/Users/preview/Library/Application Support/QuickMeeting/Meetings/sample/audio.wav",
+        status: .completed,
+        audioFilePath: previewRootURL.appendingPathComponent("audio.wav").path,
+        transcriptFilePath: transcriptURL.path,
+        transcriptPreview: "Weekly product sync transcript",
         duration: 3_600
     )
 

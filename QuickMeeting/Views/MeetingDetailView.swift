@@ -15,102 +15,31 @@ struct MeetingDetailView: View {
     let onDelete: () -> Void
 
     @StateObject private var playback = MeetingAudioPlayback()
+    @State private var transcriptContent: MeetingTranscriptContent = .notAvailable
     @State private var isShowingDeleteConfirmation = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(meeting.title.isEmpty ? "Untitled Meeting" : meeting.title)
-                    .font(.title2)
-                    .fontWeight(.semibold)
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                transcriptPane
 
-                LabeledContent("Status", value: statusText)
-                LabeledContent(
-                    "Started",
-                    value: meeting.startedAt.formatted(
-                        .dateTime.month(.wide).day().year().hour().minute()
-                    )
-                )
+                Divider()
 
-                if let endedAt = meeting.endedAt {
-                    LabeledContent(
-                        "Ended",
-                        value: endedAt.formatted(
-                            .dateTime.month(.wide).day().year().hour().minute()
-                        )
-                    )
-                }
-
-                if let duration = meeting.duration {
-                    LabeledContent("Duration", value: durationText(duration))
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Audio Playback")
-                        .font(.headline)
-
-                    Button(action: playback.togglePlayback) {
-                        Label(playbackButtonTitle, systemImage: playbackButtonSystemImage)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!playback.isPlaybackAvailable)
-
-                    Slider(
-                        value: Binding(
-                            get: { playback.currentTime },
-                            set: { playback.seek(to: $0) }
-                        ),
-                        in: 0...max(playback.duration, 0.1)
-                    )
-                    .disabled(!playback.isPlaybackAvailable)
-
-                    HStack {
-                        Text(playback.elapsedTimeText)
-                        Spacer()
-                        Text(playback.durationText)
-                    }
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-
-                    Text(playback.statusText)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Audio File")
-                        .font(.headline)
-                    Text(meeting.audioFilePath)
-                        .font(.callout.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-
-                if let transcriptFilePath = meeting.transcriptFilePath {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Transcript File")
-                            .font(.headline)
-                        Text(transcriptFilePath)
-                            .font(.callout.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                }
-
-                Button("Transcribe", action: onTranscribe)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canTranscribe)
-
-                Button("Delete Meeting", role: .destructive) {
-                    isShowingDeleteConfirmation = true
-                }
-                .disabled(!canDelete)
+                sidebar
+                    .frame(width: 300)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(24)
+
+            Divider()
+
+            playbackBar
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(.background)
         }
         .navigationTitle(meeting.title.isEmpty ? "Untitled Meeting" : meeting.title)
-        .task(id: meeting.id) {
+        .task(id: meetingDetailReloadKey(for: meeting)) {
+            transcriptContent = (try? loadMeetingTranscriptContent(from: meeting.transcriptFilePath))
+                ?? .unavailable(message: "Transcript file is unavailable.")
             try? playback.loadAudioFile(at: URL(fileURLWithPath: meeting.audioFilePath))
         }
         .alert(
@@ -121,6 +50,179 @@ struct MeetingDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will remove the meeting and its recording file from this Mac.")
+        }
+    }
+
+    private var transcriptPane: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            switch transcriptContent {
+            case .text(let transcript):
+                ScrollView {
+                    Text(transcript)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .lineSpacing(6)
+                }
+            case .notAvailable:
+                transcriptEmptyState
+            case .unavailable(let message):
+                transcriptUnavailableState(message: message)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(24)
+    }
+
+    private var transcriptEmptyState: some View {
+        VStack(spacing: 12) {
+            Text("Not transcribed yet")
+                .font(.title3)
+                .fontWeight(.semibold)
+
+            Text("Meeting audio is available and can be transcribed when you're ready.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            Button("Transcribe", action: onTranscribe)
+                .buttonStyle(.borderedProminent)
+                .disabled(!canTranscribe)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func transcriptUnavailableState(message: String) -> some View {
+        VStack(spacing: 12) {
+            Text("Transcript unavailable")
+                .font(.title3)
+                .fontWeight(.semibold)
+
+            Text(message)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            Button("Transcribe", action: onTranscribe)
+                .buttonStyle(.borderedProminent)
+                .disabled(!canTranscribe)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var sidebar: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                detailSection
+                actionSection
+                filesSection
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+        }
+    }
+
+    private var detailSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Details")
+                .font(.headline)
+
+            LabeledContent("Status", value: statusText)
+            LabeledContent(
+                "Started",
+                value: meeting.startedAt.formatted(
+                    .dateTime.month(.wide).day().year().hour().minute()
+                )
+            )
+
+            if let endedAt = meeting.endedAt {
+                LabeledContent(
+                    "Ended",
+                    value: endedAt.formatted(
+                        .dateTime.month(.wide).day().year().hour().minute()
+                    )
+                )
+            }
+
+            if let duration = meeting.duration {
+                LabeledContent("Duration", value: durationText(duration))
+            }
+        }
+    }
+
+    private var actionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Actions")
+                .font(.headline)
+
+            Button("Transcribe", action: onTranscribe)
+                .buttonStyle(.borderedProminent)
+                .disabled(!canTranscribe)
+
+            Button("Delete Meeting", role: .destructive) {
+                isShowingDeleteConfirmation = true
+            }
+            .disabled(!canDelete)
+        }
+    }
+
+    private var filesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Files")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Audio File")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Text(meeting.audioFilePath)
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            if let transcriptFilePath = meeting.transcriptFilePath {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Transcript File")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Text(transcriptFilePath)
+                        .font(.callout.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private var playbackBar: some View {
+        HStack(spacing: 16) {
+            Button(action: playback.togglePlayback) {
+                Image(systemName: playbackButtonSystemImage)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!playback.isPlaybackAvailable)
+            .help(playback.statusText)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Slider(
+                    value: Binding(
+                        get: { playback.currentTime },
+                        set: { playback.seek(to: $0) }
+                    ),
+                    in: 0...max(playback.duration, 0.1)
+                )
+                .disabled(!playback.isPlaybackAvailable)
+
+                if !playback.isPlaybackAvailable {
+                    Text(playback.statusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text("\(playback.elapsedTimeText) / \(playback.durationText)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 92, alignment: .trailing)
         }
     }
 
@@ -149,15 +251,6 @@ struct MeetingDetailView: View {
         formatter.unitsStyle = .abbreviated
         formatter.zeroFormattingBehavior = .dropLeading
         return formatter.string(from: duration) ?? "\(Int(duration)) sec"
-    }
-
-    private var playbackButtonTitle: String {
-        switch playback.state {
-        case .playing:
-            return "Pause"
-        default:
-            return "Play"
-        }
     }
 
     private var playbackButtonSystemImage: String {
