@@ -29,6 +29,7 @@ struct ContentView: View {
                     MeetingDetailView(
                         meeting: selectedMeeting,
                         transcriptionProgress: appViewModel.transcriptionProgress(for: selectedMeeting.id),
+                        diarizationProgress: appViewModel.diarizationProgress(for: selectedMeeting.id),
                         canDelete: appViewModel.canDeleteMeeting(selectedMeeting),
                         canTranscribe: appViewModel.canTranscribeMeeting(selectedMeeting),
                         onTranscribe: {

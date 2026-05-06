@@ -247,6 +247,10 @@ final class AppViewModel: ObservableObject {
         transcriptionProgressCenter.progress(for: meetingID)
     }
 
+    func diarizationProgress(for meetingID: UUID) -> Double? {
+        transcriptionProgressCenter.diarizationProgress(for: meetingID)
+    }
+
     private func rollbackFailedRecordingStart(
         meeting: Meeting?,
         artifacts: MeetingArtifacts?

@@ -43,6 +43,7 @@ final class TranscriptionService: TranscriptionServicing {
     private let fileManager: FileManager
     private let dateProvider: () -> Date
     private var activeMeetingID: UUID?
+    private var diarizationSimulationTask: Task<Void, Never>?
 
     init(
         meetingStore: MeetingStore,
@@ -97,6 +98,8 @@ final class TranscriptionService: TranscriptionServicing {
         progressCenter.startTracking(meetingID: meetingID)
 
         defer {
+            diarizationSimulationTask?.cancel()
+            diarizationSimulationTask = nil
             progressCenter.finishTracking(meetingID: meetingID)
             activeMeetingID = nil
         }
@@ -114,9 +117,30 @@ final class TranscriptionService: TranscriptionServicing {
                     }
                 )
             )
+            progressCenter.startDiarizationTracking(meetingID: meetingID)
+
+            diarizationSimulationTask = Task { [progressCenter] in
+                var elapsed: Double = 0
+                let totalDuration: Double = 30
+                let tickInterval: Double = 0.5
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(tickInterval))
+                    guard !Task.isCancelled else { break }
+                    elapsed += tickInterval
+                    let simulated = min(0.95, 1.0 - exp(-3.0 * elapsed / totalDuration))
+                    await MainActor.run {
+                        progressCenter.updateDiarizationProgress(simulated, for: meetingID)
+                    }
+                }
+            }
+
             let storedTranscript = try await diarizer.diarize(
                 TranscriptDiarizationRequest(audioFileURL: audioFileURL, result: result)
             )
+
+            diarizationSimulationTask?.cancel()
+            diarizationSimulationTask = nil
+            progressCenter.updateDiarizationProgress(1.0, for: meetingID)
             let artifacts = try artifactWriter.writeArtifacts(
                 for: storedTranscript,
                 in: audioFileURL.deletingLastPathComponent()

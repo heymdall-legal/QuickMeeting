@@ -37,4 +37,40 @@ struct TranscriptionProgressCenterTests {
 
         #expect(center.progress(for: meetingID) == nil)
     }
+
+    @Test
+    func startDiarizationTrackingRegistersZeroProgress() {
+        let meetingID = UUID()
+
+        let center = TranscriptionProgressCenter()
+        center.startDiarizationTracking(meetingID: meetingID)
+
+        #expect(center.diarizationProgress(for: meetingID) == 0)
+    }
+
+    @Test
+    func updateDiarizationProgressClampsAndIgnoresRegressions() {
+        let meetingID = UUID()
+
+        let center = TranscriptionProgressCenter()
+        center.startDiarizationTracking(meetingID: meetingID)
+        center.updateDiarizationProgress(0.5, for: meetingID)
+        center.updateDiarizationProgress(1.8, for: meetingID)
+        center.updateDiarizationProgress(0.2, for: meetingID)
+
+        #expect(center.diarizationProgress(for: meetingID) == 1)
+    }
+
+    @Test
+    func finishTrackingClearsDiarizationProgress() {
+        let meetingID = UUID()
+
+        let center = TranscriptionProgressCenter()
+        center.startTracking(meetingID: meetingID)
+        center.startDiarizationTracking(meetingID: meetingID)
+        center.finishTracking(meetingID: meetingID)
+
+        #expect(center.progress(for: meetingID) == nil)
+        #expect(center.diarizationProgress(for: meetingID) == nil)
+    }
 }
