@@ -114,7 +114,8 @@ private actor FakeWhisperModelStore: WhisperModelStore {
             return nil
         }
 
-        return URL(fileURLWithPath: "/tmp/\(model.argmaxModelID)")
+        let argmaxModelID = await model.argmaxModelID
+        return URL(fileURLWithPath: "/tmp/\(argmaxModelID)")
     }
 
     func downloadModel(

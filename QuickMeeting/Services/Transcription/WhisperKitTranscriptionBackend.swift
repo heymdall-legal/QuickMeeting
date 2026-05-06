@@ -26,7 +26,7 @@ struct WhisperKitTranscriptionBackend: WhisperTranscriptionBackend {
             download: false
         )
 
-        let results = try await whisperKit.transcribe(audioPath: request.audioFileURL.path)
+        let results = try await whisperKit.transcribe(audioPath: request.audioFileURL.path, decodeOptions: DecodingOptions(language: "RU"))
         let text = results
             .map(\.text)
             .joined(separator: "\n")

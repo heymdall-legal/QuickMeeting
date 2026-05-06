@@ -17,6 +17,7 @@ struct TranscriptionModel: Identifiable, Equatable, Sendable {
     let id: TranscriptionModelID
     let displayName: String
     let argmaxModelID: String
+    let tokenizerRepositoryID: String
     let summary: String
     let sortOrder: Int
 }

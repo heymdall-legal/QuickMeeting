@@ -13,6 +13,7 @@ enum TranscriptionModelCatalog {
             id: .tiny,
             displayName: "Tiny",
             argmaxModelID: "tiny",
+            tokenizerRepositoryID: "openai/whisper-tiny",
             summary: "Fastest download and best for debugging or quick tests.",
             sortOrder: 0
         ),
@@ -20,6 +21,7 @@ enum TranscriptionModelCatalog {
             id: .small,
             displayName: "Small",
             argmaxModelID: "small",
+            tokenizerRepositoryID: "openai/whisper-small",
             summary: "Balanced speed and accuracy for everyday use.",
             sortOrder: 1
         ),
@@ -27,6 +29,7 @@ enum TranscriptionModelCatalog {
             id: .largeV3,
             displayName: "Large v3",
             argmaxModelID: "large-v3-v20240930_626MB",
+            tokenizerRepositoryID: "openai/whisper-large-v3",
             summary: "Highest accuracy, largest download, best for production-quality transcription.",
             sortOrder: 2
         ),

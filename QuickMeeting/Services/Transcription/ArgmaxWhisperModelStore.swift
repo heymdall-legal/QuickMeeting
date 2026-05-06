@@ -60,12 +60,14 @@ struct ArgmaxWhisperModelStore: WhisperModelStore {
         _ model: TranscriptionModel,
         onProgress: @escaping @Sendable (Double?) -> Void
     ) async throws {
-        _ = try await WhisperKit.download(
+        try await downloadModelBundle(
             variant: model.argmaxModelID,
-            downloadBase: downloadBaseURL,
-            progressCallback: { progress in
-                onProgress(progress.fractionCompleted)
-            }
+            downloadBaseURL: downloadBaseURL,
+            onProgress: onProgress
+        )
+        try await downloadTokenizerBundle(
+            repositoryID: model.tokenizerRepositoryID,
+            downloadBaseURL: downloadBaseURL
         )
     }
 
@@ -139,5 +141,29 @@ struct ArgmaxWhisperModelStore: WhisperModelStore {
         return applicationSupportURL
             .appendingPathComponent("QuickMeeting", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
+    }
+
+    private func downloadModelBundle(
+        variant: String,
+        downloadBaseURL: URL,
+        onProgress: @escaping @Sendable (Double?) -> Void
+    ) async throws {
+        _ = try await WhisperKit.download(
+            variant: variant,
+            downloadBase: downloadBaseURL,
+            progressCallback: { progress in
+                onProgress(progress.fractionCompleted)
+            }
+        )
+    }
+
+    private func downloadTokenizerBundle(
+        repositoryID: String,
+        downloadBaseURL: URL
+    ) async throws {
+        _ = try await AutoTokenizerWrapper.from(
+            pretrained: repositoryID,
+            hubApi: HubApiWrapper(downloadBase: downloadBaseURL)
+        )
     }
 }
