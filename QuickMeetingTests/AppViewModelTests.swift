@@ -407,6 +407,7 @@ struct AppViewModelTests {
 
         let snapshot = harness.meetingTranscriptStore.snapshot()
         #expect(snapshot.renames.count == 1)
+        #expect(snapshot.renames.first?.meetingID == meeting.id)
         #expect(snapshot.renames.first?.speakerID == "speaker-1")
         #expect(snapshot.renames.first?.displayName == "Masha")
         #expect(viewModel.renameSpeakerErrorMessage == nil)
@@ -1421,7 +1422,7 @@ private struct TranscriptionServiceSnapshot {
 }
 
 private struct RenameAttempt {
-    let meetingFolderURL: URL
+    let meetingID: UUID
     let speakerID: String
     let displayName: String
 }
@@ -1441,9 +1442,14 @@ private final class MeetingTranscriptStoreSpy: MeetingTranscriptStoring {
 
     @discardableResult
     func renameSpeaker(id: String, to displayName: String, in meetingFolderURL: URL) throws -> StoredTranscript {
+        try renameSpeaker(id: id, to: displayName, in: UUID())
+    }
+
+    @discardableResult
+    func renameSpeaker(id: String, to displayName: String, in meetingID: UUID) throws -> StoredTranscript {
         renames.append(
             RenameAttempt(
-                meetingFolderURL: meetingFolderURL,
+                meetingID: meetingID,
                 speakerID: id,
                 displayName: displayName
             )

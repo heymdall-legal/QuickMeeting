@@ -9,6 +9,7 @@ import Foundation
 
 protocol MeetingTranscriptStoring: Sendable {
     func renameSpeaker(id: String, to displayName: String, in meetingFolderURL: URL) throws -> StoredTranscript
+    func renameSpeaker(id: String, to displayName: String, in meetingID: UUID) throws -> StoredTranscript
 }
 
 enum MeetingTranscriptStoreError: LocalizedError, Equatable {
@@ -28,14 +29,20 @@ enum MeetingTranscriptStoreError: LocalizedError, Equatable {
 struct MeetingTranscriptStore: MeetingTranscriptStoring {
     let fileManager: FileManager
     let artifactWriter: TranscriptionArtifactWriter
+    let meetingStore: MeetingStore?
+    let dateProvider: () -> Date
     private let decoder = JSONDecoder()
 
     init(
         fileManager: FileManager = .default,
-        artifactWriter: TranscriptionArtifactWriter = TranscriptionArtifactWriter()
+        artifactWriter: TranscriptionArtifactWriter = TranscriptionArtifactWriter(),
+        meetingStore: MeetingStore? = nil,
+        dateProvider: @escaping () -> Date = Date.init
     ) {
         self.fileManager = fileManager
         self.artifactWriter = artifactWriter
+        self.meetingStore = meetingStore
+        self.dateProvider = dateProvider
     }
 
     func loadTranscript(in meetingFolderURL: URL) throws -> StoredTranscript {
@@ -58,5 +65,32 @@ struct MeetingTranscriptStore: MeetingTranscriptStoring {
         transcript.speakers[speakerIndex].displayName = displayName
         _ = try artifactWriter.writeArtifacts(for: transcript, in: meetingFolderURL)
         return transcript
+    }
+
+    func loadTranscript(meetingID: UUID) throws -> StoredTranscript {
+        guard let meetingStore else {
+            throw MeetingTranscriptStoreError.sidecarMissing
+        }
+
+        let meeting = try meetingStore.fetchMeeting(id: meetingID)
+        guard let transcript = meeting.storedTranscript else {
+            throw MeetingTranscriptStoreError.sidecarMissing
+        }
+
+        return transcript
+    }
+
+    @discardableResult
+    func renameSpeaker(id: String, to displayName: String, in meetingID: UUID) throws -> StoredTranscript {
+        guard let meetingStore else {
+            throw MeetingTranscriptStoreError.sidecarMissing
+        }
+
+        return try meetingStore.renameSpeaker(
+            meetingID: meetingID,
+            speakerID: id,
+            displayName: displayName,
+            updatedAt: dateProvider()
+        )
     }
 }

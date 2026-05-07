@@ -43,9 +43,9 @@ struct MeetingDetailView: View {
         }
         .navigationTitle(meeting.title.isEmpty ? "Untitled Meeting" : meeting.title)
         .task(id: meetingTranscriptReloadKey(for: meeting)) {
-            transcriptContent = (try? loadMeetingTranscriptContent(from: meeting.transcriptFilePath))
-                ?? .unavailable(message: "Transcript file is unavailable.")
-            switch loadMeetingTranscriptSpeakers(from: meeting.transcriptFilePath) {
+            let transcript = meeting.storedTranscript
+            transcriptContent = loadMeetingTranscriptContent(from: transcript)
+            switch loadMeetingTranscriptSpeakers(from: transcript) {
             case .available(let speakers):
                 transcriptSpeakers = speakers
             case .unavailable:
@@ -86,7 +86,7 @@ struct MeetingDetailView: View {
                 transcriptionProgressState(progress: progress)
             case .diarizing(let progress):
                 diarizationProgressState(progress: progress)
-            case .transcriptFile:
+            case .transcript:
                 switch transcriptContent {
                 case .text(let transcript):
                     TranscriptTextView(text: transcript)
@@ -104,7 +104,7 @@ struct MeetingDetailView: View {
     private var currentTranscriptPaneState: TranscriptPaneState {
         transcriptPaneState(
             meetingStatus: (try? meeting.status) ?? .recorded,
-            transcriptFilePath: meeting.transcriptFilePath,
+            hasTranscript: meeting.storedTranscript != nil,
             progress: transcriptionProgress,
             diarizationProgress: diarizationProgress
         )
@@ -244,18 +244,6 @@ struct MeetingDetailView: View {
                     .font(.callout.monospaced())
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
-            }
-
-            if let transcriptFilePath = meeting.transcriptFilePath {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Transcript File")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    Text(transcriptFilePath)
-                        .font(.callout.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
             }
         }
     }

@@ -223,14 +223,11 @@ final class AppViewModel: ObservableObject {
         speakerID: String,
         displayName: String
     ) async throws {
-        let meeting = try meetingStore.fetchMeeting(id: meetingID)
-        let meetingFolderURL = URL(fileURLWithPath: meeting.audioFilePath).deletingLastPathComponent()
-
         do {
             _ = try meetingTranscriptStore.renameSpeaker(
                 id: speakerID,
                 to: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
-                in: meetingFolderURL
+                in: meetingID
             )
             renameSpeakerErrorMessage = nil
         } catch {

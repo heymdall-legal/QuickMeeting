@@ -11,12 +11,12 @@ enum TranscriptPaneState: Equatable {
     case empty
     case transcribing(progress: Double)
     case diarizing(progress: Double)
-    case transcriptFile(String)
+    case transcript
 }
 
 func transcriptPaneState(
     meetingStatus: MeetingStatus,
-    transcriptFilePath: String?,
+    hasTranscript: Bool,
     progress: Double?,
     diarizationProgress: Double?
 ) -> TranscriptPaneState {
@@ -29,8 +29,8 @@ func transcriptPaneState(
         }
     }
 
-    if let transcriptFilePath {
-        return .transcriptFile(transcriptFilePath)
+    if hasTranscript {
+        return .transcript
     }
 
     return .empty

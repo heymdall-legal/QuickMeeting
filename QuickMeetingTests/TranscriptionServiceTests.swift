@@ -6,7 +6,7 @@ import Testing
 @MainActor
 struct TranscriptionServiceTests {
     @Test
-    func transcribeRecordedMeetingWritesMarkdownTranscriptAndCompletesMeeting() async throws {
+    func transcribeRecordedMeetingPersistsStructuredTranscriptAndCompletesMeeting() async throws {
         let harness = try TranscriptionServiceHarness()
         let meeting = try harness.createRecordedMeeting()
         await harness.installDefaultModel(.small)
@@ -28,9 +28,13 @@ struct TranscriptionServiceTests {
         let reloaded = try harness.reloadMeeting(id: meeting.id)
         #expect(try reloaded.status == .completed)
         #expect(reloaded.transcriptPreview == "Transcript body")
-        #expect(reloaded.transcriptFilePath?.hasSuffix("/transcript.md") == true)
-        let transcriptPath = try #require(reloaded.transcriptFilePath)
-        #expect(try String(contentsOfFile: transcriptPath, encoding: .utf8) == "## Speaker 1\nTranscript body")
+        #expect(reloaded.transcriptSpeakers.map(\.displayName) == ["Speaker 1"])
+        #expect(reloaded.transcriptSegments.map(\.text) == ["Transcript body"])
+        #expect(
+            !harness.fileManager.fileExists(
+                atPath: harness.transcriptMarkdownURL(for: meeting.id).path
+            )
+        )
         let diarizerSnapshot = await harness.diarizer.snapshot()
         #expect(diarizerSnapshot.requests.count == 1)
     }
@@ -39,7 +43,10 @@ struct TranscriptionServiceTests {
     func transcribeCompletedMeetingClearsAndReplacesTranscript() async throws {
         let harness = try TranscriptionServiceHarness()
         let meeting = try harness.createCompletedMeeting(
-            transcriptText: "Old transcript",
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "Old transcript", speakerID: "speaker-1")]
+            ),
             preview: "Old transcript"
         )
         await harness.installDefaultModel(.small)
@@ -61,8 +68,12 @@ struct TranscriptionServiceTests {
         let reloaded = try harness.reloadMeeting(id: meeting.id)
         #expect(try reloaded.status == .completed)
         #expect(reloaded.transcriptPreview == "New transcript")
-        let transcriptPath = try #require(reloaded.transcriptFilePath)
-        #expect(try String(contentsOfFile: transcriptPath, encoding: .utf8) == "## Speaker 1\nNew transcript")
+        #expect(reloaded.transcriptSegments.map(\.text) == ["New transcript"])
+        #expect(
+            !harness.fileManager.fileExists(
+                atPath: harness.transcriptMarkdownURL(for: meeting.id).path
+            )
+        )
     }
 
     @Test
@@ -79,7 +90,10 @@ struct TranscriptionServiceTests {
     func transcribeCompletedMeetingWithMissingModelDoesNotClearExistingTranscript() async throws {
         let harness = try TranscriptionServiceHarness()
         let meeting = try harness.createCompletedMeeting(
-            transcriptText: "Existing transcript",
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "Existing transcript", speakerID: "speaker-1")]
+            ),
             preview: "Existing transcript"
         )
 
@@ -90,7 +104,7 @@ struct TranscriptionServiceTests {
         let reloaded = try harness.reloadMeeting(id: meeting.id)
         #expect(try reloaded.status == .completed)
         #expect(reloaded.transcriptPreview == "Existing transcript")
-        #expect(reloaded.transcriptFilePath != nil)
+        #expect(reloaded.transcriptSegments.map(\.text) == ["Existing transcript"])
     }
 
     @Test
@@ -238,6 +252,8 @@ private struct TranscriptionServiceHarness {
     init() throws {
         let schema = Schema([
             Meeting.self,
+            PersistedTranscriptSpeaker.self,
+            PersistedTranscriptSegment.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         container = try ModelContainer(for: schema, configurations: [configuration])
@@ -259,7 +275,6 @@ private struct TranscriptionServiceHarness {
             backend: backend,
             diarizer: diarizer,
             progressCenter: progressCenter,
-            artifactWriter: TranscriptionArtifactWriter(fileManager: fileManager),
             fileManager: fileManager,
             dateProvider: Date.init
         )
@@ -281,17 +296,13 @@ private struct TranscriptionServiceHarness {
     }
 
     func createCompletedMeeting(
-        transcriptText: String,
+        transcript: StoredTranscript,
         preview: String
     ) throws -> Meeting {
         let meeting = try createRecordedMeeting()
-        let transcriptURL = meetingFileStore.rootURL
-            .appendingPathComponent(meeting.id.uuidString, isDirectory: true)
-            .appendingPathComponent("transcript.md")
-        fileManager.createFile(atPath: transcriptURL.path, contents: Data(transcriptText.utf8))
         try meetingStore.completeTranscription(
             meetingID: meeting.id,
-            transcriptFileURL: transcriptURL,
+            transcript: transcript,
             transcriptPreview: preview,
             updatedAt: Date(timeIntervalSince1970: 1_234_568_150)
         )
@@ -320,6 +331,12 @@ private struct TranscriptionServiceHarness {
         let resolvedModelFolderURL = modelFolderURL ?? fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         await modelStore.setResolvedModelURL(resolvedModelFolderURL, for: modelID)
+    }
+
+    func transcriptMarkdownURL(for meetingID: UUID) -> URL {
+        meetingFileStore.rootURL
+            .appendingPathComponent(meetingID.uuidString, isDirectory: true)
+            .appendingPathComponent("transcript.md")
     }
 }
 

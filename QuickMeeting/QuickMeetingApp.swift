@@ -18,6 +18,8 @@ struct QuickMeetingApp: App {
     init() {
         let schema = Schema([
             Meeting.self,
+            PersistedTranscriptSpeaker.self,
+            PersistedTranscriptSegment.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -47,13 +49,15 @@ struct QuickMeetingApp: App {
                 modelStore: modelStore,
                 settingsStore: modelSettingsStore
             )
+            let meetingTranscriptStore = MeetingTranscriptStore(meetingStore: meetingStore)
             _appViewModel = StateObject(
                 wrappedValue: AppViewModel(
                     meetingStore: meetingStore,
                     meetingFileStore: meetingFileStore,
                     recordingService: recordingService,
                     transcriptionService: transcriptionService,
-                    transcriptionProgressCenter: transcriptionProgressCenter
+                    transcriptionProgressCenter: transcriptionProgressCenter,
+                    meetingTranscriptStore: meetingTranscriptStore
                 )
             )
             _modelsSettingsViewModel = StateObject(

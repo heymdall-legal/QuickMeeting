@@ -109,6 +109,48 @@ struct MeetingStore {
         try modelContext.save()
     }
 
+    func completeTranscription(
+        meetingID: UUID,
+        transcript: StoredTranscript,
+        transcriptPreview: String,
+        updatedAt: Date
+    ) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.completeTranscription(
+            transcript: transcript,
+            transcriptPreview: transcriptPreview,
+            updatedAt: updatedAt
+        )
+        try modelContext.save()
+    }
+
+    @discardableResult
+    func renameSpeaker(
+        meetingID: UUID,
+        speakerID: String,
+        displayName: String,
+        updatedAt: Date
+    ) throws -> StoredTranscript {
+        let meeting = try fetchMeeting(id: meetingID)
+        guard meeting.storedTranscript != nil else {
+            throw MeetingTranscriptStoreError.sidecarMissing
+        }
+
+        guard let speaker = meeting.transcriptSpeakers.first(where: { $0.id == speakerID }) else {
+            throw MeetingTranscriptStoreError.speakerNotFound
+        }
+
+        speaker.displayName = displayName
+        meeting.setStatus(try meeting.status, updatedAt: updatedAt)
+        try modelContext.save()
+
+        guard let transcript = meeting.storedTranscript else {
+            throw MeetingTranscriptStoreError.sidecarMissing
+        }
+
+        return transcript
+    }
+
     func failTranscription(meetingID: UUID, updatedAt: Date) throws {
         let meeting = try fetchMeeting(id: meetingID)
         meeting.failTranscription(updatedAt: updatedAt)

@@ -17,7 +17,8 @@ enum MeetingTranscriptSpeakersContent: Equatable {
 func meetingTranscriptReloadKey(for meeting: Meeting) -> String {
     [
         meeting.id.uuidString,
-        meeting.transcriptFilePath ?? "",
+        String(meeting.transcriptSpeakers.count),
+        String(meeting.transcriptSegments.count),
         String(meeting.updatedAt.timeIntervalSinceReferenceDate)
     ].joined(separator: "|")
 }
@@ -29,73 +30,25 @@ func meetingAudioReloadKey(for meeting: Meeting) -> String {
     ].joined(separator: "|")
 }
 
-func loadMeetingTranscriptContent(
-    from transcriptFilePath: String?,
-    fileManager: FileManager = .default
-) throws -> MeetingTranscriptContent {
-    guard let transcriptFilePath else {
+func loadMeetingTranscriptContent(from transcript: StoredTranscript?) -> MeetingTranscriptContent {
+    guard let transcript else {
         return .notAvailable
     }
 
-    guard let resolvedTranscriptPath = resolveTranscriptFilePath(
-        transcriptFilePath,
-        fileManager: fileManager
-    ) else {
-        return .unavailable(message: "Transcript file is unavailable.")
+    let markdown = TranscriptionArtifactWriter().renderMarkdown(from: transcript)
+    guard !markdown.isEmpty else {
+        return .notAvailable
     }
 
-    do {
-        let transcriptText = try String(contentsOfFile: resolvedTranscriptPath, encoding: .utf8)
-        return .text(transcriptText)
-    } catch {
-        return .unavailable(message: "Transcript file is unavailable.")
-    }
+    return .text(markdown)
 }
 
-func loadMeetingTranscriptSpeakers(
-    from transcriptFilePath: String?,
-    fileManager: FileManager = .default
-) -> MeetingTranscriptSpeakersContent {
-    guard let transcriptFilePath,
-          let resolvedTranscriptPath = resolveTranscriptFilePath(
-              transcriptFilePath,
-              fileManager: fileManager
-          )
-    else {
+func loadMeetingTranscriptSpeakers(from transcript: StoredTranscript?) -> MeetingTranscriptSpeakersContent {
+    guard let transcript else {
         return .unavailable
     }
 
-    let transcriptURL = URL(fileURLWithPath: resolvedTranscriptPath)
-    let meetingFolderURL = transcriptURL.deletingLastPathComponent()
-    let transcriptStore = MeetingTranscriptStore(fileManager: fileManager)
-
-    do {
-        let transcript = try transcriptStore.loadTranscript(in: meetingFolderURL)
-        return .available(transcript.speakers)
-    } catch {
-        return .unavailable
-    }
-}
-
-private func resolveTranscriptFilePath(
-    _ transcriptFilePath: String,
-    fileManager: FileManager
-) -> String? {
-    if fileManager.fileExists(atPath: transcriptFilePath) {
-        return transcriptFilePath
-    }
-
-    let decodedPath = URL(fileURLWithPath: transcriptFilePath).path(percentEncoded: false)
-    if fileManager.fileExists(atPath: decodedPath) {
-        return decodedPath
-    }
-
-    if let removingPercentEncoding = transcriptFilePath.removingPercentEncoding,
-       fileManager.fileExists(atPath: removingPercentEncoding) {
-        return removingPercentEncoding
-    }
-
-    return nil
+    return .available(transcript.speakers)
 }
 
 #if canImport(AppKit)

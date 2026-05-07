@@ -8,6 +8,8 @@ struct MeetingStoreTests {
     func createMeetingPersistsValidatedDefaultsAcrossFreshContext() throws {
         let schema = Schema([
             Meeting.self,
+            PersistedTranscriptSpeaker.self,
+            PersistedTranscriptSegment.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
@@ -31,8 +33,9 @@ struct MeetingStoreTests {
         #expect(meeting.endedAt == nil)
         #expect(meetingStatus == .recording)
         #expect(meeting.audioFilePath == audioFileURL.standardizedFileURL.path())
-        #expect(meeting.transcriptFilePath == nil)
         #expect(meeting.transcriptPreview == nil)
+        #expect(meeting.transcriptSpeakers.isEmpty)
+        #expect(meeting.transcriptSegments.isEmpty)
         #expect(meeting.duration == nil)
         #expect(meeting.calendarEventID == nil)
         #expect(meeting.id != UUID())
@@ -53,6 +56,8 @@ struct MeetingStoreTests {
     func createMeetingRejectsAudioOutsideFolder() throws {
         let schema = Schema([
             Meeting.self,
+            PersistedTranscriptSpeaker.self,
+            PersistedTranscriptSegment.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
@@ -76,6 +81,8 @@ struct MeetingStoreTests {
     func finishRecordingPersistsEndedMeetingState() throws {
         let schema = Schema([
             Meeting.self,
+            PersistedTranscriptSpeaker.self,
+            PersistedTranscriptSegment.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
@@ -120,6 +127,8 @@ struct MeetingStoreTests {
     func createMeetingPersistsUnescapedFilesystemAudioPath() throws {
         let schema = Schema([
             Meeting.self,
+            PersistedTranscriptSpeaker.self,
+            PersistedTranscriptSegment.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
@@ -157,7 +166,10 @@ struct MeetingStoreTests {
     func startTranscriptionClearsExistingTranscriptMetadata() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createCompletedMeeting(
-            transcriptFileName: "transcript.txt",
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "Existing transcript", speakerID: "speaker-1")]
+            ),
             transcriptPreview: "Existing transcript"
         )
         let updatedAt = Date(timeIntervalSince1970: 1_234_568_250)
@@ -166,29 +178,34 @@ struct MeetingStoreTests {
 
         let reloaded = try harness.reloadMeeting(id: meeting.id)
         #expect(try reloaded.status == .transcribing)
-        #expect(reloaded.transcriptFilePath == nil)
         #expect(reloaded.transcriptPreview == nil)
+        #expect(reloaded.transcriptSpeakers.isEmpty)
+        #expect(reloaded.transcriptSegments.isEmpty)
         #expect(reloaded.updatedAt == updatedAt)
     }
 
     @Test
-    func completeTranscriptionPersistsTranscriptPathAndPreview() throws {
+    func completeTranscriptionPersistsStructuredTranscriptDataAndPreview() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()
-        let transcriptURL = harness.folderURL(for: meeting.id).appendingPathComponent("transcript.txt")
         let updatedAt = Date(timeIntervalSince1970: 1_234_568_100)
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "First line of transcript", startTime: 0, endTime: 1, speakerID: "speaker-1")]
+        )
 
         try harness.store.completeTranscription(
             meetingID: meeting.id,
-            transcriptFileURL: transcriptURL,
+            transcript: transcript,
             transcriptPreview: "First line of transcript",
             updatedAt: updatedAt
         )
 
         let reloaded = try harness.reloadMeeting(id: meeting.id)
         #expect(try reloaded.status == .completed)
-        #expect(reloaded.transcriptFilePath == transcriptURL.standardizedFileURL.path())
         #expect(reloaded.transcriptPreview == "First line of transcript")
+        #expect(reloaded.transcriptSpeakers.map(\.displayName) == ["Speaker 1"])
+        #expect(reloaded.transcriptSegments.map(\.text) == ["First line of transcript"])
         #expect(reloaded.updatedAt == updatedAt)
     }
 
@@ -196,11 +213,14 @@ struct MeetingStoreTests {
     func failTranscriptionMarksMeetingAsFailedWithoutRemovingTranscriptMetadata() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()
-        let transcriptURL = harness.folderURL(for: meeting.id).appendingPathComponent("transcript.txt")
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "Existing transcript", speakerID: "speaker-1")]
+        )
 
         try harness.store.completeTranscription(
             meetingID: meeting.id,
-            transcriptFileURL: transcriptURL,
+            transcript: transcript,
             transcriptPreview: "Existing transcript",
             updatedAt: Date(timeIntervalSince1970: 1_234_568_150)
         )
@@ -210,9 +230,39 @@ struct MeetingStoreTests {
 
         let reloaded = try harness.reloadMeeting(id: meeting.id)
         #expect(try reloaded.status == .failed)
-        #expect(reloaded.transcriptFilePath == transcriptURL.standardizedFileURL.path())
         #expect(reloaded.transcriptPreview == "Existing transcript")
+        #expect(reloaded.transcriptSpeakers.map(\.displayName) == ["Speaker 1"])
+        #expect(reloaded.transcriptSegments.map(\.text) == ["Existing transcript"])
         #expect(reloaded.updatedAt == failedAt)
+    }
+
+    @Test
+    func renameSpeakerUpdatesPersistedMeetingTranscript() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+
+        try harness.store.completeTranscription(
+            meetingID: meeting.id,
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "Hello", speakerID: "speaker-1")]
+            ),
+            transcriptPreview: "Hello",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_150)
+        )
+
+        let renamedAt = Date(timeIntervalSince1970: 1_234_568_200)
+        try harness.store.renameSpeaker(
+            meetingID: meeting.id,
+            speakerID: "speaker-1",
+            displayName: "Masha",
+            updatedAt: renamedAt
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.transcriptSpeakers.map(\.displayName) == ["Masha"])
+        #expect(reloaded.transcriptSegments.map(\.speakerID) == ["speaker-1"])
+        #expect(reloaded.updatedAt == renamedAt)
     }
 }
 
@@ -223,6 +273,8 @@ private struct MeetingStoreHarness {
     init() throws {
         let schema = Schema([
             Meeting.self,
+            PersistedTranscriptSpeaker.self,
+            PersistedTranscriptSegment.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         container = try ModelContainer(for: schema, configurations: [configuration])
@@ -245,14 +297,13 @@ private struct MeetingStoreHarness {
     }
 
     func createCompletedMeeting(
-        transcriptFileName: String,
+        transcript: StoredTranscript,
         transcriptPreview: String
     ) throws -> Meeting {
         let meeting = try createRecordedMeeting()
-        let transcriptURL = folderURL(for: meeting.id).appendingPathComponent(transcriptFileName)
         try store.completeTranscription(
             meetingID: meeting.id,
-            transcriptFileURL: transcriptURL,
+            transcript: transcript,
             transcriptPreview: transcriptPreview,
             updatedAt: Date(timeIntervalSince1970: 1_234_568_150)
         )
@@ -267,9 +318,5 @@ private struct MeetingStoreHarness {
             }
         )
         return try #require(context.fetch(descriptor).first)
-    }
-
-    func folderURL(for meetingID: UUID) -> URL {
-        URL(fileURLWithPath: "/tmp/meeting-\(meetingID.uuidString)")
     }
 }

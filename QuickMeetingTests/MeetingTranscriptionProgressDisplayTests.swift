@@ -12,7 +12,7 @@ struct MeetingTranscriptionProgressDisplayTests {
     func transcribingMeetingUsesProgressPane() {
         let state = transcriptPaneState(
             meetingStatus: .transcribing,
-            transcriptFilePath: nil,
+            hasTranscript: false,
             progress: 0.42,
             diarizationProgress: nil
         )
@@ -24,19 +24,19 @@ struct MeetingTranscriptionProgressDisplayTests {
     func completedMeetingKeepsTranscriptPaneEvenWithoutProgress() {
         let state = transcriptPaneState(
             meetingStatus: .completed,
-            transcriptFilePath: "/tmp/transcript.txt",
+            hasTranscript: true,
             progress: nil,
             diarizationProgress: nil
         )
 
-        #expect(state == .transcriptFile("/tmp/transcript.txt"))
+        #expect(state == .transcript)
     }
 
     @Test
     func diarizingMeetingUsesDiarizingPane() {
         let state = transcriptPaneState(
             meetingStatus: .transcribing,
-            transcriptFilePath: nil,
+            hasTranscript: false,
             progress: nil,
             diarizationProgress: 0.6
         )
@@ -48,7 +48,7 @@ struct MeetingTranscriptionProgressDisplayTests {
     func diarizationTakesPrecedenceOverTranscriptionProgress() {
         let state = transcriptPaneState(
             meetingStatus: .transcribing,
-            transcriptFilePath: nil,
+            hasTranscript: false,
             progress: 1.0,
             diarizationProgress: 0.3
         )

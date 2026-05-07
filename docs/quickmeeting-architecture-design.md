@@ -71,7 +71,8 @@ The core persisted entity is `Meeting` with these fields:
 - `endedAt`
 - `status`
 - `audioFilePath`
-- `transcriptFilePath` optional
+- transcript speakers
+- transcript segments
 - `transcriptPreview` optional
 - `duration` optional
 - `calendarEventID` optional
@@ -95,18 +96,17 @@ The implementation may later split `failed` into more granular error types, but 
 ### Metadata Storage
 
 - SwiftData stores indexed meeting metadata.
-- Meeting records are the source of truth for list views, detail views, status, and artifact paths.
-- Large artifacts are never embedded in SwiftData.
+- Meeting records are the source of truth for list views, detail views, status, and canonical transcript data.
+- Structured transcript data is stored in SwiftData, not in filesystem sidecars.
 
 ### File Storage
 
 Each meeting gets its own folder under an app-managed root directory. That folder contains:
 
 - the canonical mixed WAV recording
-- the transcript text file when available
-- optional future derived artifacts such as exports or metadata sidecars
+- optional future derived artifacts such as explicit exports
 
-SwiftData is the indexed catalog for fast library access. Disk is the storage location for large artifacts.
+SwiftData is the indexed catalog for fast library access and transcript data. Disk is used only for the canonical audio recording and future explicit export artifacts.
 
 ### Settings Storage
 
@@ -149,8 +149,8 @@ App settings are stored separately from meeting records using `UserDefaults` or 
 1. User selects a recorded meeting and chooses `Transcribe`.
 2. `TranscriptionService` confirms a local model is available.
 3. The saved WAV file is passed to Whisper through a transcription backend abstraction.
-4. Transcript text is written to disk in the meeting folder.
-5. Meeting metadata is updated with transcript path, preview, and final status.
+4. Structured transcript data is stored in SwiftData.
+5. Meeting metadata is updated with transcript preview and final status.
 
 ### Transcription Design Boundary
 
@@ -202,6 +202,7 @@ The menubar should control the same `RecordingService` instance as the main wind
 
 - After transcription completes, `ExportService` may optionally write transcript text to a user-selected location.
 - Export is additive and must not replace or relocate the app-managed canonical transcript artifact.
+- Export is additive and must not replace the SwiftData-backed canonical transcript data.
 
 ## Failure Handling
 

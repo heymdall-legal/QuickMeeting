@@ -39,7 +39,6 @@ final class TranscriptionService: TranscriptionServicing {
     private let backend: any WhisperTranscriptionBackend
     private let diarizer: any TranscriptDiarizing
     private let progressCenter: TranscriptionProgressCenter
-    private let artifactWriter: TranscriptionArtifactWriter
     private let fileManager: FileManager
     private let dateProvider: () -> Date
     private var activeMeetingID: UUID?
@@ -52,7 +51,6 @@ final class TranscriptionService: TranscriptionServicing {
         backend: any WhisperTranscriptionBackend,
         diarizer: (any TranscriptDiarizing)? = nil,
         progressCenter: TranscriptionProgressCenter,
-        artifactWriter: TranscriptionArtifactWriter? = nil,
         fileManager: FileManager = .default,
         dateProvider: @escaping () -> Date = Date.init
     ) {
@@ -62,7 +60,6 @@ final class TranscriptionService: TranscriptionServicing {
         self.backend = backend
         self.diarizer = diarizer ?? DefaultTranscriptDiarizer()
         self.progressCenter = progressCenter
-        self.artifactWriter = artifactWriter ?? TranscriptionArtifactWriter(fileManager: fileManager)
         self.fileManager = fileManager
         self.dateProvider = dateProvider
     }
@@ -141,14 +138,10 @@ final class TranscriptionService: TranscriptionServicing {
             diarizationSimulationTask?.cancel()
             diarizationSimulationTask = nil
             progressCenter.updateDiarizationProgress(1.0, for: meetingID)
-            let artifacts = try artifactWriter.writeArtifacts(
-                for: storedTranscript,
-                in: audioFileURL.deletingLastPathComponent()
-            )
             try meetingStore.completeTranscription(
                 meetingID: meetingID,
-                transcriptFileURL: artifacts.transcriptFileURL,
-                transcriptPreview: artifacts.previewText,
+                transcript: storedTranscript,
+                transcriptPreview: storedTranscript.fullText.trimmingCharacters(in: .whitespacesAndNewlines),
                 updatedAt: dateProvider()
             )
         } catch {

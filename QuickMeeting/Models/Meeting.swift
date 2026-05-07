@@ -22,6 +22,8 @@ final class Meeting {
     private(set) var audioFilePath: String
     private(set) var transcriptFilePath: String?
     private(set) var transcriptPreview: String?
+    @Relationship(deleteRule: .cascade) private(set) var transcriptSpeakers: [PersistedTranscriptSpeaker]
+    @Relationship(deleteRule: .cascade) private(set) var transcriptSegments: [PersistedTranscriptSegment]
     private(set) var duration: TimeInterval?
     private(set) var calendarEventID: String?
     private(set) var createdAt: Date
@@ -37,6 +39,17 @@ final class Meeting {
         }
     }
 
+    var storedTranscript: StoredTranscript? {
+        guard !transcriptSpeakers.isEmpty || !transcriptSegments.isEmpty else {
+            return nil
+        }
+
+        return StoredTranscript(
+            speakers: transcriptSpeakers.map(\.value),
+            segments: transcriptSegments.map(\.value)
+        )
+    }
+
     init(
         id: UUID = UUID(),
         title: String,
@@ -46,6 +59,8 @@ final class Meeting {
         audioFilePath: String,
         transcriptFilePath: String? = nil,
         transcriptPreview: String? = nil,
+        transcriptSpeakers: [PersistedTranscriptSpeaker] = [],
+        transcriptSegments: [PersistedTranscriptSegment] = [],
         duration: TimeInterval? = nil,
         calendarEventID: String? = nil,
         createdAt: Date = Date(),
@@ -59,6 +74,8 @@ final class Meeting {
         self.audioFilePath = audioFilePath
         self.transcriptFilePath = transcriptFilePath
         self.transcriptPreview = transcriptPreview
+        self.transcriptSpeakers = transcriptSpeakers
+        self.transcriptSegments = transcriptSegments
         self.duration = duration
         self.calendarEventID = calendarEventID
         self.createdAt = createdAt
@@ -80,6 +97,8 @@ final class Meeting {
     func beginTranscription(updatedAt: Date = Date()) {
         transcriptFilePath = nil
         transcriptPreview = nil
+        transcriptSpeakers.removeAll()
+        transcriptSegments.removeAll()
         statusRawValue = MeetingStatus.transcribing.rawValue
         touch(updatedAt: updatedAt)
     }
@@ -91,6 +110,19 @@ final class Meeting {
     ) {
         self.transcriptFilePath = transcriptFilePath
         self.transcriptPreview = transcriptPreview
+        statusRawValue = MeetingStatus.completed.rawValue
+        touch(updatedAt: updatedAt)
+    }
+
+    func completeTranscription(
+        transcript: StoredTranscript,
+        transcriptPreview: String,
+        updatedAt: Date = Date()
+    ) {
+        transcriptFilePath = nil
+        self.transcriptPreview = transcriptPreview
+        transcriptSpeakers = transcript.speakers.map(PersistedTranscriptSpeaker.init)
+        transcriptSegments = transcript.segments.map(PersistedTranscriptSegment.init)
         statusRawValue = MeetingStatus.completed.rawValue
         touch(updatedAt: updatedAt)
     }
