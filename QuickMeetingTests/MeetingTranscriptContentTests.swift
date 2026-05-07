@@ -68,6 +68,38 @@ struct MeetingTranscriptContentTests {
     }
 
     @Test
+    func meetingStoredTranscriptSortsPersistedSegmentsChronologically() throws {
+        let meeting = Meeting(
+            title: "Sync",
+            startedAt: Date(timeIntervalSince1970: 1_714_561_200),
+            status: .completed,
+            audioFilePath: "/tmp/audio.wav",
+            transcriptSpeakers: [PersistedTranscriptSpeaker(id: "speaker-1", displayName: "Masha")],
+            transcriptSegments: [
+                PersistedTranscriptSegment(
+                    id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+                    text: "Second sentence",
+                    startTime: 12,
+                    endTime: 18,
+                    speakerID: "speaker-1"
+                ),
+                PersistedTranscriptSegment(
+                    id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+                    text: "First sentence",
+                    startTime: 3,
+                    endTime: 9,
+                    speakerID: "speaker-1"
+                ),
+            ]
+        )
+
+        let transcript = try #require(meeting.storedTranscript)
+
+        #expect(transcript.segments.map(\.text) == ["First sentence", "Second sentence"])
+        #expect(loadMeetingTranscriptContent(from: transcript) == .text("## Masha\nFirst sentence\n\nSecond sentence"))
+    }
+
+    @Test
     func loadMeetingTranscriptSpeakersReturnsAvailableSpeakersFromStoredTranscript() {
         let transcript = StoredTranscript(
             speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],

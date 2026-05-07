@@ -46,7 +46,9 @@ final class Meeting {
 
         return StoredTranscript(
             speakers: transcriptSpeakers.map(\.value),
-            segments: transcriptSegments.map(\.value)
+            segments: transcriptSegments
+                .map(\.value)
+                .sorted(by: Self.areTranscriptSegmentsInDisplayOrder)
         )
     }
 
@@ -134,5 +136,38 @@ final class Meeting {
 
     private func touch(updatedAt: Date) {
         self.updatedAt = updatedAt
+    }
+
+    private static func areTranscriptSegmentsInDisplayOrder(
+        _ lhs: TranscriptSegment,
+        _ rhs: TranscriptSegment
+    ) -> Bool {
+        switch (lhs.startTime, rhs.startTime) {
+        case let (lhsStart?, rhsStart?) where lhsStart != rhsStart:
+            return lhsStart < rhsStart
+        case (.some, nil):
+            return true
+        case (nil, .some):
+            return false
+        default:
+            break
+        }
+
+        switch (lhs.endTime, rhs.endTime) {
+        case let (lhsEnd?, rhsEnd?) where lhsEnd != rhsEnd:
+            return lhsEnd < rhsEnd
+        case (.some, nil):
+            return true
+        case (nil, .some):
+            return false
+        default:
+            break
+        }
+
+        if lhs.text != rhs.text {
+            return lhs.text < rhs.text
+        }
+
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 }
