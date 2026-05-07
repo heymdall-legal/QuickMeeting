@@ -20,6 +20,7 @@ struct MeetingDetailView: View {
     @StateObject private var playback = MeetingAudioPlayback()
     @State private var transcriptContent: MeetingTranscriptContent = .notAvailable
     @State private var transcriptSpeakers = [TranscriptSpeaker]()
+    @State private var showSegmentTimes = false
     @State private var isShowingDeleteConfirmation = false
     @State private var isShowingRetranscriptionConfirmation = false
 
@@ -88,8 +89,8 @@ struct MeetingDetailView: View {
                 diarizationProgressState(progress: progress)
             case .transcript:
                 switch transcriptContent {
-                case .text(let transcript):
-                    TranscriptTextView(text: transcript)
+                case .transcript(let display):
+                    TranscriptTextView(display: display, showSegmentTimes: showSegmentTimes)
                 case .notAvailable:
                     transcriptEmptyState
                 case .unavailable(let message):
@@ -178,6 +179,7 @@ struct MeetingDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 detailSection
+                transcriptDisplaySection
                 actionSection
                 speakersSection
                 filesSection
@@ -228,6 +230,15 @@ struct MeetingDetailView: View {
                 isShowingDeleteConfirmation = true
             }
             .disabled(!canDelete)
+        }
+    }
+
+    private var transcriptDisplaySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Transcript Display")
+                .font(.headline)
+
+            Toggle("Show segment times", isOn: $showSegmentTimes)
         }
     }
 
