@@ -4,6 +4,128 @@ import Testing
 
 struct NativeCalendarIntegrationTests {
     @Test
+    func eventMatchingRecordingStartUsesInclusiveMinusTenPlusFiveMinuteWindow() {
+        let eventStore = FakeCalendarEventStore(
+            authorizationState: .authorized,
+            calendars: [CalendarDescriptor(id: "work", title: "Work")],
+            events: [
+                CalendarEvent(
+                    title: "Event A",
+                    startDate: Date(timeIntervalSince1970: 36_000),
+                    endDate: Date(timeIntervalSince1970: 37_800),
+                    isAllDay: false,
+                    calendarID: "work",
+                    attendees: []
+                )
+            ]
+        )
+        let settingsStore = InMemoryCalendarSelectionStore(selectedCalendarIDs: ["work"])
+        let integration = NativeCalendarIntegration(
+            eventStore: eventStore,
+            settingsStore: settingsStore,
+            calendar: Calendar(identifier: .gregorian)
+        )
+
+        #expect(integration.eventMatchingRecordingStart(at: Date(timeIntervalSince1970: 35_640)) == nil)
+        #expect(integration.eventMatchingRecordingStart(at: Date(timeIntervalSince1970: 35_700))?.title == "Event A")
+        #expect(integration.eventMatchingRecordingStart(at: Date(timeIntervalSince1970: 36_600))?.title == "Event A")
+        #expect(integration.eventMatchingRecordingStart(at: Date(timeIntervalSince1970: 36_660)) == nil)
+    }
+
+    @Test
+    func eventMatchingRecordingStartReturnsFirstSortedMatchAndSkipsAllDayEvents() {
+        let eventStore = FakeCalendarEventStore(
+            authorizationState: .authorized,
+            calendars: [CalendarDescriptor(id: "work", title: "Work")],
+            events: [
+                CalendarEvent(
+                    title: "All Day",
+                    startDate: Date(timeIntervalSince1970: 36_000),
+                    endDate: Date(timeIntervalSince1970: 72_000),
+                    isAllDay: true,
+                    calendarID: "work",
+                    attendees: []
+                ),
+                CalendarEvent(
+                    title: "Earlier Match",
+                    startDate: Date(timeIntervalSince1970: 35_850),
+                    endDate: Date(timeIntervalSince1970: 36_300),
+                    isAllDay: false,
+                    calendarID: "work",
+                    attendees: []
+                ),
+                CalendarEvent(
+                    title: "Later Match",
+                    startDate: Date(timeIntervalSince1970: 36_000),
+                    endDate: Date(timeIntervalSince1970: 36_900),
+                    isAllDay: false,
+                    calendarID: "work",
+                    attendees: []
+                )
+            ]
+        )
+        let settingsStore = InMemoryCalendarSelectionStore(selectedCalendarIDs: ["work"])
+        let integration = NativeCalendarIntegration(
+            eventStore: eventStore,
+            settingsStore: settingsStore,
+            calendar: Calendar(identifier: .gregorian)
+        )
+
+        let event = integration.eventMatchingRecordingStart(at: Date(timeIntervalSince1970: 35_900))
+
+        #expect(event?.title == "Earlier Match")
+    }
+
+    @Test
+    func eventMatchingRecordingStartReturnsNilWithoutPermissionOrSelection() {
+        let denied = NativeCalendarIntegration(
+            eventStore: FakeCalendarEventStore(
+                authorizationState: .denied,
+                calendars: [CalendarDescriptor(id: "work", title: "Work")],
+                events: []
+            ),
+            settingsStore: InMemoryCalendarSelectionStore(selectedCalendarIDs: ["work"])
+        )
+        let noSelection = NativeCalendarIntegration(
+            eventStore: FakeCalendarEventStore(
+                authorizationState: .authorized,
+                calendars: [CalendarDescriptor(id: "work", title: "Work")],
+                events: []
+            ),
+            settingsStore: InMemoryCalendarSelectionStore(selectedCalendarIDs: [])
+        )
+
+        #expect(denied.eventMatchingRecordingStart(at: Date(timeIntervalSince1970: 36_000)) == nil)
+        #expect(noSelection.eventMatchingRecordingStart(at: Date(timeIntervalSince1970: 36_000)) == nil)
+    }
+
+    @Test
+    func eventMatchingRecordingStartReturnsNilForEmptyMatchedTitle() {
+        let eventStore = FakeCalendarEventStore(
+            authorizationState: .authorized,
+            calendars: [CalendarDescriptor(id: "work", title: "Work")],
+            events: [
+                CalendarEvent(
+                    title: "   ",
+                    startDate: Date(timeIntervalSince1970: 36_000),
+                    endDate: Date(timeIntervalSince1970: 36_900),
+                    isAllDay: false,
+                    calendarID: "work",
+                    attendees: []
+                )
+            ]
+        )
+        let settingsStore = InMemoryCalendarSelectionStore(selectedCalendarIDs: ["work"])
+        let integration = NativeCalendarIntegration(
+            eventStore: eventStore,
+            settingsStore: settingsStore,
+            calendar: Calendar(identifier: .gregorian)
+        )
+
+        #expect(integration.eventMatchingRecordingStart(at: Date(timeIntervalSince1970: 35_900)) == nil)
+    }
+
+    @Test
     func upcomingEventForTodayExcludesAllDayAndEndedEvents() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let eventStore = FakeCalendarEventStore(

@@ -84,17 +84,20 @@ private final class StubCalendarIntegration: CalendarIntegration, @unchecked Sen
     private let requestAccessResult: CalendarAuthorizationState?
     private let calendarsValue: [CalendarDescriptor]
     private let upcomingEventValue: UpcomingCalendarEvent?
+    private let matchingEventValue: UpcomingCalendarEvent?
 
     init(
         authorization: CalendarAuthorizationState = .authorized,
         requestAccessResult: CalendarAuthorizationState? = nil,
         calendars: [CalendarDescriptor] = [],
-        upcomingEvent: UpcomingCalendarEvent? = nil
+        upcomingEvent: UpcomingCalendarEvent? = nil,
+        matchingEvent: UpcomingCalendarEvent? = nil
     ) {
         currentAuthorization = authorization
         self.requestAccessResult = requestAccessResult
         calendarsValue = calendars
         upcomingEventValue = upcomingEvent
+        matchingEventValue = matchingEvent
     }
 
     func authorizationState() -> CalendarAuthorizationState {
@@ -115,5 +118,9 @@ private final class StubCalendarIntegration: CalendarIntegration, @unchecked Sen
 
     func upcomingEventForToday() -> UpcomingCalendarEvent? {
         upcomingEventValue
+    }
+
+    func eventMatchingRecordingStart(at startedAt: Date) -> UpcomingCalendarEvent? {
+        matchingEventValue
     }
 }

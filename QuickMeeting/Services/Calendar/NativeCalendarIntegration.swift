@@ -98,6 +98,50 @@ struct NativeCalendarIntegration: CalendarIntegration {
             )
         }
     }
+
+    func eventMatchingRecordingStart(at startedAt: Date) -> UpcomingCalendarEvent? {
+        guard authorizationState() == .authorized else {
+            return nil
+        }
+
+        let selectedCalendarIDs = settingsStore.selectedCalendarIDs()
+        guard !selectedCalendarIDs.isEmpty else {
+            return nil
+        }
+
+        let searchStart = startedAt.addingTimeInterval(-600)
+        let searchEnd = startedAt.addingTimeInterval(300)
+        let fetchEnd = searchEnd.addingTimeInterval(1)
+
+        return eventStore.events(
+            from: searchStart,
+            to: fetchEnd,
+            selectedCalendarIDs: selectedCalendarIDs
+        )
+        .filter { !$0.isAllDay }
+        .filter { $0.startDate >= searchStart && $0.startDate <= searchEnd }
+        .sorted { lhs, rhs in
+            if lhs.startDate != rhs.startDate {
+                return lhs.startDate < rhs.startDate
+            }
+
+            return lhs.endDate < rhs.endDate
+        }
+        .first
+        .flatMap { event in
+            let title = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else {
+                return nil
+            }
+
+            return UpcomingCalendarEvent(
+                title: title,
+                startDate: event.startDate,
+                endDate: event.endDate,
+                attendees: event.attendees
+            )
+        }
+    }
 }
 
 private struct EventKitCalendarEventStore: CalendarEventStore {

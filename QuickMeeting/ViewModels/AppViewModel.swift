@@ -27,7 +27,7 @@ final class AppViewModel: ObservableObject {
     private let calendarIntegration: any CalendarIntegration
     private let dateProvider: () -> Date
     private let meetingIDProvider: () -> UUID
-    private let meetingTitleProvider: (Date) -> String
+    private let meetingTitleFormatter: DateFormatter
     private var recoverableRecordingMeetingID: UUID?
     private var cancellables = Set<AnyCancellable>()
 
@@ -42,7 +42,7 @@ final class AppViewModel: ObservableObject {
         calendarIntegration: (any CalendarIntegration)? = nil,
         dateProvider: @escaping () -> Date = Date.init,
         meetingIDProvider: @escaping () -> UUID = UUID.init,
-        meetingTitleProvider: @escaping (Date) -> String = { _ in "Untitled Meeting" }
+        meetingTitleFormatter: DateFormatter = AppViewModel.makeMeetingTitleFormatter()
     ) {
         self.transcriptionProgressCenter = transcriptionProgressCenter ?? TranscriptionProgressCenter()
         self.meetingStore = meetingStore
@@ -54,7 +54,7 @@ final class AppViewModel: ObservableObject {
         self.calendarIntegration = calendarIntegration ?? NoopCalendarIntegration()
         self.dateProvider = dateProvider
         self.meetingIDProvider = meetingIDProvider
-        self.meetingTitleProvider = meetingTitleProvider
+        self.meetingTitleFormatter = meetingTitleFormatter
 
         self.transcriptionProgressCenter.objectWillChange
             .sink { [weak self] _ in
@@ -93,7 +93,7 @@ final class AppViewModel: ObservableObject {
 
             let meeting = try meetingStore.createMeeting(
                 id: meetingID,
-                title: meetingTitleProvider(startedAt),
+                title: resolvedMeetingTitle(for: startedAt),
                 startedAt: startedAt,
                 folderURL: artifacts.meetingFolderURL,
                 audioFileURL: artifacts.audioFileURL
@@ -273,6 +273,20 @@ final class AppViewModel: ObservableObject {
 
     func diarizationProgress(for meetingID: UUID) -> Double? {
         transcriptionProgressCenter.diarizationProgress(for: meetingID)
+    }
+
+    private func resolvedMeetingTitle(for startedAt: Date) -> String {
+        if let event = calendarIntegration.eventMatchingRecordingStart(at: startedAt) {
+            return event.title
+        }
+
+        return meetingTitleFormatter.string(from: startedAt)
+    }
+
+    nonisolated private static func makeMeetingTitleFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter
     }
 
     private func rollbackFailedRecordingStart(

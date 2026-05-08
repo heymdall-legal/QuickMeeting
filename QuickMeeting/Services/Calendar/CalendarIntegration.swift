@@ -23,6 +23,7 @@ protocol CalendarIntegration: Sendable {
     func requestAccess() async -> CalendarAuthorizationState
     func availableCalendars() -> [CalendarDescriptor]
     func upcomingEventForToday() -> UpcomingCalendarEvent?
+    func eventMatchingRecordingStart(at startedAt: Date) -> UpcomingCalendarEvent?
 }
 
 struct NoopCalendarIntegration: CalendarIntegration {
@@ -39,6 +40,10 @@ struct NoopCalendarIntegration: CalendarIntegration {
     }
 
     func upcomingEventForToday() -> UpcomingCalendarEvent? {
+        nil
+    }
+
+    func eventMatchingRecordingStart(at startedAt: Date) -> UpcomingCalendarEvent? {
         nil
     }
 }

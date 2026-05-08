@@ -376,6 +376,61 @@ struct AppViewModelTests {
     }
 
     @Test
+    func startRecordingUsesMatchingCalendarEventTitleWhenAvailable() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meetingID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 1_746_692_100)
+        var meetingIDs = [meetingID]
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions,
+            calendarIntegration: StubCalendarIntegration(
+                matchingEvent: UpcomingCalendarEvent(
+                    title: "Design Review",
+                    startDate: startedAt.addingTimeInterval(300),
+                    endDate: startedAt.addingTimeInterval(2_100),
+                    attendees: []
+                )
+            ),
+            dateProvider: { startedAt },
+            meetingIDProvider: { meetingIDs.removeFirst() }
+        )
+
+        await viewModel.startRecording()
+
+        let persistedMeeting = try #require(try harness.context.fetch(FetchDescriptor<Meeting>()).first)
+        #expect(persistedMeeting.title == "Design Review")
+    }
+
+    @Test
+    func startRecordingFallsBackToTimestampWhenCalendarMatchIsUnavailable() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meetingID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 1_746_692_100)
+        var meetingIDs = [meetingID]
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions,
+            calendarIntegration: StubCalendarIntegration(matchingEvent: nil),
+            dateProvider: { startedAt },
+            meetingIDProvider: { meetingIDs.removeFirst() },
+            meetingTitleFormatter: formatter
+        )
+
+        await viewModel.startRecording()
+
+        let persistedMeeting = try #require(try harness.context.fetch(FetchDescriptor<Meeting>()).first)
+        #expect(persistedMeeting.title == formatter.string(from: startedAt))
+    }
+
+    @Test
     func transcriptionProgressForMeetingReturnsLiveValue() async throws {
         let harness = try AppViewModelTestHarness()
         let meetingID = UUID()
@@ -1581,6 +1636,7 @@ private struct StubCalendarIntegration: CalendarIntegration {
     var authorization: CalendarAuthorizationState = .authorized
     var calendars: [CalendarDescriptor] = []
     var upcomingEvent: UpcomingCalendarEvent?
+    var matchingEvent: UpcomingCalendarEvent?
 
     func authorizationState() -> CalendarAuthorizationState {
         authorization
@@ -1596,6 +1652,10 @@ private struct StubCalendarIntegration: CalendarIntegration {
 
     func upcomingEventForToday() -> UpcomingCalendarEvent? {
         upcomingEvent
+    }
+
+    func eventMatchingRecordingStart(at startedAt: Date) -> UpcomingCalendarEvent? {
+        matchingEvent
     }
 }
 
