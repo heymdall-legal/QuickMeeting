@@ -11,6 +11,7 @@ import SwiftData
 struct ContentView: View {
     @ObservedObject var appViewModel: AppViewModel
     @ObservedObject var modelsViewModel: ModelsSettingsViewModel
+    @ObservedObject var calendarSettingsViewModel: CalendarSettingsViewModel
     @Query(sort: \Meeting.startedAt, order: .reverse) private var meetings: [Meeting]
     @State private var selection = defaultSidebarSelection()
 
@@ -23,7 +24,10 @@ struct ContentView: View {
             case .home:
                 HomeView(appViewModel: appViewModel)
             case .settings:
-                ModelsSettingsView(viewModel: modelsViewModel)
+                SettingsView(
+                    modelsViewModel: modelsViewModel,
+                    calendarViewModel: calendarSettingsViewModel
+                )
             case .meeting(let meetingID):
                 if let selectedMeeting = meetings.first(where: { $0.id == meetingID }) {
                     MeetingDetailView(
@@ -39,6 +43,9 @@ struct ContentView: View {
                         },
                         onDelete: {
                             appViewModel.deleteMeeting(selectedMeeting)
+                        },
+                        onRenameMeeting: { title in
+                            try await appViewModel.renameMeeting(selectedMeeting, title: title)
                         },
                         onRenameSpeaker: { speakerID, displayName in
                             Task {
@@ -97,6 +104,18 @@ struct ContentView: View {
                 Text(appViewModel.renameSpeakerErrorMessage ?? "Unknown error.")
             }
         )
+        .alert(
+            "Unable to Rename Meeting",
+            isPresented: renameMeetingErrorIsPresented,
+            actions: {
+                Button("OK", role: .cancel) {
+                    appViewModel.clearRenameMeetingError()
+                }
+            },
+            message: {
+                Text(appViewModel.renameMeetingErrorMessage ?? "Unknown error.")
+            }
+        )
     }
 
     private func syncSelection() {
@@ -138,6 +157,17 @@ struct ContentView: View {
             }
         )
     }
+
+    private var renameMeetingErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { appViewModel.renameMeetingErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appViewModel.clearRenameMeetingError()
+                }
+            }
+        )
+    }
 }
 
 #Preview {
@@ -145,7 +175,8 @@ struct ContentView: View {
 
     ContentView(
         appViewModel: previewAppViewModel(container: container),
-        modelsViewModel: previewModelsSettingsViewModel()
+        modelsViewModel: previewModelsSettingsViewModel(),
+        calendarSettingsViewModel: previewCalendarSettingsViewModel()
     )
         .modelContainer(container)
 }
@@ -206,6 +237,14 @@ private func previewModelsSettingsViewModel() -> ModelsSettingsViewModel {
             modelStore: ArgmaxWhisperModelStore(),
             settingsStore: ModelSettingsStore()
         )
+    )
+}
+
+@MainActor
+private func previewCalendarSettingsViewModel() -> CalendarSettingsViewModel {
+    CalendarSettingsViewModel(
+        calendarIntegration: NoopCalendarIntegration(),
+        settingsStore: CalendarSettingsStore(userDefaults: .standard)
     )
 }
 

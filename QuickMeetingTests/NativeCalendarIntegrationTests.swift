@@ -1,0 +1,143 @@
+import Foundation
+import Testing
+@testable import QuickMeeting
+
+struct NativeCalendarIntegrationTests {
+    @Test
+    func upcomingEventForTodayExcludesAllDayAndEndedEvents() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let eventStore = FakeCalendarEventStore(
+            authorizationState: .authorized,
+            calendars: [CalendarDescriptor(id: "work", title: "Work")],
+            events: [
+                CalendarEvent(
+                    title: "Offsite",
+                    startDate: now.addingTimeInterval(-7_200),
+                    endDate: now.addingTimeInterval(7_200),
+                    isAllDay: true,
+                    calendarID: "work",
+                    attendees: []
+                ),
+                CalendarEvent(
+                    title: "Finished",
+                    startDate: now.addingTimeInterval(-7_200),
+                    endDate: now.addingTimeInterval(-3_600),
+                    isAllDay: false,
+                    calendarID: "work",
+                    attendees: []
+                ),
+                CalendarEvent(
+                    title: "Standup",
+                    startDate: now.addingTimeInterval(-900),
+                    endDate: now.addingTimeInterval(900),
+                    isAllDay: false,
+                    calendarID: "work",
+                    attendees: []
+                ),
+                CalendarEvent(
+                    title: "Planning",
+                    startDate: now.addingTimeInterval(1_800),
+                    endDate: now.addingTimeInterval(3_600),
+                    isAllDay: false,
+                    calendarID: "work",
+                    attendees: []
+                )
+            ]
+        )
+        let settingsStore = InMemoryCalendarSelectionStore(selectedCalendarIDs: ["work"])
+        let integration = NativeCalendarIntegration(
+            eventStore: eventStore,
+            settingsStore: settingsStore,
+            now: { now },
+            calendar: Calendar(identifier: .gregorian)
+        )
+
+        let event = integration.upcomingEventForToday()
+
+        #expect(event?.title == "Standup")
+    }
+
+    @Test
+    func upcomingEventForTodayReturnsNilWithoutPermission() {
+        let eventStore = FakeCalendarEventStore(
+            authorizationState: .denied,
+            calendars: [],
+            events: []
+        )
+        let settingsStore = InMemoryCalendarSelectionStore(selectedCalendarIDs: ["work"])
+        let integration = NativeCalendarIntegration(
+            eventStore: eventStore,
+            settingsStore: settingsStore
+        )
+
+        #expect(integration.upcomingEventForToday() == nil)
+    }
+
+    @Test
+    func upcomingEventForTodayReturnsNilWithoutSelectedCalendars() {
+        let eventStore = FakeCalendarEventStore(
+            authorizationState: .authorized,
+            calendars: [CalendarDescriptor(id: "work", title: "Work")],
+            events: []
+        )
+        let settingsStore = InMemoryCalendarSelectionStore(selectedCalendarIDs: [])
+        let integration = NativeCalendarIntegration(
+            eventStore: eventStore,
+            settingsStore: settingsStore
+        )
+
+        #expect(integration.upcomingEventForToday() == nil)
+    }
+}
+
+private struct FakeCalendarEventStore: CalendarEventStore {
+    let authorizationStateValue: CalendarAuthorizationState
+    let calendarsValue: [CalendarDescriptor]
+    let eventsValue: [CalendarEvent]
+
+    init(
+        authorizationState: CalendarAuthorizationState,
+        calendars: [CalendarDescriptor],
+        events: [CalendarEvent]
+    ) {
+        authorizationStateValue = authorizationState
+        calendarsValue = calendars
+        eventsValue = events
+    }
+
+    func authorizationState() -> CalendarAuthorizationState {
+        authorizationStateValue
+    }
+
+    func requestAccess() async -> CalendarAuthorizationState {
+        authorizationStateValue
+    }
+
+    func availableCalendars() -> [CalendarDescriptor] {
+        calendarsValue
+    }
+
+    func events(from startDate: Date, to endDate: Date, selectedCalendarIDs: [String]) -> [CalendarEvent] {
+        eventsValue.filter { event in
+            selectedCalendarIDs.contains(event.calendarID)
+                && event.startDate < endDate
+                && event.endDate >= startDate
+        }
+    }
+}
+
+private final class InMemoryCalendarSelectionStore: CalendarSelectionStoring, @unchecked Sendable {
+    private var storedIDs: [String]
+
+    init(selectedCalendarIDs: [String]) {
+        storedIDs = selectedCalendarIDs
+    }
+
+    func selectedCalendarIDs() -> [String] {
+        storedIDs
+    }
+
+    func saveSelectedCalendarIDs(_ ids: [String]) {
+        storedIDs = ids
+    }
+}

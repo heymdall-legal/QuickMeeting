@@ -8,9 +8,21 @@
 import Foundation
 import SwiftData
 
-enum MeetingStoreError: Error, Equatable {
+enum MeetingStoreError: LocalizedError, Equatable {
     case audioFileOutsideRecordingFolder
     case meetingNotFound
+    case invalidMeetingTitle
+
+    var errorDescription: String? {
+        switch self {
+        case .audioFileOutsideRecordingFolder:
+            return "Recording files must stay inside the meeting folder."
+        case .meetingNotFound:
+            return "Meeting could not be found."
+        case .invalidMeetingTitle:
+            return "Meeting title cannot be empty."
+        }
+    }
 }
 
 struct MeetingStore {
@@ -85,6 +97,18 @@ struct MeetingStore {
             duration: endedAt.timeIntervalSince(meeting.startedAt),
             updatedAt: endedAt
         )
+        try modelContext.save()
+    }
+
+    func renameMeeting(meetingID: UUID, title: String, updatedAt: Date) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedTitle.isEmpty else {
+            throw MeetingStoreError.invalidMeetingTitle
+        }
+
+        meeting.renameTitle(to: normalizedTitle, updatedAt: updatedAt)
         try modelContext.save()
     }
 

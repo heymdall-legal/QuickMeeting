@@ -59,6 +59,13 @@ These are additive services that can be introduced later without changing the co
 - `MeetingNotificationService`
 - `ExportService`
 
+### Calendar Integration Service
+
+- Requests calendar permission explicitly from Settings.
+- Persists selected calendar identifiers outside meeting records.
+- Exposes app-owned calendar descriptors and upcoming-event data to the UI.
+- Filters today's events to timed entries whose `endDate` is still in the future.
+
 ## Data Model
 
 ### Meeting Entity

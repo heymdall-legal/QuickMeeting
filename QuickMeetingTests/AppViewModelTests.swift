@@ -354,6 +354,28 @@ struct AppViewModelTests {
     }
 
     @Test
+    func loadUpcomingCalendarEventPublishesNextEventForHome() async throws {
+        let harness = try AppViewModelTestHarness()
+        let expectedEvent = UpcomingCalendarEvent(
+            title: "Design Review",
+            startDate: Date(timeIntervalSince1970: 1_800_000_000),
+            endDate: Date(timeIntervalSince1970: 1_800_003_600),
+            attendees: []
+        )
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions,
+            calendarIntegration: StubCalendarIntegration(upcomingEvent: expectedEvent)
+        )
+
+        await viewModel.loadUpcomingCalendarEvent()
+
+        #expect(viewModel.upcomingCalendarEvent?.title == "Design Review")
+    }
+
+    @Test
     func transcriptionProgressForMeetingReturnsLiveValue() async throws {
         let harness = try AppViewModelTestHarness()
         let meetingID = UUID()
@@ -430,6 +452,51 @@ struct AppViewModelTests {
         }
 
         #expect(viewModel.renameSpeakerErrorMessage == "Speaker rename failed")
+    }
+
+    @Test
+    func renameMeetingPersistsTitleAndClearsPreviousError() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let renamedAt = Date(timeIntervalSince1970: 1_234_568_300)
+        let invalidRenameViewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions,
+            dateProvider: { renamedAt }
+        )
+
+        await #expect(throws: MeetingStoreError.invalidMeetingTitle) {
+            try await invalidRenameViewModel.renameMeeting(meeting, title: "   ")
+        }
+
+        let validRenameViewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions,
+            dateProvider: { renamedAt.addingTimeInterval(60) }
+        )
+
+        try await validRenameViewModel.renameMeeting(meeting, title: "Renamed Review")
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.title == "Renamed Review")
+        #expect(validRenameViewModel.renameMeetingErrorMessage == nil)
+    }
+
+    @Test
+    func renameMeetingStoresTheFailureMessageForUI() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let viewModel = harness.makeViewModel()
+
+        await #expect(throws: MeetingStoreError.invalidMeetingTitle) {
+            try await viewModel.renameMeeting(meeting, title: "   ")
+        }
+
+        #expect(viewModel.renameMeetingErrorMessage == "Meeting title cannot be empty.")
     }
 }
 
@@ -1322,6 +1389,10 @@ private struct AppViewModelTestHarness {
         return try meetingStore.fetchMeeting(id: meeting.id)
     }
 
+    func reloadMeeting(id: UUID) throws -> Meeting {
+        try meetingStore.fetchMeeting(id: id)
+    }
+
     func makeViewModel() -> AppViewModel {
         AppViewModel(
             meetingStore: meetingStore,
@@ -1504,6 +1575,28 @@ private struct AudioCapturePipelineSnapshot {
     let stopCallCount: Int
     let pendingStartCount: Int
     let pendingStopCount: Int
+}
+
+private struct StubCalendarIntegration: CalendarIntegration {
+    var authorization: CalendarAuthorizationState = .authorized
+    var calendars: [CalendarDescriptor] = []
+    var upcomingEvent: UpcomingCalendarEvent?
+
+    func authorizationState() -> CalendarAuthorizationState {
+        authorization
+    }
+
+    func requestAccess() async -> CalendarAuthorizationState {
+        authorization
+    }
+
+    func availableCalendars() -> [CalendarDescriptor] {
+        calendars
+    }
+
+    func upcomingEventForToday() -> UpcomingCalendarEvent? {
+        upcomingEvent
+    }
 }
 
 private enum AudioCapturePipelineTestError: LocalizedError {

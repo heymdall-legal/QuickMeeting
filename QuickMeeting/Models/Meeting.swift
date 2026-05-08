@@ -89,6 +89,11 @@ final class Meeting {
         touch(updatedAt: updatedAt)
     }
 
+    func renameTitle(to newTitle: String, updatedAt: Date = Date()) {
+        title = newTitle
+        touch(updatedAt: updatedAt)
+    }
+
     func finishRecording(endedAt: Date, duration: TimeInterval, updatedAt: Date = Date()) {
         self.endedAt = endedAt
         self.duration = duration

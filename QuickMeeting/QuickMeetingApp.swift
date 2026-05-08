@@ -13,6 +13,7 @@ struct QuickMeetingApp: App {
     private let sharedModelContainer: ModelContainer
     @StateObject private var appViewModel: AppViewModel
     @StateObject private var modelsSettingsViewModel: ModelsSettingsViewModel
+    @StateObject private var calendarSettingsViewModel: CalendarSettingsViewModel
     @State private var menuBarController: MenuBarController?
 
     init() {
@@ -50,6 +51,8 @@ struct QuickMeetingApp: App {
                 settingsStore: modelSettingsStore
             )
             let meetingTranscriptStore = MeetingTranscriptStore(meetingStore: meetingStore)
+            let calendarSettingsStore = CalendarSettingsStore()
+            let calendarIntegration = NativeCalendarIntegration(settingsStore: calendarSettingsStore)
             _appViewModel = StateObject(
                 wrappedValue: AppViewModel(
                     meetingStore: meetingStore,
@@ -57,11 +60,18 @@ struct QuickMeetingApp: App {
                     recordingService: recordingService,
                     transcriptionService: transcriptionService,
                     transcriptionProgressCenter: transcriptionProgressCenter,
-                    meetingTranscriptStore: meetingTranscriptStore
+                    meetingTranscriptStore: meetingTranscriptStore,
+                    calendarIntegration: calendarIntegration
                 )
             )
             _modelsSettingsViewModel = StateObject(
                 wrappedValue: ModelsSettingsViewModel(manager: transcriptionModelManager)
+            )
+            _calendarSettingsViewModel = StateObject(
+                wrappedValue: CalendarSettingsViewModel(
+                    calendarIntegration: calendarIntegration,
+                    settingsStore: calendarSettingsStore
+                )
             )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
@@ -72,7 +82,8 @@ struct QuickMeetingApp: App {
         WindowGroup {
             ContentView(
                 appViewModel: appViewModel,
-                modelsViewModel: modelsSettingsViewModel
+                modelsViewModel: modelsSettingsViewModel,
+                calendarSettingsViewModel: calendarSettingsViewModel
             )
                 .task {
                     if menuBarController == nil {
@@ -83,7 +94,10 @@ struct QuickMeetingApp: App {
         .modelContainer(sharedModelContainer)
 
         Settings {
-            SettingsView(modelsViewModel: modelsSettingsViewModel)
+            SettingsView(
+                modelsViewModel: modelsSettingsViewModel,
+                calendarViewModel: calendarSettingsViewModel
+            )
         }
     }
 }

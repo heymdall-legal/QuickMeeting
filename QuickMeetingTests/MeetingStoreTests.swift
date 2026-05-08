@@ -264,6 +264,42 @@ struct MeetingStoreTests {
         #expect(reloaded.transcriptSegments.map(\.speakerID) == ["speaker-1"])
         #expect(reloaded.updatedAt == renamedAt)
     }
+
+    @Test
+    func renameMeetingUpdatesPersistedTitleAndUpdatedAt() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let renamedAt = Date(timeIntervalSince1970: 1_234_568_300)
+
+        try harness.store.renameMeeting(
+            meetingID: meeting.id,
+            title: "Renamed Review",
+            updatedAt: renamedAt
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.title == "Renamed Review")
+        #expect(reloaded.updatedAt == renamedAt)
+    }
+
+    @Test
+    func renameMeetingRejectsEmptyTrimmedTitle() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let originalUpdatedAt = meeting.updatedAt
+
+        #expect(throws: MeetingStoreError.invalidMeetingTitle) {
+            try harness.store.renameMeeting(
+                meetingID: meeting.id,
+                title: "   ",
+                updatedAt: Date(timeIntervalSince1970: 1_234_568_300)
+            )
+        }
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.title == "Design Review")
+        #expect(reloaded.updatedAt == originalUpdatedAt)
+    }
 }
 
 private struct MeetingStoreHarness {

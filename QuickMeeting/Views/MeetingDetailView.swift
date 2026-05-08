@@ -15,14 +15,19 @@ struct MeetingDetailView: View {
     let canTranscribe: Bool
     let onTranscribe: () -> Void
     let onDelete: () -> Void
+    let onRenameMeeting: (String) async throws -> Void
     let onRenameSpeaker: (String, String) -> Void
 
     @StateObject private var playback = MeetingAudioPlayback()
+    @FocusState private var isMeetingTitleFocused: Bool
     @State private var transcriptContent: MeetingTranscriptContent = .notAvailable
     @State private var transcriptSpeakers = [TranscriptSpeaker]()
     @State private var showSegmentTimes = false
     @State private var isShowingDeleteConfirmation = false
     @State private var isShowingRetranscriptionConfirmation = false
+    @State private var meetingTitleDraft = ""
+    @State private var originalMeetingTitle = ""
+    @State private var isCommittingMeetingTitle = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,6 +60,18 @@ struct MeetingDetailView: View {
         }
         .task(id: meetingAudioReloadKey(for: meeting)) {
             await playback.loadAudioFileDeferred(at: URL(fileURLWithPath: meeting.audioFilePath))
+        }
+        .onAppear(perform: resetMeetingTitleDraft)
+        .onChange(of: meeting.id) { _, _ in
+            resetMeetingTitleDraft()
+        }
+        .onChange(of: meeting.title) { _, newValue in
+            guard !isMeetingTitleFocused, !isCommittingMeetingTitle else {
+                return
+            }
+
+            meetingTitleDraft = newValue
+            originalMeetingTitle = newValue
         }
         .alert(
             "Delete Meeting?",
@@ -191,6 +208,8 @@ struct MeetingDetailView: View {
 
     private var detailSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            meetingTitleField
+
             Text("Details")
                 .font(.headline)
 
@@ -215,6 +234,22 @@ struct MeetingDetailView: View {
                 LabeledContent("Duration", value: durationText(duration))
             }
         }
+    }
+
+    private var meetingTitleField: some View {
+        TextField("Meeting title", text: $meetingTitleDraft)
+            .textFieldStyle(.roundedBorder)
+            .font(.title2.weight(.semibold))
+            .focused($isMeetingTitleFocused)
+            .onSubmit {
+                commitMeetingRename(dismissFocus: true)
+            }
+            .onExitCommand(perform: cancelMeetingRename)
+            .onChange(of: isMeetingTitleFocused) { _, isFocused in
+                if !isFocused {
+                    commitMeetingRename(dismissFocus: false)
+                }
+            }
     }
 
     private var actionSection: some View {
@@ -372,6 +407,71 @@ struct MeetingDetailView: View {
 
     private func resolvedDisplayName(for speakerID: String) -> String {
         transcriptSpeakers.first(where: { $0.id == speakerID })?.displayName ?? ""
+    }
+
+    private func resetMeetingTitleDraft() {
+        meetingTitleDraft = meeting.title
+        originalMeetingTitle = meeting.title
+        isCommittingMeetingTitle = false
+    }
+
+    private func commitMeetingRename(dismissFocus: Bool) {
+        guard !isCommittingMeetingTitle else {
+            return
+        }
+
+        let trimmedTitle = meetingTitleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedTitle.isEmpty else {
+            meetingTitleDraft = originalMeetingTitle
+            if dismissFocus {
+                isMeetingTitleFocused = false
+            }
+            return
+        }
+
+        guard trimmedTitle != originalMeetingTitle else {
+            meetingTitleDraft = originalMeetingTitle
+            if dismissFocus {
+                isMeetingTitleFocused = false
+            }
+            return
+        }
+
+        let previousTitle = originalMeetingTitle
+        isCommittingMeetingTitle = true
+
+        Task {
+            do {
+                try await onRenameMeeting(trimmedTitle)
+                await MainActor.run {
+                    meetingTitleDraft = trimmedTitle
+                    originalMeetingTitle = trimmedTitle
+                    if dismissFocus {
+                        isMeetingTitleFocused = false
+                    }
+                    isCommittingMeetingTitle = false
+                }
+            } catch {
+                await MainActor.run {
+                    meetingTitleDraft = previousTitle
+                    originalMeetingTitle = previousTitle
+                    if dismissFocus {
+                        isMeetingTitleFocused = false
+                    }
+                    isCommittingMeetingTitle = false
+                }
+            }
+        }
+    }
+
+    private func cancelMeetingRename() {
+        guard !isCommittingMeetingTitle else {
+            return
+        }
+
+        meetingTitleDraft = originalMeetingTitle
+        isMeetingTitleFocused = false
     }
 
     private func updateSpeakerName(_ newValue: String, for speakerID: String) {

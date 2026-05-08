@@ -14,6 +14,8 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var deletionErrorMessage: String?
     @Published private(set) var transcriptionErrorMessage: String?
     @Published private(set) var renameSpeakerErrorMessage: String?
+    @Published private(set) var renameMeetingErrorMessage: String?
+    @Published private(set) var upcomingCalendarEvent: UpcomingCalendarEvent?
 
     let transcriptionProgressCenter: TranscriptionProgressCenter
     private let meetingStore: MeetingStore
@@ -22,6 +24,7 @@ final class AppViewModel: ObservableObject {
     private let transcriptionService: any TranscriptionServicing
     private let meetingTranscriptStore: any MeetingTranscriptStoring
     private let recordingPermissions: any RecordingPermissions
+    private let calendarIntegration: any CalendarIntegration
     private let dateProvider: () -> Date
     private let meetingIDProvider: () -> UUID
     private let meetingTitleProvider: (Date) -> String
@@ -36,6 +39,7 @@ final class AppViewModel: ObservableObject {
         transcriptionProgressCenter: TranscriptionProgressCenter? = nil,
         recordingPermissions: (any RecordingPermissions)? = nil,
         meetingTranscriptStore: (any MeetingTranscriptStoring)? = nil,
+        calendarIntegration: (any CalendarIntegration)? = nil,
         dateProvider: @escaping () -> Date = Date.init,
         meetingIDProvider: @escaping () -> UUID = UUID.init,
         meetingTitleProvider: @escaping (Date) -> String = { _ in "Untitled Meeting" }
@@ -47,6 +51,7 @@ final class AppViewModel: ObservableObject {
         self.transcriptionService = transcriptionService ?? NoopTranscriptionService()
         self.recordingPermissions = recordingPermissions ?? NativeRecordingPermissions()
         self.meetingTranscriptStore = meetingTranscriptStore ?? MeetingTranscriptStore()
+        self.calendarIntegration = calendarIntegration ?? NoopCalendarIntegration()
         self.dateProvider = dateProvider
         self.meetingIDProvider = meetingIDProvider
         self.meetingTitleProvider = meetingTitleProvider
@@ -218,6 +223,24 @@ final class AppViewModel: ObservableObject {
         transcriptionErrorMessage = nil
     }
 
+    func renameMeeting(_ meeting: Meeting, title: String) async throws {
+        do {
+            try meetingStore.renameMeeting(
+                meetingID: meeting.id,
+                title: title,
+                updatedAt: dateProvider()
+            )
+            renameMeetingErrorMessage = nil
+        } catch {
+            renameMeetingErrorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    func clearRenameMeetingError() {
+        renameMeetingErrorMessage = nil
+    }
+
     func renameSpeaker(
         meetingID: UUID,
         speakerID: String,
@@ -238,6 +261,10 @@ final class AppViewModel: ObservableObject {
 
     func clearRenameSpeakerError() {
         renameSpeakerErrorMessage = nil
+    }
+
+    func loadUpcomingCalendarEvent() async {
+        upcomingCalendarEvent = calendarIntegration.upcomingEventForToday()
     }
 
     func transcriptionProgress(for meetingID: UUID) -> Double? {
