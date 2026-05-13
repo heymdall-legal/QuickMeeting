@@ -15,6 +15,7 @@ struct NativeCalendarIntegrationTests {
                     endDate: Date(timeIntervalSince1970: 37_800),
                     isAllDay: false,
                     calendarID: "work",
+                    organizer: nil,
                     attendees: []
                 )
             ]
@@ -44,6 +45,7 @@ struct NativeCalendarIntegrationTests {
                     endDate: Date(timeIntervalSince1970: 72_000),
                     isAllDay: true,
                     calendarID: "work",
+                    organizer: nil,
                     attendees: []
                 ),
                 CalendarEvent(
@@ -52,6 +54,7 @@ struct NativeCalendarIntegrationTests {
                     endDate: Date(timeIntervalSince1970: 36_300),
                     isAllDay: false,
                     calendarID: "work",
+                    organizer: nil,
                     attendees: []
                 ),
                 CalendarEvent(
@@ -60,6 +63,7 @@ struct NativeCalendarIntegrationTests {
                     endDate: Date(timeIntervalSince1970: 36_900),
                     isAllDay: false,
                     calendarID: "work",
+                    organizer: nil,
                     attendees: []
                 )
             ]
@@ -111,6 +115,7 @@ struct NativeCalendarIntegrationTests {
                     endDate: Date(timeIntervalSince1970: 36_900),
                     isAllDay: false,
                     calendarID: "work",
+                    organizer: nil,
                     attendees: []
                 )
             ]
@@ -138,6 +143,7 @@ struct NativeCalendarIntegrationTests {
                     endDate: now.addingTimeInterval(7_200),
                     isAllDay: true,
                     calendarID: "work",
+                    organizer: nil,
                     attendees: []
                 ),
                 CalendarEvent(
@@ -146,6 +152,7 @@ struct NativeCalendarIntegrationTests {
                     endDate: now.addingTimeInterval(-3_600),
                     isAllDay: false,
                     calendarID: "work",
+                    organizer: nil,
                     attendees: []
                 ),
                 CalendarEvent(
@@ -154,6 +161,7 @@ struct NativeCalendarIntegrationTests {
                     endDate: now.addingTimeInterval(900),
                     isAllDay: false,
                     calendarID: "work",
+                    organizer: nil,
                     attendees: []
                 ),
                 CalendarEvent(
@@ -162,6 +170,7 @@ struct NativeCalendarIntegrationTests {
                     endDate: now.addingTimeInterval(3_600),
                     isAllDay: false,
                     calendarID: "work",
+                    organizer: nil,
                     attendees: []
                 )
             ]
@@ -209,6 +218,44 @@ struct NativeCalendarIntegrationTests {
         )
 
         #expect(integration.upcomingEventForToday() == nil)
+    }
+
+    @Test
+    func eventMatchingRecordingStartAppendsOrganizerWhenMissingFromAttendees() {
+        let startedAt = Date(timeIntervalSince1970: 36_000)
+        let eventStore = FakeCalendarEventStore(
+            authorizationState: .authorized,
+            calendars: [CalendarDescriptor(id: "work", title: "Work")],
+            events: [
+                CalendarEvent(
+                    title: "Design Review",
+                    startDate: startedAt,
+                    endDate: startedAt.addingTimeInterval(3_600),
+                    isAllDay: false,
+                    calendarID: "work",
+                    organizer: UpcomingCalendarAttendee(
+                        displayName: "Olga",
+                        emailAddress: "olga@example.com"
+                    ),
+                    attendees: [
+                        UpcomingCalendarAttendee(
+                            displayName: "Masha",
+                            emailAddress: "masha@example.com"
+                        )
+                    ]
+                )
+            ]
+        )
+        let settingsStore = InMemoryCalendarSelectionStore(selectedCalendarIDs: ["work"])
+        let integration = NativeCalendarIntegration(
+            eventStore: eventStore,
+            settingsStore: settingsStore,
+            calendar: Calendar(identifier: .gregorian)
+        )
+
+        let event = integration.eventMatchingRecordingStart(at: startedAt)
+
+        #expect(event?.attendees.map(\.displayName) == ["Masha", "Olga"])
     }
 }
 

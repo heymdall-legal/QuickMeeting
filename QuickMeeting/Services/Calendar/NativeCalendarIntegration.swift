@@ -14,6 +14,7 @@ struct CalendarEvent: Sendable {
     let endDate: Date
     let isAllDay: Bool
     let calendarID: String
+    let organizer: UpcomingCalendarAttendee?
     let attendees: [UpcomingCalendarAttendee]
 }
 
@@ -94,7 +95,7 @@ struct NativeCalendarIntegration: CalendarIntegration {
                 title: $0.title.isEmpty ? "Untitled Event" : $0.title,
                 startDate: $0.startDate,
                 endDate: $0.endDate,
-                attendees: $0.attendees
+                attendees: mergedAttendees(for: $0)
             )
         }
     }
@@ -138,9 +139,39 @@ struct NativeCalendarIntegration: CalendarIntegration {
                 title: title,
                 startDate: event.startDate,
                 endDate: event.endDate,
-                attendees: event.attendees
+                attendees: mergedAttendees(for: event)
             )
         }
+    }
+
+    private func mergedAttendees(for event: CalendarEvent) -> [UpcomingCalendarAttendee] {
+        guard let organizer = event.organizer else {
+            return event.attendees
+        }
+
+        let normalizedOrganizerName = organizer.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let organizerEmail = organizer.emailAddress?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let organizerAlreadyIncluded = event.attendees.contains { attendee in
+            let attendeeName = attendee.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let attendeeEmail = attendee.emailAddress?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if let organizerEmail, !organizerEmail.isEmpty,
+               let attendeeEmail, !attendeeEmail.isEmpty {
+                return attendeeEmail.caseInsensitiveCompare(organizerEmail) == .orderedSame
+            }
+
+            guard !normalizedOrganizerName.isEmpty, !attendeeName.isEmpty else {
+                return false
+            }
+
+            return attendeeName.caseInsensitiveCompare(normalizedOrganizerName) == .orderedSame
+        }
+
+        guard !organizerAlreadyIncluded else {
+            return event.attendees
+        }
+
+        return event.attendees + [organizer]
     }
 }
 
@@ -190,6 +221,12 @@ private struct EventKitCalendarEventStore: CalendarEventStore {
                 endDate: event.endDate,
                 isAllDay: event.isAllDay,
                 calendarID: event.calendar.calendarIdentifier,
+                organizer: event.organizer.map { organizer in
+                    UpcomingCalendarAttendee(
+                        displayName: organizer.name ?? "Unknown Organizer",
+                        emailAddress: organizer.url.absoluteString
+                    )
+                },
                 attendees: (event.attendees ?? []).map { attendee in
                     UpcomingCalendarAttendee(
                         displayName: attendee.name ?? "Unknown Attendee",
