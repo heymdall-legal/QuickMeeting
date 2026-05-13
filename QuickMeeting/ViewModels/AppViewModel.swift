@@ -85,6 +85,7 @@ final class AppViewModel: ObservableObject {
         do {
             let startedAt = dateProvider()
             let meetingID = meetingIDProvider()
+            let matchingEvent = calendarIntegration.eventMatchingRecordingStart(at: startedAt)
             let artifacts = try meetingFileStore.createArtifacts(
                 for: meetingID,
                 startedAt: startedAt
@@ -93,8 +94,9 @@ final class AppViewModel: ObservableObject {
 
             let meeting = try meetingStore.createMeeting(
                 id: meetingID,
-                title: resolvedMeetingTitle(for: startedAt),
+                title: resolvedMeetingTitle(for: startedAt, matchingEvent: matchingEvent),
                 startedAt: startedAt,
+                attendeeNames: matchingEvent?.attendees.map(\.displayName) ?? [],
                 folderURL: artifacts.meetingFolderURL,
                 audioFileURL: artifacts.audioFileURL
             )
@@ -275,9 +277,12 @@ final class AppViewModel: ObservableObject {
         transcriptionProgressCenter.diarizationProgress(for: meetingID)
     }
 
-    private func resolvedMeetingTitle(for startedAt: Date) -> String {
-        if let event = calendarIntegration.eventMatchingRecordingStart(at: startedAt) {
-            return event.title
+    private func resolvedMeetingTitle(
+        for startedAt: Date,
+        matchingEvent: UpcomingCalendarEvent?
+    ) -> String {
+        if let matchingEvent {
+            return matchingEvent.title
         }
 
         return meetingTitleFormatter.string(from: startedAt)

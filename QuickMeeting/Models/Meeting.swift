@@ -26,6 +26,7 @@ final class Meeting {
     @Relationship(deleteRule: .cascade) private(set) var transcriptSegments: [PersistedTranscriptSegment]
     private(set) var duration: TimeInterval?
     private(set) var calendarEventID: String?
+    @Attribute(originalName: "attendeeNames") private var attendeeNamesStorage: [String]?
     private(set) var createdAt: Date
     private(set) var updatedAt: Date
 
@@ -52,6 +53,10 @@ final class Meeting {
         )
     }
 
+    var attendeeNames: [String] {
+        attendeeNamesStorage ?? []
+    }
+
     init(
         id: UUID = UUID(),
         title: String,
@@ -65,6 +70,7 @@ final class Meeting {
         transcriptSegments: [PersistedTranscriptSegment] = [],
         duration: TimeInterval? = nil,
         calendarEventID: String? = nil,
+        attendeeNames: [String] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -80,6 +86,7 @@ final class Meeting {
         self.transcriptSegments = transcriptSegments
         self.duration = duration
         self.calendarEventID = calendarEventID
+        attendeeNamesStorage = attendeeNames
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

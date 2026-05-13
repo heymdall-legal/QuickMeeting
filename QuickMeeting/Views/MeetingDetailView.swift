@@ -5,6 +5,9 @@
 //  Created by Codex on 05.05.2026.
 //
 
+#if canImport(AppKit)
+import AppKit
+#endif
 import SwiftUI
 
 struct MeetingDetailView: View {
@@ -28,6 +31,8 @@ struct MeetingDetailView: View {
     @State private var meetingTitleDraft = ""
     @State private var originalMeetingTitle = ""
     @State private var isCommittingMeetingTitle = false
+    @State private var exportFeedbackText: String?
+    @State private var exportFeedbackTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -72,6 +77,10 @@ struct MeetingDetailView: View {
 
             meetingTitleDraft = newValue
             originalMeetingTitle = newValue
+        }
+        .onDisappear {
+            exportFeedbackTask?.cancel()
+            exportFeedbackTask = nil
         }
         .alert(
             "Delete Meeting?",
@@ -261,6 +270,18 @@ struct MeetingDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!canTranscribe)
 
+            if isTranscriptExportAvailable(from: meeting.storedTranscript) {
+                HStack(spacing: 10) {
+                    Button("Export Transcript", action: copyTranscriptExport)
+
+                    if let exportFeedbackText {
+                        Text(exportFeedbackText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Button("Delete Meeting", role: .destructive) {
                 isShowingDeleteConfirmation = true
             }
@@ -304,16 +325,12 @@ struct MeetingDetailView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(transcriptSpeakers) { speaker in
-                    TextField(
-                        "Speaker name",
-                        text: Binding(
-                            get: { resolvedDisplayName(for: speaker.id) },
-                            set: { newValue in
-                                updateSpeakerName(newValue, for: speaker.id)
-                            }
-                        )
-                    )
-                    .textFieldStyle(.roundedBorder)
+                    SpeakerNameInput(
+                        displayName: resolvedDisplayName(for: speaker.id),
+                        attendeeNames: meeting.attendeeNames
+                    ) { newValue in
+                        updateSpeakerName(newValue, for: speaker.id)
+                    }
                 }
             }
         }
@@ -481,5 +498,36 @@ struct MeetingDetailView: View {
 
         transcriptSpeakers[speakerIndex].displayName = newValue
         onRenameSpeaker(speakerID, newValue)
+    }
+
+    private func copyTranscriptExport() {
+        guard let transcript = meeting.storedTranscript,
+              isTranscriptExportAvailable(from: meeting.storedTranscript) else {
+            return
+        }
+
+        let markdown = renderMeetingTranscriptExportMarkdown(
+            meeting: meeting,
+            transcript: transcript
+        )
+
+        #if canImport(AppKit)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(markdown, forType: .string)
+        #endif
+
+        exportFeedbackTask?.cancel()
+        exportFeedbackText = "Copied"
+        exportFeedbackTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await MainActor.run {
+                exportFeedbackText = nil
+                exportFeedbackTask = nil
+            }
+        }
     }
 }

@@ -38,6 +38,7 @@ struct MeetingStoreTests {
         #expect(meeting.transcriptSegments.isEmpty)
         #expect(meeting.duration == nil)
         #expect(meeting.calendarEventID == nil)
+        #expect(meeting.attendeeNames.isEmpty)
         #expect(meeting.id != UUID())
         #expect(meeting.createdAt == meeting.updatedAt)
 
@@ -49,6 +50,7 @@ struct MeetingStoreTests {
         #expect(persistedMeeting.id == meeting.id)
         #expect(persistedMeeting.title == "Design Review")
         #expect(persistedMeeting.audioFilePath == audioFileURL.standardizedFileURL.path())
+        #expect(persistedMeeting.attendeeNames.isEmpty)
         #expect(persistedStatus == .recording)
     }
 
@@ -147,6 +149,36 @@ struct MeetingStoreTests {
 
         #expect(meeting.audioFilePath == "/tmp/Application Support/QuickMeeting/Meeting/audio file.wav")
         #expect(!meeting.audioFilePath.contains("%20"))
+    }
+
+    @Test
+    func createMeetingPersistsAttendeeNamesAcrossFreshContext() throws {
+        let schema = Schema([
+            Meeting.self,
+            PersistedTranscriptSpeaker.self,
+            PersistedTranscriptSegment.self,
+        ])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let context = ModelContext(container)
+        let store = MeetingStore(modelContext: context)
+
+        let folderURL = URL(fileURLWithPath: "/tmp/meeting")
+        let audioFileURL = folderURL.appendingPathComponent("audio.m4a")
+
+        let meeting = try store.createMeeting(
+            title: "Design Review",
+            startedAt: Date(timeIntervalSince1970: 1_234_567_890),
+            attendeeNames: ["Masha", "Ilya"],
+            folderURL: folderURL,
+            audioFileURL: audioFileURL
+        )
+
+        #expect(meeting.attendeeNames == ["Masha", "Ilya"])
+
+        let verificationContext = ModelContext(container)
+        let persistedMeeting = try #require(try verificationContext.fetch(FetchDescriptor<Meeting>()).first)
+        #expect(persistedMeeting.attendeeNames == ["Masha", "Ilya"])
     }
 
     @Test

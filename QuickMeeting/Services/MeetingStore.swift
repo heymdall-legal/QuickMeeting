@@ -33,6 +33,7 @@ struct MeetingStore {
         id: UUID = UUID(),
         title: String,
         startedAt: Date,
+        attendeeNames: [String] = [],
         folderURL: URL,
         audioFileURL: URL
     ) throws -> Meeting {
@@ -50,6 +51,7 @@ struct MeetingStore {
             startedAt: startedAt,
             status: .recording,
             audioFilePath: normalizedAudioFileURL.path(percentEncoded: false),
+            attendeeNames: attendeeNames,
             createdAt: now,
             updatedAt: now
         )

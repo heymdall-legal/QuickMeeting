@@ -80,6 +80,16 @@ func loadMeetingTranscriptSpeakers(from transcript: StoredTranscript?) -> Meetin
     return .available(transcript.speakers)
 }
 
+func isTranscriptExportAvailable(from transcript: StoredTranscript?) -> Bool {
+    guard let transcript else {
+        return false
+    }
+
+    return transcript.segments.contains { segment in
+        !segment.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 func transcriptDisplayRuns(from display: MeetingTranscriptDisplay) -> [TranscriptDisplayRun] {
     let speakersByID = Dictionary(uniqueKeysWithValues: display.speakers.map { ($0.id, $0.displayName) })
     var runs = [TranscriptDisplayRun]()

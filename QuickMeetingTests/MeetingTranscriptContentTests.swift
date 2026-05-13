@@ -131,6 +131,31 @@ struct MeetingTranscriptContentTests {
     }
 
     @Test
+    func transcriptExportAvailabilityRequiresAtLeastOneNonEmptySegment() {
+        let available = isTranscriptExportAvailable(
+            from: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: " Hello ", startTime: 0, endTime: 1, speakerID: "speaker-1")]
+            )
+        )
+
+        #expect(available)
+    }
+
+    @Test
+    func transcriptExportAvailabilityRejectsMissingOrWhitespaceOnlyTranscript() {
+        #expect(!isTranscriptExportAvailable(from: nil))
+        #expect(
+            !isTranscriptExportAvailable(
+                from: StoredTranscript(
+                    speakers: [],
+                    segments: [TranscriptSegment(text: "   ", startTime: 0, endTime: 1, speakerID: nil)]
+                )
+            )
+        )
+    }
+
+    @Test
     func displayRunsGroupConsecutiveSegmentsByResolvedSpeaker() {
         let display = MeetingTranscriptDisplay(
             speakers: [
