@@ -6,7 +6,7 @@ func speakerAutocompleteSuggestions(
 ) -> [String] {
     let trimmedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedDraft.isEmpty else {
-        return []
+        return attendeeNames
     }
 
     let normalizedDraft = trimmedDraft.localizedLowercase
@@ -25,6 +25,10 @@ struct SpeakerNameInputState {
     var attendeeNames: [String]
     var draft: String
 
+    mutating func updateDraft(_ newValue: String) {
+        draft = newValue
+    }
+
     var suggestions: [String] {
         speakerAutocompleteSuggestions(
             attendeeNames: attendeeNames,
@@ -40,6 +44,14 @@ struct SpeakerNameInputState {
         draft = suggestion
         return suggestion
     }
+
+    func commitDraft(currentDisplayName: String) -> String? {
+        guard draft != currentDisplayName else {
+            return nil
+        }
+
+        return draft
+    }
 }
 
 struct SpeakerNameInput: View {
@@ -48,6 +60,7 @@ struct SpeakerNameInput: View {
     let onCommit: (String) -> Void
 
     @State private var state: SpeakerNameInputState
+    @FocusState private var isFocused: Bool
 
     init(
         displayName: String,
@@ -72,12 +85,15 @@ struct SpeakerNameInput: View {
                 text: Binding(
                     get: { state.draft },
                     set: { newValue in
-                        state.draft = newValue
-                        onCommit(newValue)
+                        state.updateDraft(newValue)
                     }
                 )
             )
             .textFieldStyle(.roundedBorder)
+            .focused($isFocused)
+            .onSubmit {
+                commitDraftIfNeeded()
+            }
 
             if state.showsSuggestions {
                 VStack(alignment: .leading, spacing: 4) {
@@ -108,5 +124,18 @@ struct SpeakerNameInput: View {
         .onChange(of: attendeeNames) { _, newValue in
             state.attendeeNames = newValue
         }
+        .onChange(of: isFocused) { _, newValue in
+            if !newValue {
+                commitDraftIfNeeded()
+            }
+        }
+    }
+
+    private func commitDraftIfNeeded() {
+        guard let committedDraft = state.commitDraft(currentDisplayName: displayName) else {
+            return
+        }
+
+        onCommit(committedDraft)
     }
 }

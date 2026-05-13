@@ -23,13 +23,13 @@ struct SpeakerNameInputTests {
     }
 
     @Test
-    func autocompleteSuggestionsHideResultsForEmptyDraft() {
+    func autocompleteSuggestionsReturnFullStoredListForEmptyDraft() {
         let suggestions = speakerAutocompleteSuggestions(
             attendeeNames: ["Masha", "Ilya"],
             draft: ""
         )
 
-        #expect(suggestions.isEmpty)
+        #expect(suggestions == ["Masha", "Ilya"])
     }
 
     @Test
@@ -77,5 +77,27 @@ struct SpeakerNameInputTests {
 
         #expect(state.suggestions.isEmpty)
         #expect(!state.showsSuggestions)
+    }
+
+    @Test
+    func commitDraftReturnsTrailingWhitespaceWhenEditWasOnlyTypedLocally() {
+        var state = SpeakerNameInputState(
+            attendeeNames: ["Vasia Pupkin"],
+            draft: "Vasia"
+        )
+
+        state.updateDraft("Vasia ")
+
+        #expect(state.commitDraft(currentDisplayName: "Vasia") == "Vasia ")
+    }
+
+    @Test
+    func commitDraftSkipsUnchangedDraft() {
+        let state = SpeakerNameInputState(
+            attendeeNames: ["Vasia Pupkin"],
+            draft: "Vasia"
+        )
+
+        #expect(state.commitDraft(currentDisplayName: "Vasia") == nil)
     }
 }
