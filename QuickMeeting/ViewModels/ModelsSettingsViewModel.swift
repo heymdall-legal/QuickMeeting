@@ -27,6 +27,7 @@ struct TranscriptionModelRow: Identifiable, Equatable {
 @MainActor
 final class ModelsSettingsViewModel: ObservableObject {
     @Published private(set) var rows = [TranscriptionModelRow]()
+    @Published private(set) var isLoading = true
     @Published var defaultModelID: TranscriptionModelID?
     @Published var errorMessage: String?
 
@@ -43,6 +44,7 @@ final class ModelsSettingsViewModel: ObservableObject {
         let statuses = await manager.refreshStatuses()
         applyStatuses(statuses)
         defaultModelID = manager.currentDefaultModelID
+        isLoading = false
     }
 
     func download(_ modelID: TranscriptionModelID) async {

@@ -10,22 +10,37 @@ import Foundation
 struct MeetingPresenceDetector {
     private let requiredStableSampleCount: Int
     private var stableMatchCount = 0
+    private var hasConfirmedMeeting = false
 
     init(requiredStableSampleCount: Int = 3) {
         self.requiredStableSampleCount = requiredStableSampleCount
     }
 
     mutating func evaluate(_ sample: MeetingAppActivitySample) -> MeetingAppPresence {
-        let qualifies = sample.isMicrophoneActive
-            && sample.isRunning
+        guard sample.isMicrophoneActive else {
+            stableMatchCount = 0
+            hasConfirmedMeeting = false
+            return .inactive
+        }
+
+        if hasConfirmedMeeting {
+            return .activeMeeting
+        }
+
+        let qualifiesForStart = sample.isRunning
             && (sample.hasVisibleWindow || sample.hadRecentFocus)
 
-        guard qualifies else {
+        guard qualifiesForStart else {
             stableMatchCount = 0
             return .inactive
         }
 
         stableMatchCount += 1
-        return stableMatchCount >= requiredStableSampleCount ? .activeMeeting : .candidateActive
+        guard stableMatchCount >= requiredStableSampleCount else {
+            return .candidateActive
+        }
+
+        hasConfirmedMeeting = true
+        return .activeMeeting
     }
 }

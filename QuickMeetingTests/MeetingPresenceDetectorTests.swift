@@ -61,4 +61,46 @@ struct MeetingPresenceDetectorTests {
         #expect(detector.evaluate(inactiveSample) == .inactive)
         #expect(detector.evaluate(activeSample) == .candidateActive)
     }
+
+    @Test
+    func keepsMeetingActiveWhileMicrophoneStaysOnAfterWindowAndFocusAreLost() {
+        var detector = MeetingPresenceDetector(requiredStableSampleCount: 2)
+        let qualifyingSample = MeetingAppActivitySample(
+            bundleIdentifier: "kontur.talk",
+            isRunning: true,
+            isFrontmost: true,
+            hadRecentFocus: true,
+            hasVisibleWindow: true,
+            isMicrophoneActive: true
+        )
+        let backgroundedSample = MeetingAppActivitySample(
+            bundleIdentifier: "kontur.talk",
+            isRunning: true,
+            isFrontmost: false,
+            hadRecentFocus: false,
+            hasVisibleWindow: false,
+            isMicrophoneActive: true
+        )
+
+        #expect(detector.evaluate(qualifyingSample) == .candidateActive)
+        #expect(detector.evaluate(qualifyingSample) == .activeMeeting)
+        #expect(detector.evaluate(backgroundedSample) == .activeMeeting)
+        #expect(detector.evaluate(backgroundedSample) == .activeMeeting)
+    }
+
+    @Test
+    func doesNotStartMeetingWithoutVisibleWindowOrRecentFocus() {
+        var detector = MeetingPresenceDetector(requiredStableSampleCount: 2)
+        let sample = MeetingAppActivitySample(
+            bundleIdentifier: "kontur.talk",
+            isRunning: true,
+            isFrontmost: false,
+            hadRecentFocus: false,
+            hasVisibleWindow: false,
+            isMicrophoneActive: true
+        )
+
+        #expect(detector.evaluate(sample) == .inactive)
+        #expect(detector.evaluate(sample) == .inactive)
+    }
 }

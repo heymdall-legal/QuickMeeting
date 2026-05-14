@@ -6,6 +6,27 @@ import Testing
 @MainActor
 struct ModelsSettingsViewModelTests {
     @Test
+    func startsInLoadingStateUntilStatusesLoad() async {
+        let viewModel = ModelsSettingsViewModel(
+            manager: FakeTranscriptionModelManaging(
+                statuses: [
+                    .tiny: .notInstalled,
+                    .small: .notInstalled,
+                    .largeV3: .installed(sizeInBytes: 2_048, installedAt: nil),
+                ],
+                defaultModelID: .largeV3
+            )
+        )
+
+        #expect(viewModel.isLoading)
+
+        await viewModel.load()
+
+        #expect(viewModel.isLoading == false)
+        #expect(viewModel.defaultModelID == .largeV3)
+    }
+
+    @Test
     func loadBuildsRowsInCatalogOrder() async {
         let viewModel = ModelsSettingsViewModel(
             manager: FakeTranscriptionModelManaging(

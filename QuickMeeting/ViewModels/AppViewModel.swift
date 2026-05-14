@@ -179,7 +179,7 @@ final class AppViewModel: ObservableObject {
         case .starting, .recording, .stopping:
             return false
         }
-    }
+    }   
 
     var canStopRecording: Bool {
         activeOrRecoverableMeetingID != nil

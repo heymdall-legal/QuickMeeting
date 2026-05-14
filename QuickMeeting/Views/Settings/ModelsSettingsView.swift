@@ -131,16 +131,25 @@ struct ModelsSettingsSections: View {
         }
 
         Section("Default Model") {
-            Picker("Model", selection: defaultModelSelection) {
-                Text(installedRows.isEmpty ? "No installed models" : "None")
-                    .tag(Optional<TranscriptionModelID>.none)
-
-                ForEach(installedRows) { row in
-                    Text(row.model.displayName)
-                        .tag(Optional(row.model.id))
+            if viewModel.isLoading {
+                HStack {
+                    Text("Model")
+                    Spacer()
+                    Text("Loading installed models...")
+                        .foregroundStyle(.tertiary)
                 }
+            } else {
+                Picker("Model", selection: defaultModelSelection) {
+                    Text(installedRows.isEmpty ? "No installed models" : "None")
+                        .tag(Optional<TranscriptionModelID>.none)
+
+                    ForEach(installedRows) { row in
+                        Text(row.model.displayName)
+                            .tag(Optional(row.model.id))
+                    }
+                }
+                .disabled(installedRows.isEmpty)
             }
-            .disabled(installedRows.isEmpty)
         }
 
         Section("Available Models") {
