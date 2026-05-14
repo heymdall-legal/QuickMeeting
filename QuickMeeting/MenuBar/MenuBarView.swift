@@ -19,6 +19,12 @@ struct MenuBarView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            if let autoRecordingStatusText = viewModel.autoRecordingStatusText {
+                Text(autoRecordingStatusText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             Button(primaryActionTitle) {
                 Task {
                     await performPrimaryAction()

@@ -17,6 +17,7 @@ protocol AutoRecordingScheduledTask {
     func cancel()
 }
 
+@MainActor
 protocol AutoRecordingClock: Sendable {
     func schedule(
         after seconds: TimeInterval,
@@ -24,6 +25,7 @@ protocol AutoRecordingClock: Sendable {
     ) -> any AutoRecordingScheduledTask
 }
 
+@MainActor
 struct TaskSleepAutoRecordingClock: AutoRecordingClock {
     func schedule(
         after seconds: TimeInterval,
@@ -56,7 +58,7 @@ final class AutoRecordingCoordinator {
     private var pendingStopTask: (any AutoRecordingScheduledTask)?
 
     init(
-        clock: any AutoRecordingClock = TaskSleepAutoRecordingClock(),
+        clock: any AutoRecordingClock,
         intentSink: any AutoRecordingIntentSink,
         startDelay: TimeInterval,
         stopGracePeriod: TimeInterval

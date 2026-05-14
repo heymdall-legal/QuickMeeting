@@ -11,6 +11,7 @@ import Foundation
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published private(set) var recordingState: RecordingState = .idle
+    @Published private(set) var autoRecordingStatusText: String?
     @Published private(set) var deletionErrorMessage: String?
     @Published private(set) var transcriptionErrorMessage: String?
     @Published private(set) var renameSpeakerErrorMessage: String?
@@ -28,6 +29,7 @@ final class AppViewModel: ObservableObject {
     private let dateProvider: () -> Date
     private let meetingIDProvider: () -> UUID
     private let meetingTitleFormatter: DateFormatter
+    private weak var autoRecordingCoordinator: AutoRecordingCoordinator?
     private var recoverableRecordingMeetingID: UUID?
     private var cancellables = Set<AnyCancellable>()
 
@@ -142,10 +144,28 @@ final class AppViewModel: ObservableObject {
             )
             recoverableRecordingMeetingID = nil
             recordingState = .idle
+            autoRecordingCoordinator?.recordingDidStop()
         } catch {
             recoverableRecordingMeetingID = meetingID
             recordingState = .failed(message: error.localizedDescription)
         }
+    }
+
+    func attachAutoRecordingCoordinator(_ coordinator: AutoRecordingCoordinator) {
+        autoRecordingCoordinator = coordinator
+    }
+
+    func updateAutoRecordingPresence(_ presence: MeetingAppPresence) async {
+        switch presence {
+        case .candidateActive, .activeMeeting:
+            autoRecordingStatusText = "Detected meeting activity in Толк, waiting 10s"
+        case .ending:
+            autoRecordingStatusText = "Meeting activity lost, stopping soon"
+        case .inactive:
+            autoRecordingStatusText = nil
+        }
+
+        await autoRecordingCoordinator?.handle(presence)
     }
 
     var canStartRecording: Bool {
@@ -326,5 +346,32 @@ final class AppViewModel: ObservableObject {
         }
 
         try fileManager.removeItem(at: meetingFolderURL)
+    }
+}
+
+extension AppViewModel: AutoRecordingIntentSink {
+    func requestAutoRecordingStart() async {
+        guard canStartRecording else {
+            return
+        }
+
+        autoRecordingStatusText = "Recording started automatically"
+        await startRecording()
+
+        if case .recording = recordingState {
+            autoRecordingCoordinator?.recordingDidStart()
+        }
+    }
+
+    func requestAutoRecordingStop() async {
+        guard canStopRecording else {
+            return
+        }
+
+        await stopRecording()
+
+        if case .idle = recordingState {
+            autoRecordingStatusText = nil
+        }
     }
 }

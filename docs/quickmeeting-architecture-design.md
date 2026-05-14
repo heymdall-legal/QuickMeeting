@@ -54,10 +54,19 @@ The architecture is designed for incremental delivery. The initial foundation fu
 
 These are additive services that can be introduced later without changing the core recording flow:
 
+- `AutoRecordingService`
 - `CalendarIntegrationService`
 - `MeetingTitleGenerator`
 - `MeetingNotificationService`
 - `ExportService`
+
+### Auto Recording Service
+
+- Samples native app activity for supported meeting apps through a dedicated activity-source boundary.
+- Translates sampled activity into app-owned meeting-presence states with a detector instead of relying on one binary OS signal.
+- Applies confirmation and grace-period timing in a coordinator before calling the same `AppViewModel` recording entry points used by manual controls.
+- Persists enablement, selected app profile, and timing settings outside meeting records.
+- Keeps auto-recording optional and visible in the UI rather than silently starting and stopping capture.
 
 ### Calendar Integration Service
 

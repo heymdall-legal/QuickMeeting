@@ -18,6 +18,12 @@ struct HomeView: View {
             Text(recordingStatusText(for: appViewModel.recordingState))
                 .foregroundStyle(.secondary)
 
+            if let autoRecordingStatusText = appViewModel.autoRecordingStatusText {
+                Text(autoRecordingStatusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if let upcomingEvent = appViewModel.upcomingCalendarEvent {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Next Event Today")

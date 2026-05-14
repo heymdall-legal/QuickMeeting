@@ -52,7 +52,8 @@ struct AutoRecordingCoordinatorTests {
     }
 }
 
-private actor TestAutoRecordingClock: AutoRecordingClock {
+@MainActor
+private final class TestAutoRecordingClock: AutoRecordingClock {
     private struct ScheduledOperation {
         let target: TimeInterval
         let task: TestScheduledTask

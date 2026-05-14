@@ -11,9 +11,11 @@ import SwiftData
 @main
 struct QuickMeetingApp: App {
     private let sharedModelContainer: ModelContainer
+    private let autoRecordingMonitor: MeetingAppMonitor
     @StateObject private var appViewModel: AppViewModel
     @StateObject private var modelsSettingsViewModel: ModelsSettingsViewModel
     @StateObject private var calendarSettingsViewModel: CalendarSettingsViewModel
+    @StateObject private var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
     @State private var menuBarController: MenuBarController?
 
     init() {
@@ -53,17 +55,28 @@ struct QuickMeetingApp: App {
             let meetingTranscriptStore = MeetingTranscriptStore(meetingStore: meetingStore)
             let calendarSettingsStore = CalendarSettingsStore()
             let calendarIntegration = NativeCalendarIntegration(settingsStore: calendarSettingsStore)
-            _appViewModel = StateObject(
-                wrappedValue: AppViewModel(
-                    meetingStore: meetingStore,
-                    meetingFileStore: meetingFileStore,
-                    recordingService: recordingService,
-                    transcriptionService: transcriptionService,
-                    transcriptionProgressCenter: transcriptionProgressCenter,
-                    meetingTranscriptStore: meetingTranscriptStore,
-                    calendarIntegration: calendarIntegration
-                )
+            let autoRecordingSettingsStore = AutoRecordingSettingsStore()
+            let autoRecordingSettingsViewModel = AutoRecordingSettingsViewModel(
+                settingsStore: autoRecordingSettingsStore
             )
+            let appViewModel = AppViewModel(
+                meetingStore: meetingStore,
+                meetingFileStore: meetingFileStore,
+                recordingService: recordingService,
+                transcriptionService: transcriptionService,
+                transcriptionProgressCenter: transcriptionProgressCenter,
+                meetingTranscriptStore: meetingTranscriptStore,
+                calendarIntegration: calendarIntegration
+            )
+            let autoRecordingSettings = autoRecordingSettingsStore.load()
+            let autoRecordingCoordinator = AutoRecordingCoordinator(
+                clock: TaskSleepAutoRecordingClock(),
+                intentSink: appViewModel,
+                startDelay: autoRecordingSettings.startDelay,
+                stopGracePeriod: autoRecordingSettings.stopGracePeriod
+            )
+            appViewModel.attachAutoRecordingCoordinator(autoRecordingCoordinator)
+            _appViewModel = StateObject(wrappedValue: appViewModel)
             _modelsSettingsViewModel = StateObject(
                 wrappedValue: ModelsSettingsViewModel(manager: transcriptionModelManager)
             )
@@ -72,6 +85,14 @@ struct QuickMeetingApp: App {
                     calendarIntegration: calendarIntegration,
                     settingsStore: calendarSettingsStore
                 )
+            )
+            _autoRecordingSettingsViewModel = StateObject(
+                wrappedValue: autoRecordingSettingsViewModel
+            )
+            autoRecordingMonitor = MeetingAppMonitor(
+                settingsStore: autoRecordingSettingsStore,
+                activitySource: NativeMeetingAppActivitySource(),
+                appViewModel: appViewModel
             )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
@@ -83,12 +104,15 @@ struct QuickMeetingApp: App {
             ContentView(
                 appViewModel: appViewModel,
                 modelsViewModel: modelsSettingsViewModel,
-                calendarSettingsViewModel: calendarSettingsViewModel
+                calendarSettingsViewModel: calendarSettingsViewModel,
+                autoRecordingSettingsViewModel: autoRecordingSettingsViewModel
             )
                 .task {
                     if menuBarController == nil {
                         menuBarController = MenuBarController(viewModel: appViewModel)
                     }
+
+                    autoRecordingMonitor.start()
                 }
         }
         .modelContainer(sharedModelContainer)
@@ -96,7 +120,8 @@ struct QuickMeetingApp: App {
         Settings {
             SettingsView(
                 modelsViewModel: modelsSettingsViewModel,
-                calendarViewModel: calendarSettingsViewModel
+                calendarViewModel: calendarSettingsViewModel,
+                autoRecordingViewModel: autoRecordingSettingsViewModel
             )
         }
     }

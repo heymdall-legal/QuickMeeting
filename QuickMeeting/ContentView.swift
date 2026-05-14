@@ -12,6 +12,7 @@ struct ContentView: View {
     @ObservedObject var appViewModel: AppViewModel
     @ObservedObject var modelsViewModel: ModelsSettingsViewModel
     @ObservedObject var calendarSettingsViewModel: CalendarSettingsViewModel
+    @ObservedObject var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
     @Query(sort: \Meeting.startedAt, order: .reverse) private var meetings: [Meeting]
     @State private var selection = defaultSidebarSelection()
 
@@ -26,7 +27,8 @@ struct ContentView: View {
             case .settings:
                 SettingsView(
                     modelsViewModel: modelsViewModel,
-                    calendarViewModel: calendarSettingsViewModel
+                    calendarViewModel: calendarSettingsViewModel,
+                    autoRecordingViewModel: autoRecordingSettingsViewModel
                 )
             case .meeting(let meetingID):
                 if let selectedMeeting = meetings.first(where: { $0.id == meetingID }) {
@@ -176,7 +178,8 @@ struct ContentView: View {
     ContentView(
         appViewModel: previewAppViewModel(container: container),
         modelsViewModel: previewModelsSettingsViewModel(),
-        calendarSettingsViewModel: previewCalendarSettingsViewModel()
+        calendarSettingsViewModel: previewCalendarSettingsViewModel(),
+        autoRecordingSettingsViewModel: previewAutoRecordingSettingsViewModel()
     )
         .modelContainer(container)
 }
@@ -216,6 +219,11 @@ private func previewModelContainer() -> ModelContainer {
     container.mainContext.insert(sampleMeeting)
 
     return container
+}
+
+@MainActor
+private func previewAutoRecordingSettingsViewModel() -> AutoRecordingSettingsViewModel {
+    AutoRecordingSettingsViewModel(settingsStore: AutoRecordingSettingsStore())
 }
 
 @MainActor

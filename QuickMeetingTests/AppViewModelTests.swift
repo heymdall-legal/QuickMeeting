@@ -269,6 +269,29 @@ struct AppViewModelTests {
     }
 
     @Test
+    func autoRecordingStartUsesExistingRecordingPath() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meetingID = UUID()
+        var meetingIDs = [meetingID]
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions,
+            meetingIDProvider: { meetingIDs.removeFirst() }
+        )
+
+        await viewModel.requestAutoRecordingStart()
+
+        #expect(viewModel.recordingState == .recording(meetingID: meetingID))
+        #expect(viewModel.autoRecordingStatusText == "Recording started automatically")
+
+        let snapshot = harness.recordingService.snapshot()
+        #expect(snapshot.startAttempts.count == 1)
+        #expect(snapshot.startAttempts.first?.meetingID == meetingID)
+    }
+
+    @Test
     func deleteMeetingRemovesPersistedMeetingAndArtifacts() async throws {
         let harness = try AppViewModelTestHarness()
         let meetingID = UUID()

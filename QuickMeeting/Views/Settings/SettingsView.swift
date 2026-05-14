@@ -10,10 +10,12 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var modelsViewModel: ModelsSettingsViewModel
     @ObservedObject var calendarViewModel: CalendarSettingsViewModel
+    @ObservedObject var autoRecordingViewModel: AutoRecordingSettingsViewModel
     @State private var pendingDeleteModelID: TranscriptionModelID?
 
     var body: some View {
         Form {
+            AutoRecordingSettingsSections(viewModel: autoRecordingViewModel)
             CalendarSettingsSections(viewModel: calendarViewModel)
             ModelsSettingsSections(
                 viewModel: modelsViewModel,
@@ -24,6 +26,7 @@ struct SettingsView: View {
         .frame(minWidth: 760, minHeight: 460)
         .navigationTitle("Settings")
         .task {
+            await autoRecordingViewModel.load()
             await calendarViewModel.reload()
             await modelsViewModel.load()
         }
