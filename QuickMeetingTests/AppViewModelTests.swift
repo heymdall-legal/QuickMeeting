@@ -964,9 +964,280 @@ struct NativeAudioCapturePipelineTests {
         )
         #expect(stopDiagnostics.outputURL == outputURL)
         #expect(stopDiagnostics.sampleBufferCount == 0)
+        #expect(stopDiagnostics.systemSampleBufferCount == 0)
+        #expect(stopDiagnostics.microphoneSampleBufferCount == 0)
         #expect(stopDiagnostics.fileExists == false)
         #expect(stopDiagnostics.fileSizeBytes == nil)
         #expect(stopDiagnostics.errorDescription == nil)
+    }
+
+    @Test
+    func stopEmitsPerSourceSampleCountsInDiagnostics() async throws {
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-source-counts.wav")
+        let session = AudioCaptureStreamSessionSpy()
+        let writer = AudioFileWriterSpy()
+        let diagnosticRecorder = RecordingDiagnosticRecorder()
+        var createdSink: CaptureOutputSink?
+
+        let pipeline = NativeAudioCapturePipeline(
+            shareableContentProvider: {
+                NativeAudioCapturePipeline.CaptureTarget(width: 1512, height: 982) { _, sink in
+                    createdSink = sink
+                    return session
+                }
+            },
+            writerFactory: { _ in writer },
+            captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration(
+                capturesSystemAudio: true,
+                capturesMicrophone: true
+            ),
+            diagnosticHandler: { diagnosticRecorder.record($0) }
+        )
+
+        try await pipeline.start(outputURL: outputURL)
+
+        let sink = try #require(createdSink)
+        try sink.appendForTesting(
+            makeTestPCMBuffer(
+                leftChannel: [0.10, 0.10],
+                rightChannel: [0.10, 0.10]
+            ),
+            presentationTimeSeconds: 0,
+            outputType: .audio
+        )
+        try sink.appendForTesting(
+            makeTestPCMBuffer(
+                leftChannel: [0.20, 0.20],
+                rightChannel: [0.20, 0.20]
+            ),
+            presentationTimeSeconds: 0,
+            outputType: .microphone
+        )
+
+        try await pipeline.stop()
+
+        let recordedDiagnostics = diagnosticRecorder.diagnostics
+        let stopDiagnostics = try #require(
+            recordedDiagnostics.last(where: { $0.event == .captureStopped })
+        )
+        #expect(stopDiagnostics.sampleBufferCount == 2)
+        #expect(stopDiagnostics.systemSampleBufferCount == 1)
+        #expect(stopDiagnostics.microphoneSampleBufferCount == 1)
+        #expect(stopDiagnostics.systemSourceFormat == "sampleRate=48000.0 channelCount=2 commonFormat=pcmFormatFloat32 interleaved=false")
+        #expect(stopDiagnostics.microphoneSourceFormat == "sampleRate=48000.0 channelCount=2 commonFormat=pcmFormatFloat32 interleaved=false")
+        #expect(stopDiagnostics.systemRawPeakPower == 0.10)
+        #expect(stopDiagnostics.microphoneRawPeakPower == 0.20)
+        #expect(stopDiagnostics.systemPeakPower == 0.10)
+        #expect(stopDiagnostics.microphonePeakPower == 0.20)
+        #expect(stopDiagnostics.writtenPeakPower == 0.30)
+        #expect(stopDiagnostics.systemRawNonZeroFrameCount == 2)
+        #expect(stopDiagnostics.microphoneRawNonZeroFrameCount == 2)
+        #expect(stopDiagnostics.systemNonZeroFrameCount == 4)
+        #expect(stopDiagnostics.microphoneNonZeroFrameCount == 4)
+        #expect(stopDiagnostics.writtenNonZeroFrameCount == 2)
+    }
+
+    @Test
+    func startBuildsSessionWithPinnedDefaultMicrophoneDeviceID() async throws {
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-mic-device.wav")
+        let session = AudioCaptureStreamSessionSpy()
+        let writer = AudioFileWriterSpy()
+        var requestedConfiguration: NativeAudioCapturePipeline.CaptureConfiguration?
+
+        let pipeline = NativeAudioCapturePipeline(
+            shareableContentProvider: {
+                NativeAudioCapturePipeline.CaptureTarget(width: 1512, height: 982) {
+                    configuration,
+                    _
+                in
+                    requestedConfiguration = configuration
+                    return session
+                }
+            },
+            writerFactory: { _ in writer },
+            captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration(
+                capturesSystemAudio: true,
+                capturesMicrophone: true
+            ),
+            microphoneDeviceProvider: {
+                NativeAudioCapturePipeline.MicrophoneDevice(
+                    id: "built-in-mic",
+                    name: "Built-in Microphone"
+                )
+            }
+        )
+
+        try await pipeline.start(outputURL: outputURL)
+        try await pipeline.stop()
+
+        let configuration = try #require(requestedConfiguration)
+        #expect(configuration.capturesMicrophone == true)
+        #expect(configuration.microphoneCaptureDeviceID == "built-in-mic")
+    }
+
+    @Test
+    func writerPreparedDiagnosticsIncludePinnedMicrophoneDeviceDetails() async throws {
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-mic-diagnostics.wav")
+        let session = AudioCaptureStreamSessionSpy()
+        let writer = AudioFileWriterSpy()
+        let diagnosticRecorder = RecordingDiagnosticRecorder()
+
+        let pipeline = NativeAudioCapturePipeline(
+            shareableContentProvider: {
+                NativeAudioCapturePipeline.CaptureTarget(width: 1512, height: 982) { _, _ in
+                    session
+                }
+            },
+            writerFactory: { _ in writer },
+            captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration(
+                capturesSystemAudio: true,
+                capturesMicrophone: true
+            ),
+            microphoneDeviceProvider: {
+                NativeAudioCapturePipeline.MicrophoneDevice(
+                    id: "built-in-mic",
+                    name: "Built-in Microphone"
+                )
+            },
+            diagnosticHandler: { diagnosticRecorder.record($0) }
+        )
+
+        try await pipeline.start(outputURL: outputURL)
+        try await pipeline.stop()
+
+        let recordedDiagnostics = diagnosticRecorder.diagnostics
+        let preparedDiagnostics = try #require(
+            recordedDiagnostics.first(where: { $0.event == .writerPrepared })
+        )
+        #expect(preparedDiagnostics.microphoneCaptureDeviceID == "built-in-mic")
+        #expect(preparedDiagnostics.microphoneCaptureDeviceName == "Built-in Microphone")
+        #expect(preparedDiagnostics.systemSourceFormat == nil)
+        #expect(preparedDiagnostics.microphoneSourceFormat == nil)
+        #expect(preparedDiagnostics.systemRawPeakPower == 0)
+        #expect(preparedDiagnostics.microphoneRawPeakPower == 0)
+        #expect(preparedDiagnostics.systemPeakPower == 0)
+        #expect(preparedDiagnostics.microphonePeakPower == 0)
+        #expect(preparedDiagnostics.writtenPeakPower == 0)
+    }
+
+    @Test
+    func stopEmitsZeroEnergyForSilentBuffers() async throws {
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-silent-diagnostics.wav")
+        let session = AudioCaptureStreamSessionSpy()
+        let writer = AudioFileWriterSpy()
+        let diagnosticRecorder = RecordingDiagnosticRecorder()
+        var createdSink: CaptureOutputSink?
+
+        let pipeline = NativeAudioCapturePipeline(
+            shareableContentProvider: {
+                NativeAudioCapturePipeline.CaptureTarget(width: 1512, height: 982) { _, sink in
+                    createdSink = sink
+                    return session
+                }
+            },
+            writerFactory: { _ in writer },
+            captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration(
+                capturesSystemAudio: true,
+                capturesMicrophone: true
+            ),
+            diagnosticHandler: { diagnosticRecorder.record($0) }
+        )
+
+        try await pipeline.start(outputURL: outputURL)
+
+        let sink = try #require(createdSink)
+        try sink.appendForTesting(
+            makeTestPCMBuffer(
+                leftChannel: [0, 0],
+                rightChannel: [0, 0]
+            ),
+            presentationTimeSeconds: 0,
+            outputType: .audio
+        )
+        try sink.appendForTesting(
+            makeTestPCMBuffer(
+                leftChannel: [0, 0],
+                rightChannel: [0, 0]
+            ),
+            presentationTimeSeconds: 0,
+            outputType: .microphone
+        )
+
+        try await pipeline.stop()
+
+        let recordedDiagnostics = diagnosticRecorder.diagnostics
+        let stopDiagnostics = try #require(
+            recordedDiagnostics.last(where: { $0.event == .captureStopped })
+        )
+        #expect(stopDiagnostics.systemRawPeakPower == 0)
+        #expect(stopDiagnostics.microphoneRawPeakPower == 0)
+        #expect(stopDiagnostics.systemPeakPower == 0)
+        #expect(stopDiagnostics.microphonePeakPower == 0)
+        #expect(stopDiagnostics.writtenPeakPower == 0)
+        #expect(stopDiagnostics.systemRawRMSPower == 0)
+        #expect(stopDiagnostics.microphoneRawRMSPower == 0)
+        #expect(stopDiagnostics.systemRMSPower == 0)
+        #expect(stopDiagnostics.microphoneRMSPower == 0)
+        #expect(stopDiagnostics.writtenRMSPower == 0)
+        #expect(stopDiagnostics.systemRawNonZeroFrameCount == 0)
+        #expect(stopDiagnostics.microphoneRawNonZeroFrameCount == 0)
+        #expect(stopDiagnostics.systemNonZeroFrameCount == 0)
+        #expect(stopDiagnostics.microphoneNonZeroFrameCount == 0)
+        #expect(stopDiagnostics.writtenNonZeroFrameCount == 0)
+    }
+
+    @Test
+    func stopEmitsRawMetricsBeforeCanonicalConversion() async throws {
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-raw-diagnostics.wav")
+        let session = AudioCaptureStreamSessionSpy()
+        let writer = AudioFileWriterSpy()
+        let diagnosticRecorder = RecordingDiagnosticRecorder()
+        var createdSink: CaptureOutputSink?
+
+        let pipeline = NativeAudioCapturePipeline(
+            shareableContentProvider: {
+                NativeAudioCapturePipeline.CaptureTarget(width: 1512, height: 982) { _, sink in
+                    createdSink = sink
+                    return session
+                }
+            },
+            writerFactory: { _ in writer },
+            captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration(
+                capturesSystemAudio: true,
+                capturesMicrophone: true
+            ),
+            diagnosticHandler: { diagnosticRecorder.record($0) }
+        )
+
+        try await pipeline.start(outputURL: outputURL)
+
+        let sink = try #require(createdSink)
+        try sink.appendForTesting(
+            makeMonoTestPCMBuffer(samples: [0.10, 0.10], sampleRate: 16_000),
+            presentationTimeSeconds: 0,
+            outputType: .audio
+        )
+        try sink.appendForTesting(
+            makeMonoTestPCMBuffer(samples: [0.20, 0.20], sampleRate: 16_000),
+            presentationTimeSeconds: 0,
+            outputType: .microphone
+        )
+
+        try await pipeline.stop()
+
+        let recordedDiagnostics = diagnosticRecorder.diagnostics
+        let stopDiagnostics = try #require(
+            recordedDiagnostics.last(where: { $0.event == .captureStopped })
+        )
+        #expect(stopDiagnostics.systemSourceFormat == "sampleRate=16000.0 channelCount=1 commonFormat=pcmFormatFloat32 interleaved=false")
+        #expect(stopDiagnostics.microphoneSourceFormat == "sampleRate=16000.0 channelCount=1 commonFormat=pcmFormatFloat32 interleaved=false")
+        #expect(stopDiagnostics.systemRawPeakPower == 0.10)
+        #expect(stopDiagnostics.microphoneRawPeakPower == 0.20)
+        #expect(stopDiagnostics.systemRawNonZeroFrameCount == 2)
+        #expect(stopDiagnostics.microphoneRawNonZeroFrameCount == 2)
+        #expect(stopDiagnostics.systemPeakPower == 0.10)
+        #expect(stopDiagnostics.microphonePeakPower == 0.20)
+        #expect(stopDiagnostics.writtenPeakPower == 0.30)
     }
 
     @Test
@@ -1075,6 +1346,71 @@ struct NativeAudioCapturePipelineTests {
     }
 
     @Test
+    func captureOutputSinkConvertsInterleavedMonoMicrophoneBufferWithoutSilencingIt() async throws {
+        let writer = AudioFileWriterSpy()
+        let sink = CaptureOutputSink(
+            writer: writer,
+            captureConfiguration: .init(capturesMicrophone: true)
+        )
+
+        try sink.appendForTesting(
+            makePCMBufferFromSampleBufferForTesting(
+                makeInterleavedMonoAudioSampleBuffer(
+                    samples: [0.30, -0.15, 0.25, -0.10],
+                    sampleRate: 24_000,
+                    presentationTimeSeconds: 4.000
+                )
+            ),
+            presentationTimeSeconds: 4.000,
+            outputType: .microphone
+        )
+
+        let diagnostics = try await sink.finish()
+
+        #expect(diagnostics.microphoneSourceFormat == "sampleRate=24000.0 channelCount=1 commonFormat=pcmFormatFloat32 interleaved=true")
+        #expect(diagnostics.microphoneRawMetrics.peakPower == 0.30)
+        #expect(diagnostics.microphoneRawMetrics.nonZeroFrameCount == 4)
+        #expect(diagnostics.microphoneMetrics.peakPower > 0)
+        #expect(diagnostics.microphoneMetrics.nonZeroFrameCount > 0)
+        #expect(diagnostics.writtenMetrics.peakPower > 0)
+
+        #expect(writer.appendedBuffers.count == 1)
+        let mixedBuffer = try #require(writer.appendedBuffers.first)
+        #expect(mixedBuffer.frameLength > 0)
+        #expect(abs(mixedBuffer.floatChannelData?[0][0] ?? 0) > 0)
+        #expect(abs(mixedBuffer.floatChannelData?[1][0] ?? 0) > 0)
+    }
+
+    @Test
+    func captureOutputSinkConvertsDirectInterleavedMonoMicrophoneBufferWithoutSilencingIt() async throws {
+        let writer = AudioFileWriterSpy()
+        let sink = CaptureOutputSink(
+            writer: writer,
+            captureConfiguration: .init(capturesMicrophone: true)
+        )
+
+        try sink.appendForTesting(
+            makeInterleavedMonoTestPCMBuffer(
+                samples: [0.30, -0.15, 0.25, -0.10],
+                sampleRate: 24_000
+            ),
+            presentationTimeSeconds: 4.000,
+            outputType: .microphone
+        )
+
+        let diagnostics = try await sink.finish()
+
+        #expect(diagnostics.microphoneSourceFormat == "sampleRate=24000.0 channelCount=1 commonFormat=pcmFormatFloat32 interleaved=true")
+        #expect(diagnostics.microphoneRawMetrics.peakPower == 0.30)
+        #expect(diagnostics.microphoneRawMetrics.nonZeroFrameCount == 4)
+        #expect(diagnostics.microphoneMetrics.peakPower > 0)
+        #expect(diagnostics.microphoneMetrics.nonZeroFrameCount > 0)
+        #expect(diagnostics.writtenMetrics.peakPower > 0)
+
+        #expect(writer.appendedBuffers.count == 1)
+    }
+
+    @Test
     func captureOutputSinkPreservesLongerSystemBufferTailAfterMixing() async throws {
         let writer = AudioFileWriterSpy()
         let sink = CaptureOutputSink(
@@ -1171,6 +1507,152 @@ struct NativeAudioCapturePipelineTests {
         }
 
         return buffer
+    }
+
+    private func makeInterleavedMonoTestPCMBuffer(
+        samples: [Float],
+        sampleRate: Double
+    ) throws -> AVAudioPCMBuffer {
+        let format = try #require(
+            AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: 1,
+                interleaved: true
+            )
+        )
+        let buffer = try #require(
+            AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(samples.count)
+            )
+        )
+
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        let audioBuffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        let audioBuffer = try #require(audioBuffers.first)
+        let channelData = try #require(audioBuffer.mData?.assumingMemoryBound(to: Float.self))
+
+        for index in 0 ..< samples.count {
+            channelData[index] = samples[index]
+        }
+
+        return buffer
+    }
+
+    private func makeInterleavedMonoAudioSampleBuffer(
+        samples: [Float],
+        sampleRate: Double,
+        presentationTimeSeconds: Double
+    ) throws -> CMSampleBuffer {
+        var streamDescription = AudioStreamBasicDescription(
+            mSampleRate: sampleRate,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: UInt32(MemoryLayout<Float>.stride),
+            mFramesPerPacket: 1,
+            mBytesPerFrame: UInt32(MemoryLayout<Float>.stride),
+            mChannelsPerFrame: 1,
+            mBitsPerChannel: 32,
+            mReserved: 0
+        )
+
+        var formatDescription: CMAudioFormatDescription?
+        let formatStatus = CMAudioFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault,
+            asbd: &streamDescription,
+            layoutSize: 0,
+            layout: nil,
+            magicCookieSize: 0,
+            magicCookie: nil,
+            extensions: nil,
+            formatDescriptionOut: &formatDescription
+        )
+        guard formatStatus == noErr, let formatDescription else {
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+
+        let byteCount = samples.count * MemoryLayout<Float>.stride
+        var blockBuffer: CMBlockBuffer?
+        let blockStatus = CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault,
+            memoryBlock: nil,
+            blockLength: byteCount,
+            blockAllocator: kCFAllocatorDefault,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: byteCount,
+            flags: 0,
+            blockBufferOut: &blockBuffer
+        )
+        guard blockStatus == kCMBlockBufferNoErr, let blockBuffer else {
+            throw NativeAudioCapturePipelineError.audioBufferCopyFailed(blockStatus)
+        }
+
+        let replaceStatus = samples.withUnsafeBytes { sampleBytes in
+            CMBlockBufferReplaceDataBytes(
+                with: sampleBytes.baseAddress!,
+                blockBuffer: blockBuffer,
+                offsetIntoDestination: 0,
+                dataLength: byteCount
+            )
+        }
+        guard replaceStatus == kCMBlockBufferNoErr else {
+            throw NativeAudioCapturePipelineError.audioBufferCopyFailed(replaceStatus)
+        }
+
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: CMTimeScale(sampleRate)),
+            presentationTimeStamp: CMTime(seconds: presentationTimeSeconds, preferredTimescale: 48_000),
+            decodeTimeStamp: .invalid
+        )
+
+        var sampleBuffer: CMSampleBuffer?
+        let sampleSize = byteCount / samples.count
+        let sampleStatus = CMSampleBufferCreateReady(
+            allocator: kCFAllocatorDefault,
+            dataBuffer: blockBuffer,
+            formatDescription: formatDescription,
+            sampleCount: samples.count,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleSizeEntryCount: 1,
+            sampleSizeArray: [sampleSize],
+            sampleBufferOut: &sampleBuffer
+        )
+        guard sampleStatus == noErr, let sampleBuffer else {
+            throw NativeAudioCapturePipelineError.audioBufferCopyFailed(sampleStatus)
+        }
+
+        return sampleBuffer
+    }
+
+    private func makePCMBufferFromSampleBufferForTesting(
+        _ sampleBuffer: CMSampleBuffer
+    ) throws -> AVAudioPCMBuffer {
+        let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
+
+        guard frameCount > 0,
+              let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let pcmBuffer = AVAudioPCMBuffer(
+                  pcmFormat: AVAudioFormat(cmAudioFormatDescription: formatDescription),
+                  frameCapacity: AVAudioFrameCount(frameCount)
+              ) else {
+            throw NativeAudioCapturePipelineError.invalidAudioSampleBuffer
+        }
+
+        pcmBuffer.frameLength = pcmBuffer.frameCapacity
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(frameCount),
+            into: pcmBuffer.mutableAudioBufferList
+        )
+        guard status == noErr else {
+            throw NativeAudioCapturePipelineError.audioBufferCopyFailed(status)
+        }
+
+        return pcmBuffer
     }
 }
 

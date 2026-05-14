@@ -6,6 +6,7 @@
 //
 
 import AVFAudio
+import AVFoundation
 import CoreMedia
 import Foundation
 import OSLog
@@ -58,6 +59,27 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         let event: RecordingDiagnosticEvent
         let outputURL: URL
         let sampleBufferCount: Int
+        let systemSampleBufferCount: Int
+        let microphoneSampleBufferCount: Int
+        let systemSourceFormat: String?
+        let microphoneSourceFormat: String?
+        let systemRawPeakPower: Float
+        let systemRawRMSPower: Float
+        let systemRawNonZeroFrameCount: Int
+        let microphoneRawPeakPower: Float
+        let microphoneRawRMSPower: Float
+        let microphoneRawNonZeroFrameCount: Int
+        let systemPeakPower: Float
+        let systemRMSPower: Float
+        let systemNonZeroFrameCount: Int
+        let microphonePeakPower: Float
+        let microphoneRMSPower: Float
+        let microphoneNonZeroFrameCount: Int
+        let writtenPeakPower: Float
+        let writtenRMSPower: Float
+        let writtenNonZeroFrameCount: Int
+        let microphoneCaptureDeviceID: String?
+        let microphoneCaptureDeviceName: String?
         let firstSampleSeconds: Double?
         let lastSampleSeconds: Double?
         let fileExists: Bool
@@ -70,18 +92,26 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         let channelCount: Int
         let capturesSystemAudio: Bool
         let capturesMicrophone: Bool
+        let microphoneCaptureDeviceID: String?
 
         init(
             sampleRate: Double = 48_000,
             channelCount: Int = 2,
             capturesSystemAudio: Bool = true,
-            capturesMicrophone: Bool = false
+            capturesMicrophone: Bool = false,
+            microphoneCaptureDeviceID: String? = nil
         ) {
             self.sampleRate = sampleRate
             self.channelCount = channelCount
             self.capturesSystemAudio = capturesSystemAudio
             self.capturesMicrophone = capturesMicrophone
+            self.microphoneCaptureDeviceID = microphoneCaptureDeviceID
         }
+    }
+
+    struct MicrophoneDevice: Equatable {
+        let id: String
+        let name: String
     }
 
     struct CaptureTarget {
@@ -118,19 +148,27 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     private let shareableContentProvider: () async throws -> CaptureTarget
     private let writerFactory: (URL) throws -> any AudioFileWriting
     private let captureConfiguration: CaptureConfiguration
+    private let microphoneDeviceProvider: () -> MicrophoneDevice?
     private let diagnosticHandler: @Sendable (RecordingDiagnostics) -> Void
     private var state: State = .idle
+    private var activeMicrophoneDevice: MicrophoneDevice?
     private let logger = Logger(subsystem: "info.akitov.QuickMeeting", category: "Recording")
 
     init(
         shareableContentProvider: @escaping () async throws -> CaptureTarget,
         writerFactory: @escaping (URL) throws -> any AudioFileWriting,
         captureConfiguration: CaptureConfiguration,
+        microphoneDeviceProvider: @escaping () -> MicrophoneDevice? = {
+            AVCaptureDevice.default(for: .audio).map {
+                MicrophoneDevice(id: $0.uniqueID, name: $0.localizedName)
+            }
+        },
         diagnosticHandler: @escaping @Sendable (RecordingDiagnostics) -> Void = { _ in }
     ) {
         self.shareableContentProvider = shareableContentProvider
         self.writerFactory = writerFactory
         self.captureConfiguration = captureConfiguration
+        self.microphoneDeviceProvider = microphoneDeviceProvider
         self.diagnosticHandler = diagnosticHandler
     }
 
@@ -148,6 +186,8 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         }
 
         let writer = try writerFactory(outputURL)
+        let resolvedCaptureConfiguration = resolvedCaptureConfiguration()
+        activeMicrophoneDevice = resolvedCaptureConfiguration.capturesMicrophone ? microphoneDeviceProvider() : nil
         emitDiagnostics(
             event: .writerPrepared,
             outputURL: outputURL,
@@ -160,10 +200,10 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
             let target = try await shareableContentProvider()
             let createdOutputSink = CaptureOutputSink(
                 writer: writer,
-                captureConfiguration: captureConfiguration
+                captureConfiguration: resolvedCaptureConfiguration
             )
             outputSink = createdOutputSink
-            let session = try target.makeSession(captureConfiguration, createdOutputSink)
+            let session = try target.makeSession(resolvedCaptureConfiguration, createdOutputSink)
 
             state = .capturing(
                 session: session,
@@ -199,6 +239,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
                     error: error
                 )
             }
+            activeMicrophoneDevice = nil
 
             throw error
         }
@@ -254,6 +295,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
                 captureDiagnostics: captureDiagnostics,
                 error: nil
             )
+            activeMicrophoneDevice = nil
         } catch {
             let captureDiagnostics = await outputSink.currentDiagnostics()
             emitDiagnostics(
@@ -262,6 +304,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
                 captureDiagnostics: captureDiagnostics,
                 error: error
             )
+            activeMicrophoneDevice = nil
             throw error
         }
     }
@@ -277,6 +320,27 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
             event: event,
             outputURL: outputURL,
             sampleBufferCount: captureDiagnostics?.sampleBufferCount ?? 0,
+            systemSampleBufferCount: captureDiagnostics?.systemSampleBufferCount ?? 0,
+            microphoneSampleBufferCount: captureDiagnostics?.microphoneSampleBufferCount ?? 0,
+            systemSourceFormat: captureDiagnostics?.systemSourceFormat,
+            microphoneSourceFormat: captureDiagnostics?.microphoneSourceFormat,
+            systemRawPeakPower: captureDiagnostics?.systemRawMetrics.peakPower ?? 0,
+            systemRawRMSPower: captureDiagnostics?.systemRawMetrics.rmsPower ?? 0,
+            systemRawNonZeroFrameCount: captureDiagnostics?.systemRawMetrics.nonZeroFrameCount ?? 0,
+            microphoneRawPeakPower: captureDiagnostics?.microphoneRawMetrics.peakPower ?? 0,
+            microphoneRawRMSPower: captureDiagnostics?.microphoneRawMetrics.rmsPower ?? 0,
+            microphoneRawNonZeroFrameCount: captureDiagnostics?.microphoneRawMetrics.nonZeroFrameCount ?? 0,
+            systemPeakPower: captureDiagnostics?.systemMetrics.peakPower ?? 0,
+            systemRMSPower: captureDiagnostics?.systemMetrics.rmsPower ?? 0,
+            systemNonZeroFrameCount: captureDiagnostics?.systemMetrics.nonZeroFrameCount ?? 0,
+            microphonePeakPower: captureDiagnostics?.microphoneMetrics.peakPower ?? 0,
+            microphoneRMSPower: captureDiagnostics?.microphoneMetrics.rmsPower ?? 0,
+            microphoneNonZeroFrameCount: captureDiagnostics?.microphoneMetrics.nonZeroFrameCount ?? 0,
+            writtenPeakPower: captureDiagnostics?.writtenMetrics.peakPower ?? 0,
+            writtenRMSPower: captureDiagnostics?.writtenMetrics.rmsPower ?? 0,
+            writtenNonZeroFrameCount: captureDiagnostics?.writtenMetrics.nonZeroFrameCount ?? 0,
+            microphoneCaptureDeviceID: activeMicrophoneDevice?.id ?? captureConfiguration.microphoneCaptureDeviceID,
+            microphoneCaptureDeviceName: activeMicrophoneDevice?.name,
             firstSampleSeconds: captureDiagnostics?.firstSampleSeconds,
             lastSampleSeconds: captureDiagnostics?.lastSampleSeconds,
             fileExists: fileMetadata.exists,
@@ -287,7 +351,17 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         logger.info(
             """
             event=\(String(describing: diagnostics.event), privacy: .public) outputURL=\(diagnostics.outputURL.path(), privacy: .public) \
-            sampleBufferCount=\(diagnostics.sampleBufferCount) firstSampleSeconds=\(String(describing: diagnostics.firstSampleSeconds), privacy: .public) \
+            sampleBufferCount=\(diagnostics.sampleBufferCount) systemSampleBufferCount=\(diagnostics.systemSampleBufferCount) \
+            microphoneSampleBufferCount=\(diagnostics.microphoneSampleBufferCount) microphoneCaptureDeviceID=\(diagnostics.microphoneCaptureDeviceID ?? "none", privacy: .public) \
+            microphoneCaptureDeviceName=\(diagnostics.microphoneCaptureDeviceName ?? "none", privacy: .public) systemSourceFormat=\(diagnostics.systemSourceFormat ?? "none", privacy: .public) \
+            microphoneSourceFormat=\(diagnostics.microphoneSourceFormat ?? "none", privacy: .public) systemRawPeakPower=\(diagnostics.systemRawPeakPower) \
+            systemRawRMSPower=\(diagnostics.systemRawRMSPower) systemRawNonZeroFrameCount=\(diagnostics.systemRawNonZeroFrameCount) \
+            microphoneRawPeakPower=\(diagnostics.microphoneRawPeakPower) microphoneRawRMSPower=\(diagnostics.microphoneRawRMSPower) \
+            microphoneRawNonZeroFrameCount=\(diagnostics.microphoneRawNonZeroFrameCount) systemPeakPower=\(diagnostics.systemPeakPower) \
+            systemRMSPower=\(diagnostics.systemRMSPower) systemNonZeroFrameCount=\(diagnostics.systemNonZeroFrameCount) \
+            microphonePeakPower=\(diagnostics.microphonePeakPower) microphoneRMSPower=\(diagnostics.microphoneRMSPower) \
+            microphoneNonZeroFrameCount=\(diagnostics.microphoneNonZeroFrameCount) writtenPeakPower=\(diagnostics.writtenPeakPower) \
+            writtenRMSPower=\(diagnostics.writtenRMSPower) writtenNonZeroFrameCount=\(diagnostics.writtenNonZeroFrameCount) firstSampleSeconds=\(String(describing: diagnostics.firstSampleSeconds), privacy: .public) \
             lastSampleSeconds=\(String(describing: diagnostics.lastSampleSeconds), privacy: .public) fileExists=\(diagnostics.fileExists) \
             fileSizeBytes=\(String(describing: diagnostics.fileSizeBytes), privacy: .public) error=\(diagnostics.errorDescription ?? "none", privacy: .public)
             """
@@ -306,6 +380,25 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         let attributes = try? fileManager.attributesOfItem(atPath: path)
         let fileSize = attributes?[.size] as? NSNumber
         return (true, fileSize?.uint64Value)
+    }
+
+    private func resolvedCaptureConfiguration() -> CaptureConfiguration {
+        guard captureConfiguration.capturesMicrophone else {
+            return captureConfiguration
+        }
+
+        guard captureConfiguration.microphoneCaptureDeviceID == nil else {
+            return captureConfiguration
+        }
+
+        let microphoneDevice = microphoneDeviceProvider()
+        return CaptureConfiguration(
+            sampleRate: captureConfiguration.sampleRate,
+            channelCount: captureConfiguration.channelCount,
+            capturesSystemAudio: captureConfiguration.capturesSystemAudio,
+            capturesMicrophone: captureConfiguration.capturesMicrophone,
+            microphoneCaptureDeviceID: microphoneDevice?.id
+        )
     }
 
     private static func makeLiveCaptureTarget() async throws -> CaptureTarget {
@@ -347,9 +440,26 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
 
 struct CaptureOutputDiagnostics {
     let sampleBufferCount: Int
+    let systemSampleBufferCount: Int
+    let microphoneSampleBufferCount: Int
+    let systemSourceFormat: String?
+    let microphoneSourceFormat: String?
+    let systemRawMetrics: AudioSignalMetrics
+    let microphoneRawMetrics: AudioSignalMetrics
+    let systemMetrics: AudioSignalMetrics
+    let microphoneMetrics: AudioSignalMetrics
+    let writtenMetrics: AudioSignalMetrics
     let firstSampleSeconds: Double?
     let lastSampleSeconds: Double?
     let storedErrorDescription: String?
+}
+
+struct AudioSignalMetrics: Equatable {
+    let peakPower: Float
+    let rmsPower: Float
+    let nonZeroFrameCount: Int
+
+    static let zero = AudioSignalMetrics(peakPower: 0, rmsPower: 0, nonZeroFrameCount: 0)
 }
 
 final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
@@ -358,9 +468,19 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
     )
 
     private var writer: (any NativeAudioCapturePipeline.AudioFileWriting)?
+    private let measuringWriter: MeasuringAudioFileWriter
     private let mixer: CapturedAudioMixer
+    private let converter = CanonicalAudioBufferConverter()
     private var storedError: Error?
     private var sampleBufferCount = 0
+    private var systemSampleBufferCount = 0
+    private var microphoneSampleBufferCount = 0
+    private var systemSourceFormat: String?
+    private var microphoneSourceFormat: String?
+    private let systemRawMetricsAccumulator = AudioSignalMetricsAccumulator()
+    private let microphoneRawMetricsAccumulator = AudioSignalMetricsAccumulator()
+    private let systemMetricsAccumulator = AudioSignalMetricsAccumulator()
+    private let microphoneMetricsAccumulator = AudioSignalMetricsAccumulator()
     private var firstSampleSeconds: Double?
     private var lastSampleSeconds: Double?
 
@@ -368,9 +488,11 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
         writer: any NativeAudioCapturePipeline.AudioFileWriting,
         captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration = .init()
     ) {
+        let measuringWriter = MeasuringAudioFileWriter(base: writer)
         self.writer = writer
+        self.measuringWriter = measuringWriter
         mixer = CapturedAudioMixer(
-            writer: writer,
+            writer: measuringWriter,
             capturesSystemAudio: captureConfiguration.capturesSystemAudio,
             capturesMicrophone: captureConfiguration.capturesMicrophone
         )
@@ -390,12 +512,17 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
         }
 
         do {
+            let rawBuffer = try sampleBuffer.makePCMBuffer()
+            recordRawDiagnostics(for: rawBuffer, source: source)
+            let canonicalBuffer = try converter.canonicalBuffer(from: rawBuffer)
+            recordMetrics(for: canonicalBuffer, source: source)
             try mixer.append(
-                sampleBuffer,
+                canonicalBuffer,
                 presentationTimeSeconds: CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds,
                 source: source
             )
             sampleBufferCount += 1
+            incrementSourceCount(for: source)
 
             let presentationTimeSeconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
             if presentationTimeSeconds.isFinite {
@@ -418,12 +545,16 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
             return
         }
 
+        recordRawDiagnostics(for: buffer, source: source)
+        let canonicalBuffer = try converter.canonicalBuffer(from: buffer)
+        recordMetrics(for: canonicalBuffer, source: source)
         try mixer.append(
-            buffer,
+            canonicalBuffer,
             presentationTimeSeconds: presentationTimeSeconds,
             source: source
         )
         sampleBufferCount += 1
+        incrementSourceCount(for: source)
 
         if firstSampleSeconds == nil {
             firstSampleSeconds = presentationTimeSeconds
@@ -448,12 +579,30 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
                 let completionError = self.storedError
                 let diagnostics = CaptureOutputDiagnostics(
                     sampleBufferCount: self.sampleBufferCount,
+                    systemSampleBufferCount: self.systemSampleBufferCount,
+                    microphoneSampleBufferCount: self.microphoneSampleBufferCount,
+                    systemSourceFormat: self.systemSourceFormat,
+                    microphoneSourceFormat: self.microphoneSourceFormat,
+                    systemRawMetrics: self.systemRawMetricsAccumulator.snapshot(),
+                    microphoneRawMetrics: self.microphoneRawMetricsAccumulator.snapshot(),
+                    systemMetrics: self.systemMetricsAccumulator.snapshot(),
+                    microphoneMetrics: self.microphoneMetricsAccumulator.snapshot(),
+                    writtenMetrics: self.measuringWriter.metrics,
                     firstSampleSeconds: self.firstSampleSeconds,
                     lastSampleSeconds: self.lastSampleSeconds,
                     storedErrorDescription: completionError?.localizedDescription
                 )
                 self.storedError = nil
                 self.sampleBufferCount = 0
+                self.systemSampleBufferCount = 0
+                self.microphoneSampleBufferCount = 0
+                self.systemSourceFormat = nil
+                self.microphoneSourceFormat = nil
+                self.systemRawMetricsAccumulator.reset()
+                self.microphoneRawMetricsAccumulator.reset()
+                self.systemMetricsAccumulator.reset()
+                self.microphoneMetricsAccumulator.reset()
+                self.measuringWriter.resetMetrics()
                 self.firstSampleSeconds = nil
                 self.lastSampleSeconds = nil
 
@@ -482,6 +631,15 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
                 continuation.resume(
                     returning: CaptureOutputDiagnostics(
                         sampleBufferCount: self.sampleBufferCount,
+                        systemSampleBufferCount: self.systemSampleBufferCount,
+                        microphoneSampleBufferCount: self.microphoneSampleBufferCount,
+                        systemSourceFormat: self.systemSourceFormat,
+                        microphoneSourceFormat: self.microphoneSourceFormat,
+                        systemRawMetrics: self.systemRawMetricsAccumulator.snapshot(),
+                        microphoneRawMetrics: self.microphoneRawMetricsAccumulator.snapshot(),
+                        systemMetrics: self.systemMetricsAccumulator.snapshot(),
+                        microphoneMetrics: self.microphoneMetricsAccumulator.snapshot(),
+                        writtenMetrics: self.measuringWriter.metrics,
                         firstSampleSeconds: self.firstSampleSeconds,
                         lastSampleSeconds: self.lastSampleSeconds,
                         storedErrorDescription: self.storedError?.localizedDescription
@@ -500,6 +658,184 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
         default:
             nil
         }
+    }
+
+    private func incrementSourceCount(for source: CapturedAudioSource) {
+        switch source {
+        case .system:
+            systemSampleBufferCount += 1
+        case .microphone:
+            microphoneSampleBufferCount += 1
+        }
+    }
+
+    private func recordMetrics(
+        for buffer: AVAudioPCMBuffer,
+        source: CapturedAudioSource
+    ) {
+        switch source {
+        case .system:
+            systemMetricsAccumulator.record(buffer)
+        case .microphone:
+            microphoneMetricsAccumulator.record(buffer)
+        }
+    }
+
+    private func recordRawDiagnostics(
+        for buffer: AVAudioPCMBuffer,
+        source: CapturedAudioSource
+    ) {
+        switch source {
+        case .system:
+            if systemSourceFormat == nil {
+                systemSourceFormat = describeAudioFormat(buffer.format)
+            }
+            systemRawMetricsAccumulator.record(buffer)
+        case .microphone:
+            if microphoneSourceFormat == nil {
+                microphoneSourceFormat = describeAudioFormat(buffer.format)
+            }
+            microphoneRawMetricsAccumulator.record(buffer)
+        }
+    }
+}
+
+private final class AudioSignalMetricsAccumulator {
+    private var maxAbsoluteSample: Float = 0
+    private var sumOfSquares: Double = 0
+    private var totalSampleCount = 0
+    private var nonZeroFrameCount = 0
+
+    func record(_ buffer: AVAudioPCMBuffer) {
+        let frameCount = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        guard frameCount > 0, channelCount > 0 else {
+            return
+        }
+
+        let audioBuffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+
+        switch buffer.format.commonFormat {
+        case .pcmFormatFloat32:
+            record(frameCount: frameCount, channelCount: channelCount, audioBuffers: audioBuffers, bytesPerSample: MemoryLayout<Float>.stride) { audioBuffer, sampleIndex in
+                let samples = audioBuffer.mData!.assumingMemoryBound(to: Float.self)
+                return samples[sampleIndex]
+            }
+        case .pcmFormatFloat64:
+            record(frameCount: frameCount, channelCount: channelCount, audioBuffers: audioBuffers, bytesPerSample: MemoryLayout<Double>.stride) { audioBuffer, sampleIndex in
+                let samples = audioBuffer.mData!.assumingMemoryBound(to: Double.self)
+                return Float(samples[sampleIndex])
+            }
+        case .pcmFormatInt16:
+            record(frameCount: frameCount, channelCount: channelCount, audioBuffers: audioBuffers, bytesPerSample: MemoryLayout<Int16>.stride) { audioBuffer, sampleIndex in
+                let samples = audioBuffer.mData!.assumingMemoryBound(to: Int16.self)
+                return Float(samples[sampleIndex]) / Float(Int16.max)
+            }
+        case .pcmFormatInt32:
+            record(frameCount: frameCount, channelCount: channelCount, audioBuffers: audioBuffers, bytesPerSample: MemoryLayout<Int32>.stride) { audioBuffer, sampleIndex in
+                let samples = audioBuffer.mData!.assumingMemoryBound(to: Int32.self)
+                return Float(samples[sampleIndex]) / Float(Int32.max)
+            }
+        default:
+            return
+        }
+    }
+
+    private func record(
+        frameCount: Int,
+        channelCount: Int,
+        audioBuffers: UnsafeMutableAudioBufferListPointer,
+        bytesPerSample: Int,
+        sampleAt: (AudioBuffer, Int) -> Float
+    ) {
+        guard !audioBuffers.isEmpty else {
+            return
+        }
+
+        let isInterleaved = audioBuffers.count == 1 && channelCount > 1
+
+        for frameIndex in 0 ..< frameCount {
+            var frameHasNonZeroSample = false
+
+            for channelIndex in 0 ..< channelCount {
+                let audioBuffer: AudioBuffer
+                let sampleIndex: Int
+
+                if isInterleaved {
+                    audioBuffer = audioBuffers[0]
+                    sampleIndex = frameIndex * channelCount + channelIndex
+                } else {
+                    guard channelIndex < audioBuffers.count else {
+                        continue
+                    }
+                    audioBuffer = audioBuffers[channelIndex]
+                    sampleIndex = frameIndex
+                }
+
+                let availableSampleCount = Int(audioBuffer.mDataByteSize) / bytesPerSample
+                guard sampleIndex < availableSampleCount else {
+                    continue
+                }
+
+                let sample = sampleAt(audioBuffer, sampleIndex)
+                let magnitude = abs(sample)
+                maxAbsoluteSample = max(maxAbsoluteSample, magnitude)
+                sumOfSquares += Double(sample * sample)
+                totalSampleCount += 1
+                if sample != 0 {
+                    frameHasNonZeroSample = true
+                }
+            }
+
+            if frameHasNonZeroSample {
+                nonZeroFrameCount += 1
+            }
+        }
+    }
+
+    func snapshot() -> AudioSignalMetrics {
+        guard totalSampleCount > 0 else {
+            return .zero
+        }
+
+        return AudioSignalMetrics(
+            peakPower: maxAbsoluteSample,
+            rmsPower: Float(sqrt(sumOfSquares / Double(totalSampleCount))),
+            nonZeroFrameCount: nonZeroFrameCount
+        )
+    }
+
+    func reset() {
+        maxAbsoluteSample = 0
+        sumOfSquares = 0
+        totalSampleCount = 0
+        nonZeroFrameCount = 0
+    }
+}
+
+private final class MeasuringAudioFileWriter: NativeAudioCapturePipeline.AudioFileWriting {
+    private let base: any NativeAudioCapturePipeline.AudioFileWriting
+    private let accumulator = AudioSignalMetricsAccumulator()
+
+    init(base: any NativeAudioCapturePipeline.AudioFileWriting) {
+        self.base = base
+    }
+
+    var metrics: AudioSignalMetrics {
+        accumulator.snapshot()
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) throws {
+        accumulator.record(buffer)
+        try base.append(buffer)
+    }
+
+    func finish() throws {
+        try base.finish()
+    }
+
+    func resetMetrics() {
+        accumulator.reset()
     }
 }
 
@@ -891,6 +1227,7 @@ private final class ScreenCaptureAudioStreamSession: NativeAudioCapturePipeline.
         configuration.channelCount = captureConfiguration.channelCount
         configuration.excludesCurrentProcessAudio = false
         configuration.captureMicrophone = captureConfiguration.capturesMicrophone
+        configuration.microphoneCaptureDeviceID = captureConfiguration.microphoneCaptureDeviceID
 
         let stream = SCStream(
             filter: contentFilter,
@@ -993,19 +1330,21 @@ private final class CanonicalAudioBufferConverter {
             return sourceBuffer
         }
 
-        if formatsMatch(sourceBuffer.format, Self.canonicalFormat) {
-            return sourceBuffer
+        let normalizedSourceBuffer = try normalizedSourceBuffer(from: sourceBuffer)
+
+        if formatsMatch(normalizedSourceBuffer.format, Self.canonicalFormat) {
+            return normalizedSourceBuffer
         }
 
-        guard let converter = AVAudioConverter(from: sourceBuffer.format, to: Self.canonicalFormat) else {
+        guard let converter = AVAudioConverter(from: normalizedSourceBuffer.format, to: Self.canonicalFormat) else {
             throw NativeAudioCapturePipelineError.audioConversionFailed
         }
 
         let frameCapacity = max(
             AVAudioFrameCount(
                 ceil(
-                    Double(sourceBuffer.frameLength)
-                        * (Self.canonicalFormat.sampleRate / sourceBuffer.format.sampleRate)
+                    Double(normalizedSourceBuffer.frameLength)
+                        * (Self.canonicalFormat.sampleRate / normalizedSourceBuffer.format.sampleRate)
                 )
             ),
             1
@@ -1020,29 +1359,41 @@ private final class CanonicalAudioBufferConverter {
 
         var didProvideInput = false
         var conversionError: NSError?
-        let status = converter.convert(to: convertedBuffer, error: &conversionError) { _, outputStatus in
-            if didProvideInput {
-                outputStatus.pointee = .endOfStream
-                return nil
+        for _ in 0 ..< 3 {
+            convertedBuffer.frameLength = 0
+
+            let status = converter.convert(to: convertedBuffer, error: &conversionError) { _, outputStatus in
+                if didProvideInput {
+                    outputStatus.pointee = .endOfStream
+                    return nil
+                }
+
+                didProvideInput = true
+                outputStatus.pointee = .haveData
+                return normalizedSourceBuffer
             }
 
-            didProvideInput = true
-            outputStatus.pointee = .haveData
-            return sourceBuffer
+            if let conversionError {
+                throw conversionError
+            }
+
+            if convertedBuffer.frameLength > 0 {
+                return convertedBuffer
+            }
+
+            switch status {
+            case .inputRanDry, .endOfStream:
+                continue
+            case .haveData:
+                return convertedBuffer
+            case .error:
+                throw NativeAudioCapturePipelineError.audioConversionFailed
+            @unknown default:
+                throw NativeAudioCapturePipelineError.audioConversionFailed
+            }
         }
 
-        if let conversionError {
-            throw conversionError
-        }
-
-        switch status {
-        case .haveData, .inputRanDry, .endOfStream:
-            return convertedBuffer
-        case .error:
-            throw NativeAudioCapturePipelineError.audioConversionFailed
-        @unknown default:
-            throw NativeAudioCapturePipelineError.audioConversionFailed
-        }
+        return convertedBuffer
     }
 
     private func formatsMatch(_ lhs: AVAudioFormat, _ rhs: AVAudioFormat) -> Bool {
@@ -1051,6 +1402,70 @@ private final class CanonicalAudioBufferConverter {
             && lhs.commonFormat == rhs.commonFormat
             && lhs.isInterleaved == rhs.isInterleaved
     }
+
+    private func normalizedSourceBuffer(from sourceBuffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer {
+        guard sourceBuffer.format.channelCount == 1, sourceBuffer.format.isInterleaved else {
+            return sourceBuffer
+        }
+
+        let normalizedFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sourceBuffer.format.sampleRate,
+            channels: 1,
+            interleaved: false
+        )!
+        guard let normalizedBuffer = AVAudioPCMBuffer(
+            pcmFormat: normalizedFormat,
+            frameCapacity: sourceBuffer.frameLength
+        ) else {
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+
+        normalizedBuffer.frameLength = sourceBuffer.frameLength
+        guard let destinationChannel = normalizedBuffer.floatChannelData?[0] else {
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+
+        let samples = try sourceSamples(from: sourceBuffer)
+        for (index, sample) in samples.enumerated() {
+            destinationChannel[index] = sample
+        }
+
+        return normalizedBuffer
+    }
+
+    private func sourceSamples(from sourceBuffer: AVAudioPCMBuffer) throws -> [Float] {
+        let frameCount = Int(sourceBuffer.frameLength)
+        guard frameCount > 0 else {
+            return []
+        }
+
+        let audioBuffers = UnsafeMutableAudioBufferListPointer(sourceBuffer.mutableAudioBufferList)
+        guard let audioBuffer = audioBuffers.first, let rawData = audioBuffer.mData else {
+            throw NativeAudioCapturePipelineError.invalidAudioSampleBuffer
+        }
+
+        switch sourceBuffer.format.commonFormat {
+        case .pcmFormatFloat32:
+            let samples = rawData.assumingMemoryBound(to: Float.self)
+            return (0 ..< frameCount).map { samples[$0] }
+        case .pcmFormatFloat64:
+            let samples = rawData.assumingMemoryBound(to: Double.self)
+            return (0 ..< frameCount).map { Float(samples[$0]) }
+        case .pcmFormatInt16:
+            let samples = rawData.assumingMemoryBound(to: Int16.self)
+            return (0 ..< frameCount).map { Float(samples[$0]) / Float(Int16.max) }
+        case .pcmFormatInt32:
+            let samples = rawData.assumingMemoryBound(to: Int32.self)
+            return (0 ..< frameCount).map { Float(samples[$0]) / Float(Int32.max) }
+        default:
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+    }
+}
+
+private func describeAudioFormat(_ format: AVAudioFormat) -> String {
+    "sampleRate=\(format.sampleRate) channelCount=\(format.channelCount) commonFormat=\(String(describing: format.commonFormat)) interleaved=\(format.isInterleaved)"
 }
 
 private extension CMSampleBuffer {

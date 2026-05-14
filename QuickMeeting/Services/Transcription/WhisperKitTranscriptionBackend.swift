@@ -67,7 +67,14 @@ struct WhisperKitTranscriptionBackend: WhisperTranscriptionBackend {
 
         let results = try await whisperKit.transcribe(
             audioPath: request.audioFileURL.path,
-            decodeOptions: DecodingOptions(language: "ru"),
+            decodeOptions: DecodingOptions(
+                language: "ru",
+                temperature: 0,
+                temperatureFallbackCount: 0,
+                skipSpecialTokens: true,
+                compressionRatioThreshold: 2.2,
+                noSpeechThreshold: 0.4
+            ),
             callback: { _ in
                 return nil
             }
