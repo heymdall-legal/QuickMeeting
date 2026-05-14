@@ -16,9 +16,9 @@ struct MeetingPresenceDetector {
     }
 
     mutating func evaluate(_ sample: MeetingAppActivitySample) -> MeetingAppPresence {
-        let qualifies = sample.isRunning
-            && sample.hasVisibleWindow
-            && (sample.isUsingMedia || sample.isFrontmost || sample.hadRecentFocus)
+        let qualifies = sample.isMicrophoneActive
+            && sample.isRunning
+            && (sample.hasVisibleWindow || sample.hadRecentFocus)
 
         guard qualifies else {
             stableMatchCount = 0

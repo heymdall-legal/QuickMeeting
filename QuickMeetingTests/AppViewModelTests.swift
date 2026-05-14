@@ -292,6 +292,59 @@ struct AppViewModelTests {
     }
 
     @Test
+    func autoRecordingPresenceUpdatesStatusText() async throws {
+        let harness = try AppViewModelTestHarness()
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions
+        )
+
+        await viewModel.updateAutoRecordingPresence(.candidateActive)
+        #expect(viewModel.autoRecordingStatusText == "Detected meeting activity in Толк, waiting 10s")
+
+        await viewModel.updateAutoRecordingPresence(.ending)
+        #expect(viewModel.autoRecordingStatusText == "Meeting activity lost, stopping soon")
+
+        await viewModel.updateAutoRecordingPresence(.inactive)
+        #expect(viewModel.autoRecordingStatusText == nil)
+    }
+
+    @Test
+    func attachedAutoRecordingCoordinatorRemainsAliveLongEnoughToStartRecording() async throws {
+        let harness = try AppViewModelTestHarness()
+        let clock = AppViewModelTestAutoRecordingClock()
+        let meetingID = UUID()
+        var meetingIDs = [meetingID]
+        weak var weakCoordinator: AutoRecordingCoordinator?
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions,
+            meetingIDProvider: { meetingIDs.removeFirst() }
+        )
+
+        do {
+            let coordinator = AutoRecordingCoordinator(
+                clock: clock,
+                intentSink: viewModel,
+                startDelay: 10,
+                stopGracePeriod: 60
+            )
+            weakCoordinator = coordinator
+            viewModel.attachAutoRecordingCoordinator(coordinator)
+        }
+
+        #expect(weakCoordinator != nil)
+        await viewModel.updateAutoRecordingPresence(.candidateActive)
+        await clock.advance(by: 10)
+
+        #expect(viewModel.recordingState == .recording(meetingID: meetingID))
+    }
+
+    @Test
     func deleteMeetingRemovesPersistedMeetingAndArtifacts() async throws {
         let harness = try AppViewModelTestHarness()
         let meetingID = UUID()
@@ -2241,6 +2294,51 @@ private enum AudioCapturePipelineTestError: LocalizedError {
         case .stopFailed:
             "Audio capture stop failed"
         }
+    }
+}
+
+@MainActor
+private final class AppViewModelTestAutoRecordingClock: AutoRecordingClock {
+    private struct ScheduledOperation {
+        let target: TimeInterval
+        let task: AppViewModelTestScheduledTask
+        let operation: @MainActor @Sendable () async -> Void
+    }
+
+    private var currentTime: TimeInterval = 0
+    private var scheduledOperations: [ScheduledOperation] = []
+
+    func schedule(
+        after seconds: TimeInterval,
+        operation: @escaping @MainActor @Sendable () async -> Void
+    ) -> any AutoRecordingScheduledTask {
+        let task = AppViewModelTestScheduledTask()
+        scheduledOperations.append(
+            ScheduledOperation(
+                target: currentTime + seconds,
+                task: task,
+                operation: operation
+            )
+        )
+        return task
+    }
+
+    func advance(by interval: TimeInterval) async {
+        currentTime += interval
+        let ready = scheduledOperations.filter { $0.target <= currentTime }
+        scheduledOperations.removeAll { $0.target <= currentTime }
+
+        for scheduledOperation in ready where !scheduledOperation.task.isCancelled {
+            await scheduledOperation.operation()
+        }
+    }
+}
+
+private final class AppViewModelTestScheduledTask: AutoRecordingScheduledTask, @unchecked Sendable {
+    private(set) var isCancelled = false
+
+    func cancel() {
+        isCancelled = true
     }
 }
 

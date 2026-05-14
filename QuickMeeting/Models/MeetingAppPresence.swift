@@ -13,7 +13,7 @@ struct MeetingAppActivitySample: Equatable, Sendable {
     let isFrontmost: Bool
     let hadRecentFocus: Bool
     let hasVisibleWindow: Bool
-    let isUsingMedia: Bool
+    let isMicrophoneActive: Bool
 }
 
 enum MeetingAppPresence: Equatable, Sendable {

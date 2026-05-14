@@ -63,7 +63,8 @@ These are additive services that can be introduced later without changing the co
 ### Auto Recording Service
 
 - Samples native app activity for supported meeting apps through a dedicated activity-source boundary.
-- Translates sampled activity into app-owned meeting-presence states with a detector instead of relying on one binary OS signal.
+- Requires active microphone usage before any app-side meeting signal can qualify.
+- Combines CoreAudio-backed microphone activity with selected-app visibility or recent focus before translating samples into app-owned meeting-presence states.
 - Applies confirmation and grace-period timing in a coordinator before calling the same `AppViewModel` recording entry points used by manual controls.
 - Persists enablement, selected app profile, and timing settings outside meeting records.
 - Keeps auto-recording optional and visible in the UI rather than silently starting and stopping capture.

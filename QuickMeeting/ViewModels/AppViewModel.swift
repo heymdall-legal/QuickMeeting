@@ -29,7 +29,7 @@ final class AppViewModel: ObservableObject {
     private let dateProvider: () -> Date
     private let meetingIDProvider: () -> UUID
     private let meetingTitleFormatter: DateFormatter
-    private weak var autoRecordingCoordinator: AutoRecordingCoordinator?
+    private var autoRecordingCoordinator: AutoRecordingCoordinator?
     private var recoverableRecordingMeetingID: UUID?
     private var cancellables = Set<AnyCancellable>()
 
