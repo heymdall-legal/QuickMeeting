@@ -8,24 +8,30 @@
 import Foundation
 
 @MainActor
+protocol AutoRecordingPresenceUpdating: AnyObject {
+    var canStopRecording: Bool { get }
+    func updateAutoRecordingPresence(_ presence: MeetingAppPresence) async
+}
+
+@MainActor
 final class MeetingAppMonitor {
     private let settingsStore: any AutoRecordingSettingsStoring
     private let activitySource: any MeetingAppActivitySource
-    private let appViewModel: AppViewModel
+    private weak var presenceSink: (any AutoRecordingPresenceUpdating)?
     private let pollInterval: TimeInterval
     private var detector = MeetingPresenceDetector()
     private var task: Task<Void, Never>?
-    private var lastSelectedApp: AutoRecordingApp?
+    private var lastSelectedBundleIdentifiers: [String] = []
 
     init(
         settingsStore: any AutoRecordingSettingsStoring,
         activitySource: any MeetingAppActivitySource,
-        appViewModel: AppViewModel,
+        presenceSink: any AutoRecordingPresenceUpdating,
         pollInterval: TimeInterval = 1
     ) {
         self.settingsStore = settingsStore
         self.activitySource = activitySource
-        self.appViewModel = appViewModel
+        self.presenceSink = presenceSink
         self.pollInterval = pollInterval
     }
 
@@ -48,31 +54,59 @@ final class MeetingAppMonitor {
         }
     }
 
+    func pollOnceForTesting() async {
+        await pollOnce()
+    }
+
     private func pollOnce() async {
         let settings = settingsStore.load()
 
         guard settings.isEnabled else {
             detector = MeetingPresenceDetector()
-            lastSelectedApp = nil
-            await appViewModel.updateAutoRecordingPresence(.inactive)
+            lastSelectedBundleIdentifiers = []
+            await presenceSink?.updateAutoRecordingPresence(.inactive)
             return
         }
 
-        if lastSelectedApp != settings.selectedApp {
+        let bundleIdentifiers = settings.selectedApps.map(\.bundleIdentifier)
+        guard !bundleIdentifiers.isEmpty else {
             detector = MeetingPresenceDetector()
-            lastSelectedApp = settings.selectedApp
+            lastSelectedBundleIdentifiers = []
+            await presenceSink?.updateAutoRecordingPresence(.inactive)
+            return
         }
 
-        let sample = activitySource.sample(for: settings.selectedApp)
-        let detectedPresence = detector.evaluate(sample)
+        if lastSelectedBundleIdentifiers != bundleIdentifiers {
+            detector = MeetingPresenceDetector()
+            lastSelectedBundleIdentifiers = bundleIdentifiers
+        }
+
+        let samples = bundleIdentifiers.map {
+            activitySource.sample(forBundleIdentifier: $0)
+        }
+
+        if let qualifyingSample = samples.first(where: {
+            $0.isMicrophoneActive && $0.isRunning && ($0.hasVisibleWindow || $0.hadRecentFocus)
+        }) {
+            let detectedPresence = detector.evaluate(qualifyingSample)
+            await presenceSink?.updateAutoRecordingPresence(detectedPresence)
+            return
+        }
+
+        guard let fallbackSample = samples.first else {
+            await presenceSink?.updateAutoRecordingPresence(.inactive)
+            return
+        }
+
+        let detectedPresence = detector.evaluate(fallbackSample)
         let presentationPresence: MeetingAppPresence
 
-        if detectedPresence == .inactive, appViewModel.canStopRecording {
+        if detectedPresence == .inactive, presenceSink?.canStopRecording == true {
             presentationPresence = .ending
         } else {
             presentationPresence = detectedPresence
         }
 
-        await appViewModel.updateAutoRecordingPresence(presentationPresence)
+        await presenceSink?.updateAutoRecordingPresence(presentationPresence)
     }
 }

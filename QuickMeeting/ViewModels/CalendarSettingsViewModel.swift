@@ -27,6 +27,10 @@ final class CalendarSettingsViewModel: ObservableObject {
         selectedCalendarIDs = settingsStore.selectedCalendarIDs()
     }
 
+    var selectedCalendarSummaryText: String {
+        "\(selectedCalendarIDs.count) selected"
+    }
+
     func reload() async {
         authorizationState = calendarIntegration.authorizationState()
 
@@ -60,6 +64,16 @@ final class CalendarSettingsViewModel: ObservableObject {
             selectedCalendarIDs.append(id)
         }
 
+        settingsStore.saveSelectedCalendarIDs(selectedCalendarIDs)
+    }
+
+    func selectAllCalendars() {
+        selectedCalendarIDs = availableCalendars.map(\.id)
+        settingsStore.saveSelectedCalendarIDs(selectedCalendarIDs)
+    }
+
+    func selectNoCalendars() {
+        selectedCalendarIDs = []
         settingsStore.saveSelectedCalendarIDs(selectedCalendarIDs)
     }
 }

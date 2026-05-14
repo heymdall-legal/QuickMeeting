@@ -6,18 +6,45 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct AutoRecordingSettingsSections: View {
     @ObservedObject var viewModel: AutoRecordingSettingsViewModel
+    @State private var isImporterPresented = false
 
     var body: some View {
         Section("Auto Recording") {
             Toggle("Enable auto recording", isOn: $viewModel.isEnabled)
-            Picker("Watched app", selection: $viewModel.selectedApp) {
-                ForEach(AutoRecordingApp.allCases, id: \.self) { app in
-                    Text(app.displayName).tag(app)
+
+            Button("Add App...") {
+                isImporterPresented = true
+            }
+
+            if viewModel.selectedApps.isEmpty {
+                Text("No apps selected.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(viewModel.selectedApps, id: \.bundleIdentifier) { app in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(app.displayName)
+                            Text(app.bundleIdentifier)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Remove", role: .destructive) {
+                            Task {
+                                await viewModel.removeSelectedApp(bundleIdentifier: app.bundleIdentifier)
+                            }
+                        }
+                    }
                 }
             }
+
+            Text("Recording starts when the microphone is active and any selected app is in use.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             HStack {
                 Text("Start delay")
@@ -35,10 +62,21 @@ struct AutoRecordingSettingsSections: View {
             }
             Slider(value: $viewModel.stopGracePeriod, in: 30 ... 120, step: 5)
         }
-        .onChange(of: viewModel.isEnabled) { _, _ in
-            Task { await viewModel.save() }
+        .fileImporter(
+            isPresented: $isImporterPresented,
+            allowedContentTypes: [.application],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result,
+                  let url = urls.first else {
+                return
+            }
+
+            Task {
+                try await viewModel.addSelectedApp(at: url)
+            }
         }
-        .onChange(of: viewModel.selectedApp) { _, _ in
+        .onChange(of: viewModel.isEnabled) { _, _ in
             Task { await viewModel.save() }
         }
         .onChange(of: viewModel.startDelay) { _, _ in

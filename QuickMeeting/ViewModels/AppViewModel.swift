@@ -158,7 +158,7 @@ final class AppViewModel: ObservableObject {
     func updateAutoRecordingPresence(_ presence: MeetingAppPresence) async {
         switch presence {
         case .candidateActive, .activeMeeting:
-            autoRecordingStatusText = "Detected meeting activity in Толк, waiting 10s"
+            autoRecordingStatusText = "Detected meeting activity, waiting 10s"
         case .ending:
             autoRecordingStatusText = "Meeting activity lost, stopping soon"
         case .inactive:
@@ -375,3 +375,5 @@ extension AppViewModel: AutoRecordingIntentSink {
         }
     }
 }
+
+extension AppViewModel: AutoRecordingPresenceUpdating {}

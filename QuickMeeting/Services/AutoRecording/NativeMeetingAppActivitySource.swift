@@ -37,8 +37,7 @@ final class NativeMeetingAppActivitySource: MeetingAppActivitySource, @unchecked
         self.recentFocusWindow = recentFocusWindow
     }
 
-    func sample(for app: AutoRecordingApp) -> MeetingAppActivitySample {
-        let bundleIdentifier = bundleIdentifier(for: app)
+    func sample(forBundleIdentifier bundleIdentifier: String) -> MeetingAppActivitySample {
         if let frontmostBundleIdentifier = frontmostBundleIdentifier() {
             lastFocusedAtByBundleIdentifier[frontmostBundleIdentifier] = now()
         }
@@ -57,14 +56,6 @@ final class NativeMeetingAppActivitySource: MeetingAppActivitySource, @unchecked
             isMicrophoneActive: microphoneActivitySource.isMicrophoneActive()
         )
     }
-
-    private func bundleIdentifier(for app: AutoRecordingApp) -> String {
-        switch app {
-        case .tolk:
-            return "kontur.talk"
-        }
-    }
-
 }
 
 private func defaultVisibleWindowBundleIdentifiers() -> Set<String> {

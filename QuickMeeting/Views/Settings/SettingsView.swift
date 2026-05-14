@@ -37,6 +37,13 @@ struct SettingsView: View {
         } message: {
             Text(modelsViewModel.errorMessage ?? "Unknown error.")
         }
+        .alert("Auto Recording App Error", isPresented: autoRecordingErrorIsPresented) {
+            Button("OK") {
+                autoRecordingViewModel.clearError()
+            }
+        } message: {
+            Text(autoRecordingViewModel.errorMessage ?? "Unknown error.")
+        }
         .confirmationDialog(
             "Delete downloaded model?",
             isPresented: deleteDialogIsPresented,
@@ -59,6 +66,17 @@ struct SettingsView: View {
         } message: {
             Text("The downloaded model files will be removed from QuickMeeting storage.")
         }
+    }
+
+    private var autoRecordingErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { autoRecordingViewModel.errorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    autoRecordingViewModel.clearError()
+                }
+            }
+        )
     }
 
     private var modelErrorIsPresented: Binding<Bool> {

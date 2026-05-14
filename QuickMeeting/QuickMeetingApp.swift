@@ -92,7 +92,7 @@ struct QuickMeetingApp: App {
             autoRecordingMonitor = MeetingAppMonitor(
                 settingsStore: autoRecordingSettingsStore,
                 activitySource: NativeMeetingAppActivitySource(),
-                appViewModel: appViewModel
+                presenceSink: appViewModel
             )
         } catch {
             fatalError("Could not create ModelContainer: \(error)")

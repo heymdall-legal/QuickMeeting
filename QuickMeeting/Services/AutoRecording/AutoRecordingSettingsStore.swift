@@ -15,7 +15,8 @@ protocol AutoRecordingSettingsStoring: Sendable {
 struct AutoRecordingSettingsStore: AutoRecordingSettingsStoring {
     private let userDefaults: UserDefaults
     private let enabledKey = "autoRecording.enabled"
-    private let appKey = "autoRecording.app"
+    private let appsKey = "autoRecording.apps"
+    private let legacyAppKey = "autoRecording.app"
     private let startDelayKey = "autoRecording.startDelay"
     private let stopGraceKey = "autoRecording.stopGrace"
 
@@ -25,13 +26,11 @@ struct AutoRecordingSettingsStore: AutoRecordingSettingsStoring {
 
     func load() -> AutoRecordingSettings {
         let defaults = AutoRecordingSettings.default
-        let selectedApp = AutoRecordingApp(
-            rawValue: userDefaults.string(forKey: appKey) ?? ""
-        ) ?? defaults.selectedApp
+        let selectedApps = loadSelectedApps()
 
         return AutoRecordingSettings(
             isEnabled: userDefaults.object(forKey: enabledKey) as? Bool ?? defaults.isEnabled,
-            selectedApp: selectedApp,
+            selectedApps: selectedApps,
             startDelay: userDefaults.object(forKey: startDelayKey) as? Double ?? defaults.startDelay,
             stopGracePeriod: userDefaults.object(forKey: stopGraceKey) as? Double ?? defaults.stopGracePeriod
         )
@@ -39,8 +38,32 @@ struct AutoRecordingSettingsStore: AutoRecordingSettingsStoring {
 
     func save(_ settings: AutoRecordingSettings) {
         userDefaults.set(settings.isEnabled, forKey: enabledKey)
-        userDefaults.set(settings.selectedApp.rawValue, forKey: appKey)
+        userDefaults.set(encode(uniqueTargets(from: settings.selectedApps)), forKey: appsKey)
+        userDefaults.removeObject(forKey: legacyAppKey)
         userDefaults.set(settings.startDelay, forKey: startDelayKey)
         userDefaults.set(settings.stopGracePeriod, forKey: stopGraceKey)
+    }
+
+    private func loadSelectedApps() -> [AutoRecordingTarget] {
+        if let data = userDefaults.data(forKey: appsKey),
+           let decoded = try? JSONDecoder().decode([AutoRecordingTarget].self, from: data) {
+            return uniqueTargets(from: decoded)
+        }
+
+        guard let legacy = userDefaults.string(forKey: legacyAppKey),
+              legacy == AutoRecordingApp.tolk.rawValue else {
+            return []
+        }
+
+        return [.legacyTolk]
+    }
+
+    private func uniqueTargets(from targets: [AutoRecordingTarget]) -> [AutoRecordingTarget] {
+        var seen = Set<String>()
+        return targets.filter { seen.insert($0.bundleIdentifier).inserted }
+    }
+
+    private func encode(_ targets: [AutoRecordingTarget]) -> Data? {
+        try? JSONEncoder().encode(targets)
     }
 }

@@ -8,5 +8,5 @@
 import Foundation
 
 protocol MeetingAppActivitySource: Sendable {
-    func sample(for app: AutoRecordingApp) -> MeetingAppActivitySample
+    func sample(forBundleIdentifier bundleIdentifier: String) -> MeetingAppActivitySample
 }

@@ -302,7 +302,7 @@ struct AppViewModelTests {
         )
 
         await viewModel.updateAutoRecordingPresence(.candidateActive)
-        #expect(viewModel.autoRecordingStatusText == "Detected meeting activity in Толк, waiting 10s")
+        #expect(viewModel.autoRecordingStatusText == "Detected meeting activity, waiting 10s")
 
         await viewModel.updateAutoRecordingPresence(.ending)
         #expect(viewModel.autoRecordingStatusText == "Meeting activity lost, stopping soon")

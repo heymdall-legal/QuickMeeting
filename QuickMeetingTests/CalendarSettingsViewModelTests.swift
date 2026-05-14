@@ -42,6 +42,64 @@ struct CalendarSettingsViewModelTests {
     }
 
     @Test
+    func selectAllCalendarsPersistsAvailableCalendarIDsInDisplayOrder() async {
+        let integration = StubCalendarIntegration(
+            calendars: [
+                CalendarDescriptor(id: "personal", title: "Personal"),
+                CalendarDescriptor(id: "work", title: "Work")
+            ]
+        )
+        let settingsStore = InMemoryCalendarSelectionStore(selectedCalendarIDs: ["work"])
+        let viewModel = CalendarSettingsViewModel(
+            calendarIntegration: integration,
+            settingsStore: settingsStore
+        )
+
+        await viewModel.reload()
+        viewModel.selectAllCalendars()
+
+        #expect(viewModel.selectedCalendarIDs == ["personal", "work"])
+        #expect(settingsStore.selectedCalendarIDs() == ["personal", "work"])
+    }
+
+    @Test
+    func selectNoCalendarsClearsPersistedSelection() async {
+        let integration = StubCalendarIntegration(
+            calendars: [CalendarDescriptor(id: "work", title: "Work")]
+        )
+        let settingsStore = InMemoryCalendarSelectionStore(selectedCalendarIDs: ["work"])
+        let viewModel = CalendarSettingsViewModel(
+            calendarIntegration: integration,
+            settingsStore: settingsStore
+        )
+
+        await viewModel.reload()
+        viewModel.selectNoCalendars()
+
+        #expect(viewModel.selectedCalendarIDs == [])
+        #expect(settingsStore.selectedCalendarIDs() == [])
+    }
+
+    @Test(arguments: [
+        ([], "0 selected"),
+        (["work"], "1 selected"),
+        (["work", "personal"], "2 selected")
+    ])
+    func selectedCalendarSummaryTextReflectsSelectedCount(
+        selectedIDs: [String],
+        expectedText: String
+    ) {
+        let integration = StubCalendarIntegration()
+        let settingsStore = InMemoryCalendarSelectionStore(selectedCalendarIDs: selectedIDs)
+        let viewModel = CalendarSettingsViewModel(
+            calendarIntegration: integration,
+            settingsStore: settingsStore
+        )
+
+        #expect(viewModel.selectedCalendarSummaryText == expectedText)
+    }
+
+    @Test
     func requestAccessReloadsCalendarsIntoSettingsState() async {
         let integration = StubCalendarIntegration(
             authorization: .notDetermined,

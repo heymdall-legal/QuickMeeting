@@ -18,11 +18,11 @@ struct NativeMeetingAppActivitySourceTests {
             recentFocusWindow: 30
         )
 
-        _ = source.sample(for: .tolk)
+        _ = source.sample(forBundleIdentifier: "kontur.talk")
         frontmost.value = nil
         clock.now = Date(timeIntervalSinceReferenceDate: 125)
 
-        let sample = source.sample(for: .tolk)
+        let sample = source.sample(forBundleIdentifier: "kontur.talk")
         #expect(sample.hadRecentFocus == true)
         #expect(sample.hasVisibleWindow == false)
         #expect(sample.isMicrophoneActive == true)
@@ -41,11 +41,11 @@ struct NativeMeetingAppActivitySourceTests {
             recentFocusWindow: 30
         )
 
-        _ = source.sample(for: .tolk)
+        _ = source.sample(forBundleIdentifier: "kontur.talk")
         frontmost.value = nil
         clock.now = Date(timeIntervalSinceReferenceDate: 131)
 
-        let sample = source.sample(for: .tolk)
+        let sample = source.sample(forBundleIdentifier: "kontur.talk")
         #expect(sample.hadRecentFocus == false)
     }
 
@@ -60,10 +60,27 @@ struct NativeMeetingAppActivitySourceTests {
             recentFocusWindow: 30
         )
 
-        let sample = source.sample(for: .tolk)
+        let sample = source.sample(forBundleIdentifier: "kontur.talk")
         #expect(sample.isRunning == true)
         #expect(sample.hasVisibleWindow == true)
         #expect(sample.isMicrophoneActive == false)
+    }
+
+    @Test
+    func sampleUsesProvidedBundleIdentifier() {
+        let source = NativeMeetingAppActivitySource(
+            runningBundleIdentifiers: { ["us.zoom.xos"] },
+            frontmostBundleIdentifier: { "us.zoom.xos" },
+            visibleWindowBundleIdentifiers: { ["us.zoom.xos"] },
+            microphoneActivitySource: StubMicrophoneActivitySource(isActive: true),
+            now: Date.init,
+            recentFocusWindow: 30
+        )
+
+        let sample = source.sample(forBundleIdentifier: "us.zoom.xos")
+        #expect(sample.bundleIdentifier == "us.zoom.xos")
+        #expect(sample.isRunning == true)
+        #expect(sample.hasVisibleWindow == true)
     }
 }
 

@@ -39,17 +39,7 @@ struct CalendarSettingsSections: View {
         switch viewModel.authorizationState {
         case .authorized:
             Section("Calendars") {
-                ForEach(viewModel.availableCalendars) { calendar in
-                    Toggle(
-                        calendar.title,
-                        isOn: Binding(
-                            get: { viewModel.selectedCalendarIDs.contains(calendar.id) },
-                            set: { _ in
-                                viewModel.toggleCalendarSelection(id: calendar.id)
-                            }
-                        )
-                    )
-                }
+                calendarSelectionRow
             }
         case .notDetermined, .denied:
             Section("Access") {
@@ -62,6 +52,53 @@ struct CalendarSettingsSections: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var calendarSelectionRow: some View {
+        HStack(alignment: .top) {
+            Text("Observed Calendars")
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Menu {
+                    Button("Select All") {
+                        viewModel.selectAllCalendars()
+                    }
+
+                    Button("Select None") {
+                        viewModel.selectNoCalendars()
+                    }
+
+                    Divider()
+
+                    ForEach(viewModel.availableCalendars) { calendar in
+                        Button {
+                            viewModel.toggleCalendarSelection(id: calendar.id)
+                        } label: {
+                            HStack {
+                                Text(calendar.title)
+                                Spacer()
+                                if viewModel.selectedCalendarIDs.contains(calendar.id) {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("Select Calendars")
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+
+                Text(viewModel.selectedCalendarSummaryText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
