@@ -292,6 +292,71 @@ struct AppViewModelTests {
     }
 
     @Test
+    func menuBarIconStateIsIdleByDefault() throws {
+        let harness = try AppViewModelTestHarness()
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions
+        )
+
+        #expect(viewModel.menuBarIconState == .idle)
+    }
+
+    @Test
+    func menuBarIconStateBecomesPendingWhenMeetingActivityIsDetected() async throws {
+        let harness = try AppViewModelTestHarness()
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions
+        )
+
+        await viewModel.updateAutoRecordingPresence(.candidateActive)
+
+        #expect(viewModel.menuBarIconState == .pendingAutoRecord)
+    }
+
+    @Test
+    func menuBarIconStateBecomesRecordingWhileManualRecordingIsActive() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meetingID = UUID()
+        var meetingIDs = [meetingID]
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions,
+            meetingIDProvider: { meetingIDs.removeFirst() }
+        )
+
+        await viewModel.startRecording()
+
+        #expect(viewModel.menuBarIconState == .recording)
+    }
+
+    @Test
+    func menuBarIconStatePrefersRecordingOverPendingAutoRecord() async throws {
+        let harness = try AppViewModelTestHarness()
+        let meetingID = UUID()
+        var meetingIDs = [meetingID]
+        let viewModel = AppViewModel(
+            meetingStore: harness.meetingStore,
+            meetingFileStore: harness.meetingFileStore,
+            recordingService: harness.recordingService,
+            recordingPermissions: harness.recordingPermissions,
+            meetingIDProvider: { meetingIDs.removeFirst() }
+        )
+
+        await viewModel.updateAutoRecordingPresence(.candidateActive)
+        await viewModel.startRecording()
+
+        #expect(viewModel.menuBarIconState == .recording)
+    }
+
+    @Test
     func autoRecordingPresenceUpdatesStatusText() async throws {
         let harness = try AppViewModelTestHarness()
         let viewModel = AppViewModel(
@@ -723,6 +788,16 @@ struct MenuBarViewTests {
         await view.performPrimaryAction()
         #expect(viewModel.recordingState == .idle)
         #expect(view.primaryActionTitle == "Start Recording")
+    }
+}
+
+@MainActor
+struct MenuBarIconImageBuilderTests {
+    @Test
+    func buildsImagesForAllIconStates() {
+        #expect(MenuBarIconImageBuilder.makeImage(for: .idle) != nil)
+        #expect(MenuBarIconImageBuilder.makeImage(for: .pendingAutoRecord) != nil)
+        #expect(MenuBarIconImageBuilder.makeImage(for: .recording) != nil)
     }
 }
 

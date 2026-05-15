@@ -76,6 +76,25 @@ struct ModelsSettingsViewModelTests {
         let tinyRow = viewModel.rows.first { $0.model.id == .tiny }
         #expect(tinyRow?.state == .downloading(progress: 0.42))
     }
+
+    @Test
+    func updateDefaultModelChangesActiveSelection() async {
+        let manager = FakeTranscriptionModelManaging(
+            statuses: [
+                .tiny: .installed(sizeInBytes: 512, installedAt: nil),
+                .small: .installed(sizeInBytes: 1_024, installedAt: nil),
+                .largeV3: .notInstalled,
+            ],
+            defaultModelID: .tiny
+        )
+        let viewModel = ModelsSettingsViewModel(manager: manager)
+        await viewModel.load()
+
+        await viewModel.updateDefaultModel(.small)
+
+        #expect(viewModel.defaultModelID == .small)
+        #expect(manager.currentDefaultModelID == .small)
+    }
 }
 
 @MainActor

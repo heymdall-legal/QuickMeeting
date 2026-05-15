@@ -15,12 +15,20 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            AutoRecordingSettingsSections(viewModel: autoRecordingViewModel)
-            CalendarSettingsSections(viewModel: calendarViewModel)
-            ModelsSettingsSections(
-                viewModel: modelsViewModel,
-                pendingDeleteModelID: $pendingDeleteModelID
-            )
+            Section("Transcription Models") {
+                ModelsSettingsContent(
+                    viewModel: modelsViewModel,
+                    pendingDeleteModelID: $pendingDeleteModelID
+                )
+            }
+
+            Section("Calendar Integration") {
+                CalendarSettingsContent(viewModel: calendarViewModel)
+            }
+
+            Section("Auto Recording") {
+                AutoRecordingSettingsContent(viewModel: autoRecordingViewModel)
+            }
         }
         .formStyle(.grouped)
         .frame(minWidth: 760, minHeight: 460)

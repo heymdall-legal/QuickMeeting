@@ -8,16 +8,21 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct AutoRecordingSettingsSections: View {
+struct AutoRecordingSettingsContent: View {
     @ObservedObject var viewModel: AutoRecordingSettingsViewModel
     @State private var isImporterPresented = false
 
     var body: some View {
-        Section("Auto Recording") {
+        Group {
             Toggle("Enable auto recording", isOn: $viewModel.isEnabled)
 
-            Button("Add App...") {
-                isImporterPresented = true
+            HStack {
+                Text("Observed apps")
+                Spacer()
+                Button("Add App...") {
+                    isImporterPresented = true
+                }
+                .buttonStyle(.bordered)
             }
 
             if viewModel.selectedApps.isEmpty {
@@ -25,20 +30,24 @@ struct AutoRecordingSettingsSections: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(viewModel.selectedApps, id: \.bundleIdentifier) { app in
-                    HStack {
+                    HStack(alignment: .top, spacing: 16) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(app.displayName)
                             Text(app.bundleIdentifier)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
                         Spacer()
+
                         Button("Remove", role: .destructive) {
                             Task {
                                 await viewModel.removeSelectedApp(bundleIdentifier: app.bundleIdentifier)
                             }
                         }
+                        .buttonStyle(.bordered)
                     }
+                    .padding(.vertical, 2)
                 }
             }
 
@@ -46,21 +55,19 @@ struct AutoRecordingSettingsSections: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            HStack {
-                Text("Start delay")
-                Spacer()
-                Text("\(Int(viewModel.startDelay))s")
-                    .foregroundStyle(.secondary)
-            }
-            Slider(value: $viewModel.startDelay, in: 5 ... 20, step: 1)
+            inlineSliderRow(
+                title: "Start delay",
+                value: $viewModel.startDelay,
+                range: 5 ... 20,
+                step: 1
+            )
 
-            HStack {
-                Text("Stop grace period")
-                Spacer()
-                Text("\(Int(viewModel.stopGracePeriod))s")
-                    .foregroundStyle(.secondary)
-            }
-            Slider(value: $viewModel.stopGracePeriod, in: 30 ... 120, step: 5)
+            inlineSliderRow(
+                title: "Stop delay",
+                value: $viewModel.stopGracePeriod,
+                range: 30 ... 120,
+                step: 5
+            )
         }
         .fileImporter(
             isPresented: $isImporterPresented,
@@ -84,6 +91,24 @@ struct AutoRecordingSettingsSections: View {
         }
         .onChange(of: viewModel.stopGracePeriod) { _, _ in
             Task { await viewModel.save() }
+        }
+    }
+
+    private func inlineSliderRow(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double
+    ) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .frame(width: 90, alignment: .leading)
+
+            Slider(value: value, in: range, step: step)
+
+            Text("\(Int(value.wrappedValue))s")
+                .foregroundStyle(.secondary)
+                .frame(width: 42, alignment: .trailing)
         }
     }
 }

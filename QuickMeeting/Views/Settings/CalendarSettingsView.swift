@@ -12,7 +12,9 @@ struct CalendarSettingsView: View {
 
     var body: some View {
         Form {
-            CalendarSettingsSections(viewModel: viewModel)
+            Section("Calendar Integration") {
+                CalendarSettingsContent(viewModel: viewModel)
+            }
         }
         .formStyle(.grouped)
         .navigationTitle("Calendar")
@@ -22,37 +24,26 @@ struct CalendarSettingsView: View {
     }
 }
 
-struct CalendarSettingsSections: View {
+struct CalendarSettingsContent: View {
     @ObservedObject var viewModel: CalendarSettingsViewModel
 
     var body: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Use your macOS calendars")
-                    .font(.title2.weight(.semibold))
-                Text("QuickMeeting looks only at timed events for today and ignores all-day entries.")
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 4)
-        }
-
         switch viewModel.authorizationState {
         case .authorized:
-            Section("Calendars") {
-                calendarSelectionRow
-            }
+            calendarSelectionRow
+            Text("QuickMeeting looks only at timed events for today and ignores all-day entries.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         case .notDetermined, .denied:
-            Section("Access") {
-                Text("Allow calendar access, then choose which calendars Home uses to show the next event for today.")
-                    .foregroundStyle(.secondary)
+            Text("Allow calendar access, then choose which calendars Home uses to show the next event for today.")
+                .foregroundStyle(.secondary)
 
-                Button("Grant Calendar Access") {
-                    Task {
-                        await viewModel.requestAccess()
-                    }
+            Button("Grant Calendar Access") {
+                Task {
+                    await viewModel.requestAccess()
                 }
-                .buttonStyle(.borderedProminent)
             }
+            .buttonStyle(.borderedProminent)
         }
     }
 

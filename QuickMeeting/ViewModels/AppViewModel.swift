@@ -12,6 +12,7 @@ import Foundation
 final class AppViewModel: ObservableObject {
     @Published private(set) var recordingState: RecordingState = .idle
     @Published private(set) var autoRecordingStatusText: String?
+    @Published private(set) var isAutoRecordingStartPending = false
     @Published private(set) var deletionErrorMessage: String?
     @Published private(set) var transcriptionErrorMessage: String?
     @Published private(set) var renameSpeakerErrorMessage: String?
@@ -158,14 +159,26 @@ final class AppViewModel: ObservableObject {
     func updateAutoRecordingPresence(_ presence: MeetingAppPresence) async {
         switch presence {
         case .candidateActive, .activeMeeting:
+            isAutoRecordingStartPending = !canStopRecording
             autoRecordingStatusText = "Detected meeting activity, waiting 10s"
         case .ending:
+            isAutoRecordingStartPending = false
             autoRecordingStatusText = "Meeting activity lost, stopping soon"
         case .inactive:
+            isAutoRecordingStartPending = false
             autoRecordingStatusText = nil
         }
 
         await autoRecordingCoordinator?.handle(presence)
+    }
+
+    var menuBarIconState: MenuBarIconState {
+        switch recordingState {
+        case .recording, .stopping:
+            return .recording
+        case .idle, .starting, .failed:
+            return isAutoRecordingStartPending ? .pendingAutoRecord : .idle
+        }
     }
 
     var canStartRecording: Bool {
@@ -352,9 +365,11 @@ final class AppViewModel: ObservableObject {
 extension AppViewModel: AutoRecordingIntentSink {
     func requestAutoRecordingStart() async {
         guard canStartRecording else {
+            isAutoRecordingStartPending = false
             return
         }
 
+        isAutoRecordingStartPending = false
         autoRecordingStatusText = "Recording started automatically"
         await startRecording()
 
@@ -364,6 +379,8 @@ extension AppViewModel: AutoRecordingIntentSink {
     }
 
     func requestAutoRecordingStop() async {
+        isAutoRecordingStartPending = false
+
         guard canStopRecording else {
             return
         }

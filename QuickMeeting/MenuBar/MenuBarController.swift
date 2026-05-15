@@ -6,12 +6,14 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
 final class MenuBarController {
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
+    private var cancellables = Set<AnyCancellable>()
 
     init(viewModel: AppViewModel) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -21,12 +23,24 @@ final class MenuBarController {
             rootView: MenuBarView(viewModel: viewModel)
         )
 
-        statusItem.button?.image = NSImage(
-            systemSymbolName: "waveform.circle",
-            accessibilityDescription: "QuickMeeting"
-        )
         statusItem.button?.action = #selector(togglePopover(_:))
         statusItem.button?.target = self
+        applyIconState(viewModel.menuBarIconState)
+
+        viewModel.$recordingState
+            .combineLatest(viewModel.$isAutoRecordingStartPending)
+            .sink { [weak self, weak viewModel] _, _ in
+                guard let self, let viewModel else {
+                    return
+                }
+
+                self.applyIconState(viewModel.menuBarIconState)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func applyIconState(_ state: MenuBarIconState) {
+        statusItem.button?.image = MenuBarIconImageBuilder.makeImage(for: state)
     }
 
     @objc
