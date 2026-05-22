@@ -36,7 +36,7 @@ struct MeetingFileStore {
 
         return MeetingArtifacts(
             meetingFolderURL: meetingFolderURL,
-            audioFileURL: meetingFolderURL.appendingPathComponent("audio.wav")
+            audioFileURL: meetingFolderURL.appendingPathComponent("audio.m4a")
         )
     }
 

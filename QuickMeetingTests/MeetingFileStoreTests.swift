@@ -28,7 +28,7 @@ struct MeetingFileStoreTests {
             artifacts.audioFileURL.deletingLastPathComponent().standardizedFileURL
                 == artifacts.meetingFolderURL.standardizedFileURL
         )
-        #expect(artifacts.audioFileURL.lastPathComponent == "audio.wav")
+        #expect(artifacts.audioFileURL.lastPathComponent == "audio.m4a")
     }
 
     @Test
