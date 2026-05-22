@@ -260,7 +260,7 @@ struct AppViewModelTests {
 
         let persistedMeetings = try harness.context.fetch(FetchDescriptor<Meeting>())
         let persistedMeeting = try #require(persistedMeetings.first)
-        #expect(try persistedMeeting.status == .recording)
+        #expect(try persistedMeeting.status == .failed)
         #expect(persistedMeeting.endedAt == nil)
 
         let snapshot = harness.recordingService.snapshot()
@@ -974,7 +974,7 @@ struct DefaultRecordingServiceTests {
         Meeting(
             title: "Test Meeting",
             startedAt: Date(timeIntervalSince1970: 1_234_567_890),
-            status: .recording,
+            status: .failed,
             audioFilePath: "/tmp/audio.wav"
         )
     }
@@ -984,7 +984,7 @@ struct DefaultRecordingServiceTests {
 struct NativeAudioCapturePipelineTests {
     @Test
     func startBuildsSystemAudioOnlySessionWithCanonicalWriterSettings() async throws {
-        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-audio.wav")
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-audio.m4a")
         let session = AudioCaptureStreamSessionSpy()
         let writer = AudioFileWriterSpy()
         var requestedConfiguration: NativeAudioCapturePipeline.CaptureConfiguration?
@@ -1024,8 +1024,36 @@ struct NativeAudioCapturePipelineTests {
     }
 
     @Test
+    func aacM4AAudioFileWriterCreatesReadableM4AFile() throws {
+        let fileManager = FileManager.default
+        let outputURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("sample.m4a")
+        let writer = try AACM4AAudioFileWriter(outputURL: outputURL)
+        let format = CanonicalAudioBufferConverter.canonicalFormat
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4_800)!
+        buffer.frameLength = 4_800
+
+        if let channelData = buffer.floatChannelData {
+            for frame in 0 ..< Int(buffer.frameLength) {
+                channelData[0][frame] = 0.2
+                channelData[1][frame] = 0.2
+            }
+        }
+
+        try writer.append(buffer)
+        try writer.finish()
+
+        #expect(fileManager.fileExists(atPath: outputURL.path))
+
+        let file = try AVAudioFile(forReading: outputURL)
+        #expect(file.length > 0)
+        #expect(outputURL.pathExtension == "m4a")
+    }
+
+    @Test
     func stopKeepsCaptureStateAliveWhenNativeStopFailsAndAllowsRetry() async throws {
-        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-retry-stop.wav")
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-retry-stop.m4a")
         let session = AudioCaptureStreamSessionSpy(suspendNextStop: true)
         let writer = AudioFileWriterSpy()
 
@@ -1081,7 +1109,7 @@ struct NativeAudioCapturePipelineTests {
         )
 
         await #expect(throws: AudioCapturePipelineTestError.startFailed) {
-            try await pipeline.start(outputURL: URL(fileURLWithPath: "/tmp/native-pipeline-start-failure.wav"))
+            try await pipeline.start(outputURL: URL(fileURLWithPath: "/tmp/native-pipeline-start-failure.m4a"))
         }
 
         #expect(session.startCallCount == 1)
@@ -1090,7 +1118,7 @@ struct NativeAudioCapturePipelineTests {
 
     @Test
     func stopEmitsDiagnosticsForMissingOutputAndZeroSamples() async throws {
-        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-missing-output.wav")
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-missing-output.m4a")
         let session = AudioCaptureStreamSessionSpy()
         let writer = AudioFileWriterSpy()
         let diagnosticRecorder = RecordingDiagnosticRecorder()
@@ -1124,7 +1152,7 @@ struct NativeAudioCapturePipelineTests {
 
     @Test
     func stopEmitsPerSourceSampleCountsInDiagnostics() async throws {
-        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-source-counts.wav")
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-source-counts.m4a")
         let session = AudioCaptureStreamSessionSpy()
         let writer = AudioFileWriterSpy()
         let diagnosticRecorder = RecordingDiagnosticRecorder()
@@ -1190,7 +1218,7 @@ struct NativeAudioCapturePipelineTests {
 
     @Test
     func startBuildsSessionWithPinnedDefaultMicrophoneDeviceID() async throws {
-        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-mic-device.wav")
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-mic-device.m4a")
         let session = AudioCaptureStreamSessionSpy()
         let writer = AudioFileWriterSpy()
         var requestedConfiguration: NativeAudioCapturePipeline.CaptureConfiguration?
@@ -1228,7 +1256,7 @@ struct NativeAudioCapturePipelineTests {
 
     @Test
     func writerPreparedDiagnosticsIncludePinnedMicrophoneDeviceDetails() async throws {
-        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-mic-diagnostics.wav")
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-mic-diagnostics.m4a")
         let session = AudioCaptureStreamSessionSpy()
         let writer = AudioFileWriterSpy()
         let diagnosticRecorder = RecordingDiagnosticRecorder()
@@ -1273,7 +1301,7 @@ struct NativeAudioCapturePipelineTests {
 
     @Test
     func stopEmitsZeroEnergyForSilentBuffers() async throws {
-        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-silent-diagnostics.wav")
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-silent-diagnostics.m4a")
         let session = AudioCaptureStreamSessionSpy()
         let writer = AudioFileWriterSpy()
         let diagnosticRecorder = RecordingDiagnosticRecorder()
@@ -1339,7 +1367,7 @@ struct NativeAudioCapturePipelineTests {
 
     @Test
     func stopEmitsRawMetricsBeforeCanonicalConversion() async throws {
-        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-raw-diagnostics.wav")
+        let outputURL = URL(fileURLWithPath: "/tmp/native-pipeline-raw-diagnostics.m4a")
         let session = AudioCaptureStreamSessionSpy()
         let writer = AudioFileWriterSpy()
         let diagnosticRecorder = RecordingDiagnosticRecorder()
@@ -2093,7 +2121,7 @@ private struct AppViewModelTestHarness {
             .appendingPathComponent(meetingID.uuidString, isDirectory: true)
         return MeetingArtifacts(
             meetingFolderURL: meetingFolderURL,
-            audioFileURL: meetingFolderURL.appendingPathComponent("audio.wav")
+            audioFileURL: meetingFolderURL.appendingPathComponent("audio.m4a")
         )
     }
 

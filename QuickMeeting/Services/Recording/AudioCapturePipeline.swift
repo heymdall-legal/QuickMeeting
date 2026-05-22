@@ -175,7 +175,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     convenience init() {
         self.init(
             shareableContentProvider: { try await Self.makeLiveCaptureTarget() },
-            writerFactory: { try CanonicalWAVAudioFileWriter(outputURL: $0) },
+            writerFactory: { try AACM4AAudioFileWriter(outputURL: $0) },
             captureConfiguration: CaptureConfiguration(capturesMicrophone: true)
         )
     }
@@ -1279,13 +1279,17 @@ private final class ScreenCaptureAudioStreamSession: NativeAudioCapturePipeline.
     }
 }
 
-private final class CanonicalWAVAudioFileWriter: NativeAudioCapturePipeline.AudioFileWriting {
-    private let outputURL: URL
+final class AACM4AAudioFileWriter: NativeAudioCapturePipeline.AudioFileWriting {
+    private static let outputSettings: [String: Any] = [
+        AVFormatIDKey: kAudioFormatMPEG4AAC,
+        AVEncoderBitRateKey: 96_000,
+        AVNumberOfChannelsKey: 2,
+        AVSampleRateKey: 48_000
+    ]
+
     private var audioFile: AVAudioFile?
 
     init(outputURL: URL) throws {
-        self.outputURL = outputURL
-
         let fileManager = FileManager.default
         try fileManager.createDirectory(
             at: outputURL.deletingLastPathComponent(),
@@ -1298,7 +1302,7 @@ private final class CanonicalWAVAudioFileWriter: NativeAudioCapturePipeline.Audi
 
         audioFile = try AVAudioFile(
             forWriting: outputURL,
-            settings: CanonicalAudioBufferConverter.canonicalFormat.settings,
+            settings: Self.outputSettings,
             commonFormat: CanonicalAudioBufferConverter.canonicalFormat.commonFormat,
             interleaved: CanonicalAudioBufferConverter.canonicalFormat.isInterleaved
         )
@@ -1317,7 +1321,7 @@ private final class CanonicalWAVAudioFileWriter: NativeAudioCapturePipeline.Audi
     }
 }
 
-private final class CanonicalAudioBufferConverter {
+final class CanonicalAudioBufferConverter {
     static let canonicalFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32,
         sampleRate: 48_000,
