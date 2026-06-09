@@ -110,13 +110,19 @@ No schema change is required for this migration because the sidecar result can b
 
 ## Bundling Strategy
 
-The executable at `/Users/heymdall/Developer/whisper-test/dist/example/example` should be added to the app bundle as a resource during the build.
+The sidecar distribution is not a standalone file. The app must bundle the full contents of `/Users/heymdall/Developer/whisper-test/dist/example`, including:
+
+- the `example` executable
+- the sibling `_internal` directory that contains the embedded Python runtime and shared-library dependencies
+
+The bundled layout must preserve that sibling relationship so the executable can resolve `_internal` exactly as it does in the source distribution.
 
 Runtime expectations:
 
 - the app resolves the executable through `Bundle.main`
+- the app preserves the adjacent `_internal` directory in the final app bundle
 - the app executes the bundled binary in place
-- the app does not copy the executable into Application Support on first launch
+- the app does not copy the sidecar payload into Application Support on first launch
 - the app does not download or install the sidecar itself
 
 The design assumes the bundled artifact is already executable when included in the app product. If Xcode resource handling drops execute permissions, that should be corrected as part of integration.
