@@ -19,7 +19,7 @@ enum SidecarTranscriptionServiceError: LocalizedError, Equatable {
 
 @MainActor
 final class SidecarTranscriptionService: TranscriptionServicing {
-    nonisolated static let hardcodedHuggingFaceToken = "hardcoded-token"
+    nonisolated static let hardcodedHuggingFaceToken = "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"
 
     private let meetingStore: MeetingStore
     private let progressCenter: TranscriptionProgressCenter
