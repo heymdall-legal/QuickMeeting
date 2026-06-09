@@ -40,13 +40,19 @@ struct QuickMeetingApp: App {
             let modelSettingsStore = ModelSettingsStore()
             let modelStore = ArgmaxWhisperModelStore()
             let transcriptionProgressCenter = TranscriptionProgressCenter()
-            let transcriptionService = TranscriptionService(
+            let transcriptionService = SidecarTranscriptionService(
                 meetingStore: meetingStore,
-                modelStore: modelStore,
-                modelSettingsStore: modelSettingsStore,
-                backend: WhisperKitTranscriptionBackend(),
-                diarizer: DefaultTranscriptDiarizer(),
-                progressCenter: transcriptionProgressCenter
+                progressCenter: transcriptionProgressCenter,
+                launcher: DefaultSidecarProcessLauncher(),
+                executableURLProvider: {
+                    SidecarTranscriptionService.defaultExecutableURL()
+                },
+                hfTokenProvider: {
+                    SidecarTranscriptionService.hardcodedHuggingFaceToken
+                },
+                hfHomeURLProvider: {
+                    SidecarTranscriptionService.defaultHFHomeURL()
+                }
             )
             let transcriptionModelManager = TranscriptionModelManager(
                 modelStore: modelStore,

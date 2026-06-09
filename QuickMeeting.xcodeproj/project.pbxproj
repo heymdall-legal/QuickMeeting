@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4BFD10012FC0000000A1B2C3 /* example in Resources */ = {isa = PBXBuildFile; fileRef = 4BFD10002FC0000000A1B2C3 /* example */; };
 		4BDEC0902FAA88360037F703 /* SpeakerKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4BDEC08F2FAA88360037F703 /* SpeakerKit */; };
 		4BDEC0922FAA88360037F703 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4BDEC0912FAA88360037F703 /* WhisperKit */; };
 /* End PBXBuildFile section */
@@ -24,6 +25,7 @@
 /* Begin PBXFileReference section */
 		4BD1296B2FA9197200DC589F /* QuickMeeting.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuickMeeting.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4BD12A092FA91C3400DC589F /* QuickMeetingTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuickMeetingTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		4BFD10002FC0000000A1B2C3 /* example */ = {isa = PBXFileReference; lastKnownFileType = folder; name = example; path = dist/example; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -62,6 +64,7 @@
 		4BD129622FA9197200DC589F = {
 			isa = PBXGroup;
 			children = (
+				4BFD10002FC0000000A1B2C3 /* example */,
 				4BD1296D2FA9197200DC589F /* QuickMeeting */,
 				4BD12A082FA91C3400DC589F /* QuickMeetingTests */,
 				4BD1296C2FA9197200DC589F /* Products */,
@@ -174,6 +177,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4BFD10012FC0000000A1B2C3 /* example in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
