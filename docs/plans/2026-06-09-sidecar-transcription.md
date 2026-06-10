@@ -1,6 +1,6 @@
 **Goal:** Add a bundled sidecar-backed transcription service that becomes the app's default manual transcription path while preserving the existing native implementation in the codebase.
 
-**Architecture:** Add a new `SidecarTranscriptionService` behind the existing `TranscriptionServicing` boundary, plus small helper types for sidecar event decoding and process launching. Wire the new service into `QuickMeetingApp`, bundle the full `dist/example` payload with the app, and cover the behavior with focused service and decoder tests before touching runtime wiring.
+**Architecture:** Keep `SidecarTranscriptionService` behind the existing `TranscriptionServicing` boundary, but switch its bundle/runtime assumptions from the old packaged executable to the repo-local `python/` project plus bundled `.venv`. Wire the Python-based payload into `QuickMeetingApp`, launch `.venv/bin/python main.py`, and cover the behavior with focused service and decoder tests before touching runtime wiring.
 
 **Tech Stack:** Swift, SwiftData, Foundation `Process`/`Pipe`, Swift Testing, Xcode project resources, `xcodebuild`
 
@@ -17,7 +17,7 @@
 - `QuickMeeting/Services/Transcription/SidecarProcessLaunching.swift`
   Purpose: Define the small boundary around launching the bundled sidecar and streaming lines.
 - `QuickMeeting/Services/Transcription/DefaultSidecarProcessLauncher.swift`
-  Purpose: Implement executable resolution, environment setup, process execution, and stdout streaming with `Process`.
+  Purpose: Implement bundled Python interpreter resolution, environment setup, process execution, and stdout streaming with `Process`.
 - `QuickMeeting/Services/Transcription/SidecarTranscriptionService.swift`
   Purpose: Orchestrate meeting validation, progress tracking, sidecar execution, transcript mapping, and persistence.
 - `QuickMeetingTests/SidecarTranscriptionEventDecoderTests.swift`
@@ -30,7 +30,7 @@
 - `QuickMeeting/QuickMeetingApp.swift`
   Purpose: Register the sidecar service as the default `transcriptionService`.
 - `QuickMeeting.xcodeproj/project.pbxproj`
-  Purpose: Bundle the full `dist/example` payload so the app product contains the executable and sibling `_internal` directory.
+  Purpose: Bundle the full `python/` payload so the app product contains `main.py`, `.venv`, and the rest of the Python runtime tree.
 
 ## Task 1: Add the sidecar stdout contract and decoder
 
@@ -563,9 +563,11 @@ git commit -m "feat: add sidecar transcription service"
 func transcribePassesExecutableArgumentsAndHFHomeToLauncher() async throws {
     let harness = try SidecarTranscriptionHarness()
     let meeting = try harness.createRecordedMeeting()
-    let executableURL = URL(fileURLWithPath: "/tmp/QuickMeetingSidecar/example")
+    let executableURL = URL(fileURLWithPath: "/tmp/QuickMeetingSidecar/python/.venv/bin/python")
+    let workingDirectoryURL = URL(fileURLWithPath: "/tmp/QuickMeetingSidecar/python", isDirectory: true)
     let hfHomeURL = URL(fileURLWithPath: "/tmp/Application Support/QuickMeeting/HuggingFace")
     harness.executableURL = executableURL
+    harness.workingDirectoryURL = workingDirectoryURL
     harness.hfHomeURL = hfHomeURL
     await harness.launcher.setResult(.success([#"{"status":"completed","speakers":[],"segments":[]}"#]))
 
@@ -573,7 +575,8 @@ func transcribePassesExecutableArgumentsAndHFHomeToLauncher() async throws {
 
     let request = try await #require(harness.launcher.requests.first)
     #expect(request.executableURL == executableURL)
-    #expect(request.arguments == ["--input-file", meeting.audioFilePath, "--hf-token", "hardcoded-token"])
+    #expect(request.workingDirectoryURL == workingDirectoryURL)
+    #expect(request.arguments == ["main.py", "--input-file", meeting.audioFilePath, "--hf-token", "hardcoded-token"])
     #expect(request.environment["HF_HOME"] == hfHomeURL.path)
 }
 
@@ -646,8 +649,10 @@ struct DefaultSidecarProcessLauncher: SidecarProcessLaunching {
 // QuickMeeting/Services/Transcription/SidecarTranscriptionService.swift
 private static func defaultExecutableURL() -> URL? {
     Bundle.main.resourceURL?
-        .appendingPathComponent("example", isDirectory: true)
-        .appendingPathComponent("example", isDirectory: false)
+        .appendingPathComponent("python", isDirectory: true)
+        .appendingPathComponent(".venv", isDirectory: true)
+        .appendingPathComponent("bin", isDirectory: true)
+        .appendingPathComponent("python", isDirectory: false)
 }
 
 private static func defaultHFHomeURL(fileManager: FileManager) -> URL {
@@ -697,7 +702,7 @@ func appUsesSidecarServiceAsDefaultTranscriptionService() {
         meetingStore: meetingStore,
         progressCenter: progressCenter,
         launcher: FakeSidecarProcessLauncher(),
-        executableURLProvider: { URL(fileURLWithPath: "/tmp/example/example") },
+        executableURLProvider: { URL(fileURLWithPath: "/tmp/python/.venv/bin/python") },
         hfTokenProvider: { "hardcoded-token" },
         hfHomeURLProvider: { URL(fileURLWithPath: "/tmp/HuggingFace") }
     )
@@ -727,8 +732,10 @@ let transcriptionService = SidecarTranscriptionService(
     launcher: DefaultSidecarProcessLauncher(),
     executableURLProvider: {
         Bundle.main.resourceURL?
-            .appendingPathComponent("example", isDirectory: true)
-            .appendingPathComponent("example", isDirectory: false)
+            .appendingPathComponent("python", isDirectory: true)
+            .appendingPathComponent(".venv", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("python", isDirectory: false)
     },
     hfTokenProvider: {
         "hardcoded-token"
@@ -746,9 +753,10 @@ let transcriptionService = SidecarTranscriptionService(
 ```
 
 ```pbxproj
-/* Add the full dist/example folder as a copied resource so the app bundle contains:
-   QuickMeeting.app/Contents/Resources/example/example
-   QuickMeeting.app/Contents/Resources/example/_internal/... */
+/* Add the full python/ folder as a copied resource so the app bundle contains:
+   QuickMeeting.app/Contents/Resources/python/main.py
+   QuickMeeting.app/Contents/Resources/python/.venv/bin/python
+   QuickMeeting.app/Contents/Resources/python/... */
 ```
 
 - [ ] **Step 4: Run the focused sidecar tests, then the existing transcription regression suite**
@@ -807,10 +815,10 @@ Expected: `BUILD SUCCEEDED`.
 Run:
 
 ```bash
-find .derived-data-sidecar-build/Build/Products/Debug/QuickMeeting.app/Contents/Resources/example -maxdepth 2 | sed -n '1,40p'
+find .derived-data-sidecar-build/Build/Products/Debug/QuickMeeting.app/Contents/Resources/python -maxdepth 3 | sed -n '1,40p'
 ```
 
-Expected: output includes both `example` and `_internal`.
+Expected: output includes `main.py` and `.venv/bin/python`.
 
 - [ ] **Step 3: Update docs only if the implementation differs from the approved spec**
 
@@ -832,8 +840,8 @@ Only do this step if Step 3 changed the spec.
 - Spec coverage:
   Task 1 covers the stdout contract and malformed-line behavior.
   Task 2 covers service orchestration, status changes, transcript persistence, and progress updates.
-  Task 3 covers real process launching, executable resolution, and `HF_HOME`.
-  Task 4 covers default app wiring and bundling the full sidecar payload.
+  Task 3 covers real process launching, bundled Python resolution, and `HF_HOME`.
+  Task 4 covers default app wiring and bundling the full Python payload.
   Task 5 covers final verification and the bundle layout check.
 - Placeholder scan:
   The only intentionally non-literal section is the `project.pbxproj` snippet note in Task 4 because the exact PBX object IDs must be generated from the existing project file structure during implementation.

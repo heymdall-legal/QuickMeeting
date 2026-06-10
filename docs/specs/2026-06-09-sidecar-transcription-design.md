@@ -46,8 +46,8 @@ The flow is:
 1. User starts transcription for a recorded meeting.
 2. The sidecar-backed service validates meeting state and audio availability.
 3. The service marks the meeting as `transcribing` and begins progress tracking.
-4. The service resolves the bundled executable from the app bundle.
-5. The service launches the executable with the meeting audio path and runtime environment.
+4. The service resolves the bundled Python runtime from the app bundle.
+5. The service launches the bundled interpreter with the meeting audio path and runtime environment.
 6. The service reads newline-delimited JSON events from `stdout`.
 7. Progress events update `TranscriptionProgressCenter`.
 8. A terminal `completed` event is converted into `StoredTranscript`.
@@ -65,7 +65,7 @@ This keeps the UI and meeting persistence model stable while moving the heavy ru
 - enforcing the single-active-transcription rule
 - validating the meeting and source audio file
 - starting and finishing meeting progress tracking
-- resolving the bundled executable path
+- resolving the bundled Python runtime path
 - launching the sidecar process
 - passing required arguments and environment variables
 - decoding and reacting to streamed JSON events
@@ -76,9 +76,9 @@ It should own orchestration only. Process spawning and event decoding should rem
 
 ### Sidecar Process Launcher
 
-A dedicated launcher helper should wrap `Process`, `Pipe`, and executable resolution. Its responsibilities are:
+A dedicated launcher helper should wrap `Process`, `Pipe`, and Python-runtime resolution. Its responsibilities are:
 
-- resolve the sidecar executable URL from `Bundle.main`
+- resolve the bundled `python/` working directory and `.venv/bin/python` interpreter path from `Bundle.main`
 - configure process arguments
 - configure environment variables such as `HF_HOME`
 - stream `stdout` lines back to the caller
@@ -110,27 +110,34 @@ No schema change is required for this migration because the sidecar result can b
 
 ## Bundling Strategy
 
-The sidecar distribution is not a standalone file. The app must bundle the full contents of `/Users/heymdall/Developer/whisper-test/dist/example`, including:
+The sidecar distribution is now the repo-local `python/` project with its bundled virtual environment. The app must bundle the full contents of `/Users/heymdall/Developer/QuickMeeting/python`, including:
 
-- the `example` executable
-- the sibling `_internal` directory that contains the embedded Python runtime and shared-library dependencies
+- `main.py`
+- the `.venv` directory, including `.venv/bin/python`
+- any Python project files and dependencies required by the script at runtime
 
-The bundled layout must preserve that sibling relationship so the executable can resolve `_internal` exactly as it does in the source distribution.
+The bundled layout must preserve that directory structure so the app can launch the bundled interpreter from `.venv/bin/python` with `main.py` in the same bundled `python/` working tree.
 
 Runtime expectations:
 
-- the app resolves the executable through `Bundle.main`
-- the app preserves the adjacent `_internal` directory in the final app bundle
-- the app executes the bundled binary in place
+- the app resolves the bundled `python/` directory through `Bundle.main`
+- the app preserves the `.venv` contents in the final app bundle
+- the app executes the bundled interpreter in place
 - the app does not copy the sidecar payload into Application Support on first launch
 - the app does not download or install the sidecar itself
 
-The design assumes the bundled artifact is already executable when included in the app product. If Xcode resource handling drops execute permissions, that should be corrected as part of integration.
+The design assumes `.venv/bin/python` remains executable when included in the app product. If Xcode resource handling drops execute permissions, that should be corrected as part of integration.
 
 ## Runtime Contract
 
-The service should invoke the sidecar with:
+The service should invoke the bundled interpreter as:
 
+- executable path: `<bundled python>/.venv/bin/python`
+- working directory: `<bundled python>`
+
+The process arguments should be:
+
+- `main.py`
 - `--input-file <meeting audio path>`
 - `--hf-token <hardcoded token>`
 
@@ -213,7 +220,7 @@ Failures to handle explicitly:
 - meeting is not in a transcribable state
 - meeting audio file is missing
 - another transcription job is already active
-- bundled sidecar executable cannot be found
+- bundled Python interpreter cannot be found
 - sidecar process fails to launch
 - sidecar emits a terminal `error` event
 - sidecar exits without a terminal `completed` event
@@ -243,7 +250,7 @@ Tests should cover the new service at the orchestration boundary without launchi
 - missing audio file is rejected before process launch
 - non-transcribable meeting states are rejected
 - a second request while one is active is rejected
-- missing bundled executable fails cleanly
+- missing bundled Python interpreter fails cleanly
 
 ### Runtime Failures
 
