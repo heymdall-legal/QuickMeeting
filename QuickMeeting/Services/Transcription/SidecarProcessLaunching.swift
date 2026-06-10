@@ -2,6 +2,7 @@ import Foundation
 
 struct SidecarLaunchRequest: Sendable, Equatable {
     let executableURL: URL
+    let workingDirectoryURL: URL
     let arguments: [String]
     let environment: [String: String]
 }

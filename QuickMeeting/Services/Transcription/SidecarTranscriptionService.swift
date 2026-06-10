@@ -85,20 +85,43 @@ final class SidecarTranscriptionService: TranscriptionServicing {
 
         do {
             let runState = SidecarTranscriptionRunState()
+            let workingDirectory = executableURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+            print(executableURL)
+            print( [
+                       "main.py",
+                       "--input-file",
+                       audioFileURL.path.replacing(".m4a", with: ".wav"),
+                       "--hf-token",
+                       hfTokenProvider(),
+                   ])
             try await launcher.run(
                 SidecarLaunchRequest(
                     executableURL: executableURL,
+                    workingDirectoryURL: workingDirectory,
                     arguments: [
+                        "main.py",
                         "--input-file",
-                        audioFileURL.path,
+                        audioFileURL.path.replacing(".m4a", with: ".wav"),
                         "--hf-token",
                         hfTokenProvider(),
                     ],
                     environment: [
                         "HF_HOME": hfHomeURLProvider().path,
+                        "MPLCONFIGDIR": NSTemporaryDirectory(),
+                        "TMPDIR": NSTemporaryDirectory(),
+                        "PYTHONPATH": workingDirectory
+                            .appendingPathComponent(".venv", isDirectory: true) // .venv/lib/python3.12/site-packages/
+                            .appendingPathComponent("lib", isDirectory: true) // .venv/lib/python3.12/site-packages/
+                            .appendingPathComponent("python3.12", isDirectory: true) // .venv/lib/python3.12/site-packages/
+                            .appendingPathComponent("site-packages", isDirectory: true) // .venv/lib/python3.12/site-packages/
+                            .path()
                     ]
                 )
             ) { [self] line in
+                print(line)
                 try await consume(line: line, meetingID: meetingID, runState: runState)
             }
 
@@ -190,8 +213,10 @@ final class SidecarTranscriptionService: TranscriptionServicing {
 
     nonisolated static func defaultExecutableURL(bundle: Bundle = .main) -> URL? {
         bundle.resourceURL?
-            .appendingPathComponent("example", isDirectory: true)
-            .appendingPathComponent("example", isDirectory: false)
+            .appendingPathComponent("python", isDirectory: true)
+            .appendingPathComponent("lib", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("python", isDirectory: false)
     }
 
     nonisolated static func defaultHFHomeURL(fileManager: FileManager = .default) -> URL {
