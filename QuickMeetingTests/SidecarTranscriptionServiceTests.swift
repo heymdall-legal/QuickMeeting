@@ -68,7 +68,7 @@ struct SidecarTranscriptionServiceTests {
     func transcribePassesPythonInterpreterWorkingDirectoryAndScriptArguments() async throws {
         let harness = try SidecarTranscriptionHarness()
         let meeting = try harness.createRecordedMeeting()
-        let executableURL = URL(fileURLWithPath: "/tmp/QuickMeetingSidecar/python/.venv/bin/python")
+        let executableURL = URL(fileURLWithPath: "/tmp/QuickMeetingSidecar/python/lib/bin/python")
         let workingDirectoryURL = URL(fileURLWithPath: "/tmp/QuickMeetingSidecar/python", isDirectory: true)
         let hfHomeURL = URL(fileURLWithPath: "/tmp/Application Support/QuickMeeting/HuggingFace")
         harness.runtimeConfiguration.executableURL = executableURL
@@ -83,7 +83,13 @@ struct SidecarTranscriptionServiceTests {
         let request = try await #require(harness.launcher.requests.first)
         #expect(request.executableURL == executableURL)
         #expect(request.workingDirectoryURL == workingDirectoryURL)
-        #expect(request.arguments == ["main.py", "--input-file", meeting.audioFilePath, "--hf-token", "hardcoded-token"])
+        #expect(request.arguments == [
+            "main.py",
+            "--input-file",
+            meeting.audioFilePath.replacing(".m4a", with: ".wav"),
+            "--hf-token",
+            "hardcoded-token",
+        ])
         #expect(request.environment["HF_HOME"] == hfHomeURL.path)
     }
 
@@ -109,7 +115,13 @@ struct SidecarTranscriptionServiceTests {
             .appendingPathExtension("app")
         let contentsURL = bundleURL.appendingPathComponent("Contents", isDirectory: true)
         let resourcesURL = contentsURL.appendingPathComponent("Resources", isDirectory: true)
-        try fileManager.createDirectory(at: resourcesURL, withIntermediateDirectories: true)
+        let bundledInterpreterURL = resourcesURL
+            .appendingPathComponent("python", isDirectory: true)
+            .appendingPathComponent("lib", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("python", isDirectory: false)
+        try fileManager.createDirectory(at: bundledInterpreterURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        fileManager.createFile(atPath: bundledInterpreterURL.path, contents: Data())
         try """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -128,13 +140,45 @@ struct SidecarTranscriptionServiceTests {
 
         let resolvedURL = try #require(SidecarTranscriptionService.defaultExecutableURL(bundle: bundle))
 
-        let expectedURL = resourcesURL
+        #expect(resolvedURL.path == bundledInterpreterURL.path)
+    }
+
+    @Test
+    func defaultExecutableURLFallsBackToVirtualenvInterpreter() throws {
+        let fileManager = FileManager.default
+        let bundleURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("app")
+        let contentsURL = bundleURL.appendingPathComponent("Contents", isDirectory: true)
+        let resourcesURL = contentsURL.appendingPathComponent("Resources", isDirectory: true)
+        let fallbackInterpreterURL = resourcesURL
             .appendingPathComponent("python", isDirectory: true)
             .appendingPathComponent(".venv", isDirectory: true)
             .appendingPathComponent("bin", isDirectory: true)
             .appendingPathComponent("python", isDirectory: false)
+        try fileManager.createDirectory(
+            at: fallbackInterpreterURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        fileManager.createFile(atPath: fallbackInterpreterURL.path, contents: Data())
+        try """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleIdentifier</key>
+            <string>com.example.QuickMeetingTests</string>
+            <key>CFBundleName</key>
+            <string>QuickMeetingTests</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+        </dict>
+        </plist>
+        """.write(to: contentsURL.appendingPathComponent("Info.plist"), atomically: true, encoding: .utf8)
+        let bundle = try #require(Bundle(url: bundleURL))
 
-        #expect(resolvedURL.path == expectedURL.path)
+        let resolvedURL = try #require(SidecarTranscriptionService.defaultExecutableURL(bundle: bundle))
+
+        #expect(resolvedURL.path == fallbackInterpreterURL.path)
     }
 
     @Test
@@ -355,7 +399,7 @@ private actor SuspendedSidecarProcessLauncher: SidecarProcessLaunching {
 }
 
 private final class SidecarHarnessRuntimeConfiguration: @unchecked Sendable {
-    var executableURL = URL(fileURLWithPath: "/tmp/example/python/.venv/bin/python")
+    var executableURL = URL(fileURLWithPath: "/tmp/example/python/lib/bin/python")
     var workingDirectoryURL = URL(fileURLWithPath: "/tmp/example/python", isDirectory: true)
     var hfHomeURL = URL(fileURLWithPath: "/tmp/HuggingFace")
 }

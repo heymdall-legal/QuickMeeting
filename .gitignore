@@ -2,3 +2,7 @@
 .derived-data-*/
 QuickRecorder
 .idea
+python/.venv/
+python/lib/
+python/**/__pycache__/
+python/.pytest_cache/

@@ -85,18 +85,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
 
         do {
             let runState = SidecarTranscriptionRunState()
-            let workingDirectory = executableURL
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-            print(executableURL)
-            print( [
-                       "main.py",
-                       "--input-file",
-                       audioFileURL.path.replacing(".m4a", with: ".wav"),
-                       "--hf-token",
-                       hfTokenProvider(),
-                   ])
+            let workingDirectory = Self.pythonRootURL(for: executableURL)
             try await launcher.run(
                 SidecarLaunchRequest(
                     executableURL: executableURL,
@@ -121,7 +110,6 @@ final class SidecarTranscriptionService: TranscriptionServicing {
                     ]
                 )
             ) { [self] line in
-                print(line)
                 try await consume(line: line, meetingID: meetingID, runState: runState)
             }
 
@@ -212,11 +200,26 @@ final class SidecarTranscriptionService: TranscriptionServicing {
     }
 
     nonisolated static func defaultExecutableURL(bundle: Bundle = .main) -> URL? {
-        bundle.resourceURL?
+        let fileManager = FileManager.default
+        let bundledURL = bundle.resourceURL?
             .appendingPathComponent("python", isDirectory: true)
             .appendingPathComponent("lib", isDirectory: true)
             .appendingPathComponent("bin", isDirectory: true)
             .appendingPathComponent("python", isDirectory: false)
+        if let bundledURL, fileManager.fileExists(atPath: bundledURL.path) {
+            return bundledURL
+        }
+
+        let fallbackURL = bundle.resourceURL?
+            .appendingPathComponent("python", isDirectory: true)
+            .appendingPathComponent(".venv", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("python", isDirectory: false)
+        if let fallbackURL, fileManager.fileExists(atPath: fallbackURL.path) {
+            return fallbackURL
+        }
+
+        return bundledURL ?? fallbackURL
     }
 
     nonisolated static func defaultHFHomeURL(fileManager: FileManager = .default) -> URL {
@@ -227,6 +230,13 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         return applicationSupportURL
             .appendingPathComponent("QuickMeeting", isDirectory: true)
             .appendingPathComponent("HuggingFace", isDirectory: true)
+    }
+
+    private nonisolated static func pythonRootURL(for executableURL: URL) -> URL {
+        executableURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
     }
 }
 
