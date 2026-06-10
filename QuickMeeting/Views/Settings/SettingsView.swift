@@ -8,20 +8,11 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @ObservedObject var modelsViewModel: ModelsSettingsViewModel
     @ObservedObject var calendarViewModel: CalendarSettingsViewModel
     @ObservedObject var autoRecordingViewModel: AutoRecordingSettingsViewModel
-    @State private var pendingDeleteModelID: TranscriptionModelID?
 
     var body: some View {
         Form {
-            Section("Transcription Models") {
-                ModelsSettingsContent(
-                    viewModel: modelsViewModel,
-                    pendingDeleteModelID: $pendingDeleteModelID
-                )
-            }
-
             Section("Calendar Integration") {
                 CalendarSettingsContent(viewModel: calendarViewModel)
             }
@@ -36,14 +27,6 @@ struct SettingsView: View {
         .task {
             await autoRecordingViewModel.load()
             await calendarViewModel.reload()
-            await modelsViewModel.load()
-        }
-        .alert("Model Operation Failed", isPresented: modelErrorIsPresented) {
-            Button("OK") {
-                modelsViewModel.clearError()
-            }
-        } message: {
-            Text(modelsViewModel.errorMessage ?? "Unknown error.")
         }
         .alert("Auto Recording App Error", isPresented: autoRecordingErrorIsPresented) {
             Button("OK") {
@@ -51,28 +34,6 @@ struct SettingsView: View {
             }
         } message: {
             Text(autoRecordingViewModel.errorMessage ?? "Unknown error.")
-        }
-        .confirmationDialog(
-            "Delete downloaded model?",
-            isPresented: deleteDialogIsPresented,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
-                guard let pendingDeleteModelID else {
-                    return
-                }
-
-                Task {
-                    await modelsViewModel.delete(pendingDeleteModelID)
-                    self.pendingDeleteModelID = nil
-                }
-            }
-
-            Button("Cancel", role: .cancel) {
-                pendingDeleteModelID = nil
-            }
-        } message: {
-            Text("The downloaded model files will be removed from QuickMeeting storage.")
         }
     }
 
@@ -82,28 +43,6 @@ struct SettingsView: View {
             set: { isPresented in
                 if !isPresented {
                     autoRecordingViewModel.clearError()
-                }
-            }
-        )
-    }
-
-    private var modelErrorIsPresented: Binding<Bool> {
-        Binding(
-            get: { modelsViewModel.errorMessage != nil },
-            set: { isPresented in
-                if !isPresented {
-                    modelsViewModel.clearError()
-                }
-            }
-        )
-    }
-
-    private var deleteDialogIsPresented: Binding<Bool> {
-        Binding(
-            get: { pendingDeleteModelID != nil },
-            set: { isPresented in
-                if !isPresented {
-                    pendingDeleteModelID = nil
                 }
             }
         )

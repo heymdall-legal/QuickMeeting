@@ -252,7 +252,7 @@ struct MeetingTranscriptContentTests {
         ])
     }
 
-    @Test
+    @Test @MainActor
     func transcriptDocumentViewReportsNonZeroContentSizeAfterUpdate() {
         let display = MeetingTranscriptDisplay(
             speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
@@ -272,7 +272,7 @@ struct MeetingTranscriptContentTests {
         #expect(documentView.isTimestampContainerFlipped == true)
     }
 
-    @Test
+    @Test @MainActor
     func transcriptDocumentViewPositionsTimestampsUsingWrappedTextLayout() {
         let display = MeetingTranscriptDisplay(
             speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],

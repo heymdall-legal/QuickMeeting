@@ -21,14 +21,14 @@ struct DefaultSidecarProcessLauncher: SidecarProcessLaunching {
         process.standardError = stderrPipe
 
         let stdoutTask = Task {
-            for try await line in stdoutPipe.fileHandleForReading.bytes.lines {
-                try await onLine(String(line))
+            for await line in Self.lineStream(from: stdoutPipe.fileHandleForReading) {
+                try await onLine(line)
             }
         }
         let stderrTask = Task {
             var lines = [String]()
-            for try await line in stderrPipe.fileHandleForReading.bytes.lines {
-                lines.append(String(line))
+            for await line in Self.lineStream(from: stderrPipe.fileHandleForReading) {
+                lines.append(line)
             }
             return lines.joined(separator: "\n")
         }
@@ -54,6 +54,40 @@ struct DefaultSidecarProcessLauncher: SidecarProcessLaunching {
 
         if terminationStatus != 0 {
             throw SidecarLaunchError.launchFailed(stderr.isEmpty ? "Sidecar process failed." : stderr)
+        }
+    }
+
+    /// Streams newline-delimited UTF-8 lines from a file handle.
+    ///
+    /// Reads in chunks via `readabilityHandler` rather than `FileHandle.AsyncBytes`,
+    /// which iterates one byte at a time and is orders of magnitude slower for
+    /// high-volume output (e.g. verbose sidecar diagnostics on stderr).
+    private static func lineStream(from handle: FileHandle) -> AsyncStream<String> {
+        AsyncStream { continuation in
+            var buffer = Data()
+            handle.readabilityHandler = { fileHandle in
+                let data = fileHandle.availableData
+                guard !data.isEmpty else {
+                    if !buffer.isEmpty, let line = String(data: buffer, encoding: .utf8) {
+                        continuation.yield(line)
+                    }
+                    fileHandle.readabilityHandler = nil
+                    continuation.finish()
+                    return
+                }
+
+                buffer.append(data)
+                while let newlineIndex = buffer.firstIndex(of: 0x0A) {
+                    let lineData = buffer.subdata(in: buffer.startIndex..<newlineIndex)
+                    buffer.removeSubrange(buffer.startIndex...newlineIndex)
+                    if let line = String(data: lineData, encoding: .utf8) {
+                        continuation.yield(line)
+                    }
+                }
+            }
+            continuation.onTermination = { _ in
+                handle.readabilityHandler = nil
+            }
         }
     }
 

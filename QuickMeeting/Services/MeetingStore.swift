@@ -122,21 +122,6 @@ struct MeetingStore {
 
     func completeTranscription(
         meetingID: UUID,
-        transcriptFileURL: URL,
-        transcriptPreview: String,
-        updatedAt: Date
-    ) throws {
-        let meeting = try fetchMeeting(id: meetingID)
-        meeting.completeTranscription(
-            transcriptFilePath: transcriptFileURL.standardizedFileURL.path(),
-            transcriptPreview: transcriptPreview,
-            updatedAt: updatedAt
-        )
-        try modelContext.save()
-    }
-
-    func completeTranscription(
-        meetingID: UUID,
         transcript: StoredTranscript,
         transcriptPreview: String,
         updatedAt: Date

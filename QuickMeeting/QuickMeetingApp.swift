@@ -13,7 +13,6 @@ struct QuickMeetingApp: App {
     private let sharedModelContainer: ModelContainer
     private let autoRecordingMonitor: MeetingAppMonitor
     @StateObject private var appViewModel: AppViewModel
-    @StateObject private var modelsSettingsViewModel: ModelsSettingsViewModel
     @StateObject private var calendarSettingsViewModel: CalendarSettingsViewModel
     @StateObject private var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
     @State private var menuBarController: MenuBarController?
@@ -37,8 +36,6 @@ struct QuickMeetingApp: App {
             let recordingService = DefaultRecordingService(
                 audioCapturePipeline: NativeAudioCapturePipeline()
             )
-            let modelSettingsStore = ModelSettingsStore()
-            let modelStore = ArgmaxWhisperModelStore()
             let transcriptionProgressCenter = TranscriptionProgressCenter()
             let transcriptionService = SidecarTranscriptionService(
                 meetingStore: meetingStore,
@@ -53,10 +50,6 @@ struct QuickMeetingApp: App {
                 hfHomeURLProvider: {
                     SidecarTranscriptionService.defaultHFHomeURL()
                 }
-            )
-            let transcriptionModelManager = TranscriptionModelManager(
-                modelStore: modelStore,
-                settingsStore: modelSettingsStore
             )
             let meetingTranscriptStore = MeetingTranscriptStore(meetingStore: meetingStore)
             let calendarSettingsStore = CalendarSettingsStore()
@@ -83,9 +76,6 @@ struct QuickMeetingApp: App {
             )
             appViewModel.attachAutoRecordingCoordinator(autoRecordingCoordinator)
             _appViewModel = StateObject(wrappedValue: appViewModel)
-            _modelsSettingsViewModel = StateObject(
-                wrappedValue: ModelsSettingsViewModel(manager: transcriptionModelManager)
-            )
             _calendarSettingsViewModel = StateObject(
                 wrappedValue: CalendarSettingsViewModel(
                     calendarIntegration: calendarIntegration,
@@ -109,7 +99,6 @@ struct QuickMeetingApp: App {
         WindowGroup {
             ContentView(
                 appViewModel: appViewModel,
-                modelsViewModel: modelsSettingsViewModel,
                 calendarSettingsViewModel: calendarSettingsViewModel,
                 autoRecordingSettingsViewModel: autoRecordingSettingsViewModel
             )
@@ -125,7 +114,6 @@ struct QuickMeetingApp: App {
 
         Settings {
             SettingsView(
-                modelsViewModel: modelsSettingsViewModel,
                 calendarViewModel: calendarSettingsViewModel,
                 autoRecordingViewModel: autoRecordingSettingsViewModel
             )

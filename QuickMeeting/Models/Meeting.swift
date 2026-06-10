@@ -20,7 +20,6 @@ final class Meeting {
     private(set) var endedAt: Date?
     private var statusRawValue: String
     private(set) var audioFilePath: String
-    private(set) var transcriptFilePath: String?
     private(set) var transcriptPreview: String?
     @Relationship(deleteRule: .cascade) private(set) var transcriptSpeakers: [PersistedTranscriptSpeaker]
     @Relationship(deleteRule: .cascade) private(set) var transcriptSegments: [PersistedTranscriptSegment]
@@ -64,7 +63,6 @@ final class Meeting {
         endedAt: Date? = nil,
         status: MeetingStatus,
         audioFilePath: String,
-        transcriptFilePath: String? = nil,
         transcriptPreview: String? = nil,
         transcriptSpeakers: [PersistedTranscriptSpeaker] = [],
         transcriptSegments: [PersistedTranscriptSegment] = [],
@@ -80,7 +78,6 @@ final class Meeting {
         self.endedAt = endedAt
         self.statusRawValue = status.rawValue
         self.audioFilePath = audioFilePath
-        self.transcriptFilePath = transcriptFilePath
         self.transcriptPreview = transcriptPreview
         self.transcriptSpeakers = transcriptSpeakers
         self.transcriptSegments = transcriptSegments
@@ -109,7 +106,6 @@ final class Meeting {
     }
 
     func beginTranscription(updatedAt: Date = Date()) {
-        transcriptFilePath = nil
         transcriptPreview = nil
         transcriptSpeakers.removeAll()
         transcriptSegments.removeAll()
@@ -118,22 +114,10 @@ final class Meeting {
     }
 
     func completeTranscription(
-        transcriptFilePath: String,
-        transcriptPreview: String,
-        updatedAt: Date = Date()
-    ) {
-        self.transcriptFilePath = transcriptFilePath
-        self.transcriptPreview = transcriptPreview
-        statusRawValue = MeetingStatus.completed.rawValue
-        touch(updatedAt: updatedAt)
-    }
-
-    func completeTranscription(
         transcript: StoredTranscript,
         transcriptPreview: String,
         updatedAt: Date = Date()
     ) {
-        transcriptFilePath = nil
         self.transcriptPreview = transcriptPreview
         transcriptSpeakers = transcript.speakers.map(PersistedTranscriptSpeaker.init)
         transcriptSegments = transcript.segments.map(PersistedTranscriptSegment.init)

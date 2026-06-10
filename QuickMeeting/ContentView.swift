@@ -10,7 +10,6 @@ import SwiftData
 
 struct ContentView: View {
     @ObservedObject var appViewModel: AppViewModel
-    @ObservedObject var modelsViewModel: ModelsSettingsViewModel
     @ObservedObject var calendarSettingsViewModel: CalendarSettingsViewModel
     @ObservedObject var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
     @Query(sort: \Meeting.startedAt, order: .reverse) private var meetings: [Meeting]
@@ -26,7 +25,6 @@ struct ContentView: View {
                 HomeView(appViewModel: appViewModel)
             case .settings:
                 SettingsView(
-                    modelsViewModel: modelsViewModel,
                     calendarViewModel: calendarSettingsViewModel,
                     autoRecordingViewModel: autoRecordingSettingsViewModel
                 )
@@ -177,7 +175,6 @@ struct ContentView: View {
 
     ContentView(
         appViewModel: previewAppViewModel(container: container),
-        modelsViewModel: previewModelsSettingsViewModel(),
         calendarSettingsViewModel: previewCalendarSettingsViewModel(),
         autoRecordingSettingsViewModel: previewAutoRecordingSettingsViewModel()
     )
@@ -235,16 +232,6 @@ private func previewAppViewModel(container: ModelContainer) -> AppViewModel {
                 .appendingPathComponent("QuickMeetingPreview", isDirectory: true)
         ),
         recordingService: PreviewRecordingService()
-    )
-}
-
-@MainActor
-private func previewModelsSettingsViewModel() -> ModelsSettingsViewModel {
-    ModelsSettingsViewModel(
-        manager: TranscriptionModelManager(
-            modelStore: ArgmaxWhisperModelStore(),
-            settingsStore: ModelSettingsStore()
-        )
     )
 }
 

@@ -28,8 +28,3 @@ struct TranscriptSegment: Codable, Identifiable, Equatable, Sendable {
         self.speakerID = speakerID
     }
 }
-
-struct TranscriptionResult: Equatable, Sendable {
-    let fullText: String
-    let segments: [TranscriptSegment]
-}

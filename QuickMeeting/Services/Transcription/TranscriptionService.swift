@@ -10,7 +10,6 @@ import Foundation
 enum TranscriptionServiceError: LocalizedError, Equatable {
     case meetingNotTranscribable
     case audioFileMissing
-    case noInstalledDefaultModel
     case transcriptionAlreadyActive
 
     var errorDescription: String? {
@@ -19,8 +18,6 @@ enum TranscriptionServiceError: LocalizedError, Equatable {
             return "This meeting can't be transcribed right now."
         case .audioFileMissing:
             return "Recording file is missing."
-        case .noInstalledDefaultModel:
-            return "No installed default transcription model is available."
         case .transcriptionAlreadyActive:
             return "Another transcription is already in progress."
         }
@@ -29,126 +26,6 @@ enum TranscriptionServiceError: LocalizedError, Equatable {
 
 protocol TranscriptionServicing: AnyObject {
     func transcribe(meetingID: UUID) async throws
-}
-
-@MainActor
-final class TranscriptionService: TranscriptionServicing {
-    private let meetingStore: MeetingStore
-    private let modelStore: any WhisperModelStore
-    private let modelSettingsStore: ModelSettingsStore
-    private let backend: any WhisperTranscriptionBackend
-    private let diarizer: any TranscriptDiarizing
-    private let progressCenter: TranscriptionProgressCenter
-    private let fileManager: FileManager
-    private let dateProvider: () -> Date
-    private var activeMeetingID: UUID?
-    private var diarizationSimulationTask: Task<Void, Never>?
-
-    init(
-        meetingStore: MeetingStore,
-        modelStore: any WhisperModelStore,
-        modelSettingsStore: ModelSettingsStore,
-        backend: any WhisperTranscriptionBackend,
-        diarizer: (any TranscriptDiarizing)? = nil,
-        progressCenter: TranscriptionProgressCenter,
-        fileManager: FileManager = .default,
-        dateProvider: @escaping () -> Date = Date.init
-    ) {
-        self.meetingStore = meetingStore
-        self.modelStore = modelStore
-        self.modelSettingsStore = modelSettingsStore
-        self.backend = backend
-        self.diarizer = diarizer ?? DefaultTranscriptDiarizer()
-        self.progressCenter = progressCenter
-        self.fileManager = fileManager
-        self.dateProvider = dateProvider
-    }
-
-    func transcribe(meetingID: UUID) async throws {
-        guard activeMeetingID == nil else {
-            throw TranscriptionServiceError.transcriptionAlreadyActive
-        }
-
-        let meeting = try meetingStore.fetchMeeting(id: meetingID)
-        let status = try meeting.status
-        guard status == .recorded || status == .failed || status == .completed else {
-            throw TranscriptionServiceError.meetingNotTranscribable
-        }
-
-        let audioFileURL = URL(fileURLWithPath: meeting.audioFilePath)
-        guard fileManager.fileExists(atPath: audioFileURL.path) else {
-            throw TranscriptionServiceError.audioFileMissing
-        }
-
-        let installedModels = try await modelStore.installedModels()
-        guard
-            let defaultModelID = modelSettingsStore.defaultModelID,
-            installedModels[defaultModelID] != nil,
-            let model = TranscriptionModelCatalog.model(for: defaultModelID),
-            let modelFolderURL = try await modelStore.installedModelURL(for: model)
-        else {
-            throw TranscriptionServiceError.noInstalledDefaultModel
-        }
-
-        activeMeetingID = meetingID
-        try meetingStore.startTranscription(meetingID: meetingID, updatedAt: dateProvider())
-        progressCenter.startTracking(meetingID: meetingID)
-
-        defer {
-            diarizationSimulationTask?.cancel()
-            diarizationSimulationTask = nil
-            progressCenter.finishTracking(meetingID: meetingID)
-            activeMeetingID = nil
-        }
-
-        do {
-            let result = try await backend.transcribe(
-                TranscriptionRequest(
-                    audioFileURL: audioFileURL,
-                    model: model,
-                    modelFolderURL: modelFolderURL,
-                    onProgress: { [progressCenter] progress in
-                        Task { @MainActor in
-                            progressCenter.updateProgress(progress, for: meetingID)
-                        }
-                    }
-                )
-            )
-            progressCenter.startDiarizationTracking(meetingID: meetingID)
-
-            diarizationSimulationTask = Task { [progressCenter] in
-                var elapsed: Double = 0
-                let totalDuration: Double = 30
-                let tickInterval: Double = 0.5
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(tickInterval))
-                    guard !Task.isCancelled else { break }
-                    elapsed += tickInterval
-                    let simulated = min(0.95, 1.0 - exp(-3.0 * elapsed / totalDuration))
-                    await MainActor.run {
-                        progressCenter.updateDiarizationProgress(simulated, for: meetingID)
-                    }
-                }
-            }
-
-            let storedTranscript = try await diarizer.diarize(
-                TranscriptDiarizationRequest(audioFileURL: audioFileURL, result: result)
-            )
-
-            diarizationSimulationTask?.cancel()
-            diarizationSimulationTask = nil
-            progressCenter.updateDiarizationProgress(1.0, for: meetingID)
-            try meetingStore.completeTranscription(
-                meetingID: meetingID,
-                transcript: storedTranscript,
-                transcriptPreview: storedTranscript.fullText.trimmingCharacters(in: .whitespacesAndNewlines),
-                updatedAt: dateProvider()
-            )
-        } catch {
-            try? meetingStore.failTranscription(meetingID: meetingID, updatedAt: dateProvider())
-            throw error
-        }
-    }
 }
 
 final class NoopTranscriptionService: TranscriptionServicing {
