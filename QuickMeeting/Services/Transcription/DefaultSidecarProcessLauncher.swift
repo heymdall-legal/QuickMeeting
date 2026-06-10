@@ -12,10 +12,8 @@ struct DefaultSidecarProcessLauncher: SidecarProcessLaunching {
         let process = Process()
         process.executableURL = request.executableURL
         process.arguments = request.arguments
-        process.currentDirectoryURL = request.executableURL.deletingLastPathComponent()
-        process.environment = ProcessInfo.processInfo.environment.merging(request.environment) { _, new in
-            new
-        }
+        process.currentDirectoryURL = request.workingDirectoryURL
+        process.environment = request.environment
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -27,27 +25,56 @@ struct DefaultSidecarProcessLauncher: SidecarProcessLaunching {
                 try await onLine(String(line))
             }
         }
-
-        do {
-            try process.run()
-        } catch {
-            stdoutTask.cancel()
-            throw SidecarLaunchError.launchFailed(error.localizedDescription)
+        let stderrTask = Task {
+            var lines = [String]()
+            for try await line in stderrPipe.fileHandleForReading.bytes.lines {
+                lines.append(String(line))
+            }
+            return lines.joined(separator: "\n")
         }
 
-        process.waitUntilExit()
+        let terminationStatus: Int32
+        do {
+            terminationStatus = try await runUntilTermination(process)
+        } catch {
+            stdoutTask.cancel()
+            stderrTask.cancel()
+            throw SidecarLaunchError.launchFailed(error.localizedDescription)
+        }
 
         do {
             try await stdoutTask.value
         } catch {
+            stderrTask.cancel()
             throw error
         }
 
-        if process.terminationStatus != 0 {
-            let stderrData = try stderrPipe.fileHandleForReading.readToEnd() ?? Data()
-            let stderr = String(decoding: stderrData, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+        let stderr = (try? await stderrTask.value)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if terminationStatus != 0 {
             throw SidecarLaunchError.launchFailed(stderr.isEmpty ? "Sidecar process failed." : stderr)
+        }
+    }
+
+    private func runUntilTermination(_ process: Process) async throws -> Int32 {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                process.terminationHandler = { process in
+                    continuation.resume(returning: process.terminationStatus)
+                }
+
+                do {
+                    try process.run()
+                } catch {
+                    process.terminationHandler = nil
+                    continuation.resume(throwing: error)
+                }
+            }
+        } onCancel: {
+            if process.isRunning {
+                process.terminate()
+            }
         }
     }
 }

@@ -65,12 +65,14 @@ struct SidecarTranscriptionServiceTests {
     }
 
     @Test
-    func transcribePassesExecutableArgumentsAndHFHomeToLauncher() async throws {
+    func transcribePassesPythonInterpreterWorkingDirectoryAndScriptArguments() async throws {
         let harness = try SidecarTranscriptionHarness()
         let meeting = try harness.createRecordedMeeting()
-        let executableURL = URL(fileURLWithPath: "/tmp/QuickMeetingSidecar/example")
+        let executableURL = URL(fileURLWithPath: "/tmp/QuickMeetingSidecar/python/.venv/bin/python")
+        let workingDirectoryURL = URL(fileURLWithPath: "/tmp/QuickMeetingSidecar/python", isDirectory: true)
         let hfHomeURL = URL(fileURLWithPath: "/tmp/Application Support/QuickMeeting/HuggingFace")
         harness.runtimeConfiguration.executableURL = executableURL
+        harness.runtimeConfiguration.workingDirectoryURL = workingDirectoryURL
         harness.runtimeConfiguration.hfHomeURL = hfHomeURL
         await harness.launcher.setResult(.success([
             #"{"status":"completed","speakers":[],"segments":[]}"#,
@@ -80,7 +82,8 @@ struct SidecarTranscriptionServiceTests {
 
         let request = try await #require(harness.launcher.requests.first)
         #expect(request.executableURL == executableURL)
-        #expect(request.arguments == ["--input-file", meeting.audioFilePath, "--hf-token", "hardcoded-token"])
+        #expect(request.workingDirectoryURL == workingDirectoryURL)
+        #expect(request.arguments == ["main.py", "--input-file", meeting.audioFilePath, "--hf-token", "hardcoded-token"])
         #expect(request.environment["HF_HOME"] == hfHomeURL.path)
     }
 
@@ -100,6 +103,41 @@ struct SidecarTranscriptionServiceTests {
     }
 
     @Test
+    func defaultExecutableURLResolvesBundledPythonInterpreter() throws {
+        let fileManager = FileManager.default
+        let bundleURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("app")
+        let contentsURL = bundleURL.appendingPathComponent("Contents", isDirectory: true)
+        let resourcesURL = contentsURL.appendingPathComponent("Resources", isDirectory: true)
+        try fileManager.createDirectory(at: resourcesURL, withIntermediateDirectories: true)
+        try """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleIdentifier</key>
+            <string>com.example.QuickMeetingTests</string>
+            <key>CFBundleName</key>
+            <string>QuickMeetingTests</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+        </dict>
+        </plist>
+        """.write(to: contentsURL.appendingPathComponent("Info.plist"), atomically: true, encoding: .utf8)
+        let bundle = try #require(Bundle(url: bundleURL))
+
+        let resolvedURL = try #require(SidecarTranscriptionService.defaultExecutableURL(bundle: bundle))
+
+        let expectedURL = resourcesURL
+            .appendingPathComponent("python", isDirectory: true)
+            .appendingPathComponent(".venv", isDirectory: true)
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("python", isDirectory: false)
+
+        #expect(resolvedURL.path == expectedURL.path)
+    }
+
+    @Test
     func defaultLauncherThrowsExecutableMissingForAbsentBinary() async throws {
         let launcher = DefaultSidecarProcessLauncher()
 
@@ -107,12 +145,95 @@ struct SidecarTranscriptionServiceTests {
             try await launcher.run(
                 SidecarLaunchRequest(
                     executableURL: URL(fileURLWithPath: "/tmp/does-not-exist/example"),
+                    workingDirectoryURL: URL(fileURLWithPath: "/tmp/does-not-exist", isDirectory: true),
                     arguments: [],
                     environment: [:]
                 ),
                 onLine: { _ in }
             )
         }
+    }
+
+    @Test
+    func defaultLauncherDeliversStdoutLinesBeforeProcessExits() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let scriptURL = rootURL.appendingPathComponent("streaming-sidecar.sh")
+        try """
+        #!/bin/sh
+        printf '%s\\n' '{"status":"running"}'
+        sleep 1
+        printf '%s\\n' '{"status":"completed","speakers":[],"segments":[]}'
+        """.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let launcher = DefaultSidecarProcessLauncher()
+        let firstLine = AsyncStream<String>.makeStream()
+        var deliveredLines = [String]()
+
+        let runTask = Task {
+            try await launcher.run(
+                SidecarLaunchRequest(
+                    executableURL: URL(fileURLWithPath: "/bin/sh"),
+                    workingDirectoryURL: rootURL,
+                    arguments: [scriptURL.path],
+                    environment: [:]
+                )
+            ) { line in
+                deliveredLines.append(line)
+                if deliveredLines.count == 1 {
+                    firstLine.continuation.yield(line)
+                    firstLine.continuation.finish()
+                }
+            }
+        }
+
+        var iterator = firstLine.stream.makeAsyncIterator()
+        let observedFirstLine = await iterator.next()
+
+        #expect(observedFirstLine == #"{"status":"running"}"#)
+        #expect(!runTask.isCancelled)
+
+        try await runTask.value
+        #expect(deliveredLines == [
+            #"{"status":"running"}"#,
+            #"{"status":"completed","speakers":[],"segments":[]}"#,
+        ])
+    }
+
+    @Test
+    func defaultLauncherDrainsStderrWhileProcessRuns() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let scriptURL = rootURL.appendingPathComponent("stderr-heavy-sidecar.sh")
+        try """
+        #!/bin/sh
+        i=0
+        while [ "$i" -lt 20000 ]; do
+          printf 'diagnostic line %s\\n' "$i" >&2
+          i=$((i + 1))
+        done
+        printf '%s\\n' '{"status":"completed","speakers":[],"segments":[]}'
+        """.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        var lines = [String]()
+        try await DefaultSidecarProcessLauncher().run(
+            SidecarLaunchRequest(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                workingDirectoryURL: rootURL,
+                arguments: [scriptURL.path],
+                environment: [:]
+            )
+        ) { line in
+            lines.append(line)
+        }
+
+        #expect(lines == [#"{"status":"completed","speakers":[],"segments":[]}"#])
     }
 }
 
@@ -234,6 +355,7 @@ private actor SuspendedSidecarProcessLauncher: SidecarProcessLaunching {
 }
 
 private final class SidecarHarnessRuntimeConfiguration: @unchecked Sendable {
-    var executableURL = URL(fileURLWithPath: "/tmp/example/example")
+    var executableURL = URL(fileURLWithPath: "/tmp/example/python/.venv/bin/python")
+    var workingDirectoryURL = URL(fileURLWithPath: "/tmp/example/python", isDirectory: true)
     var hfHomeURL = URL(fileURLWithPath: "/tmp/HuggingFace")
 }
