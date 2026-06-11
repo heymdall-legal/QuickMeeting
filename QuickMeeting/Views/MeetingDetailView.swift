@@ -130,7 +130,6 @@ struct MeetingDetailView: View {
 
     private var currentTranscriptPaneState: TranscriptPaneState {
         transcriptPaneState(
-            meetingStatus: (try? meeting.status) ?? .recorded,
             hasTranscript: meeting.storedTranscript != nil,
             progress: transcriptionProgress,
             diarizationProgress: diarizationProgress

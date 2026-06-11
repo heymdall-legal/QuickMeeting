@@ -109,7 +109,6 @@ final class Meeting {
         transcriptPreview = nil
         transcriptSpeakers.removeAll()
         transcriptSegments.removeAll()
-        statusRawValue = MeetingStatus.transcribing.rawValue
         touch(updatedAt: updatedAt)
     }
 

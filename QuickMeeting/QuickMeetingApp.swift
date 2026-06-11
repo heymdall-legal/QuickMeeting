@@ -32,6 +32,7 @@ struct QuickMeetingApp: App {
             )
             sharedModelContainer = modelContainer
             let meetingStore = MeetingStore(modelContext: modelContainer.mainContext)
+            try? meetingStore.resetStuckTranscribingMeetings(updatedAt: Date())
             let meetingFileStore = MeetingFileStore()
             let recordingService = DefaultRecordingService(
                 audioCapturePipeline: NativeAudioCapturePipeline()

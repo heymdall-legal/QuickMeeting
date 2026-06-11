@@ -182,7 +182,7 @@ struct MeetingStoreTests {
     }
 
     @Test
-    func startTranscriptionMarksMeetingAsTranscribing() throws {
+    func startTranscriptionPreservesExistingStatus() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()
         let updatedAt = Date(timeIntervalSince1970: 1_234_568_000)
@@ -190,7 +190,7 @@ struct MeetingStoreTests {
         try harness.store.startTranscription(meetingID: meeting.id, updatedAt: updatedAt)
 
         let reloaded = try harness.reloadMeeting(id: meeting.id)
-        #expect(try reloaded.status == .transcribing)
+        #expect(try reloaded.status == .recorded)
         #expect(reloaded.updatedAt == updatedAt)
     }
 
@@ -209,7 +209,7 @@ struct MeetingStoreTests {
         try harness.store.startTranscription(meetingID: meeting.id, updatedAt: updatedAt)
 
         let reloaded = try harness.reloadMeeting(id: meeting.id)
-        #expect(try reloaded.status == .transcribing)
+        #expect(try reloaded.status == .completed)
         #expect(reloaded.transcriptPreview == nil)
         #expect(reloaded.transcriptSpeakers.isEmpty)
         #expect(reloaded.transcriptSegments.isEmpty)
@@ -312,6 +312,35 @@ struct MeetingStoreTests {
         let reloaded = try harness.reloadMeeting(id: meeting.id)
         #expect(reloaded.title == "Renamed Review")
         #expect(reloaded.updatedAt == renamedAt)
+    }
+
+    @Test
+    func resetStuckTranscribingMeetingsMarksMeetingsAsFailed() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let stuckMeeting = try harness.store.fetchMeeting(id: meeting.id)
+        stuckMeeting.setStatus(.transcribing, updatedAt: Date(timeIntervalSince1970: 1_234_568_000))
+        try harness.store.modelContext.save()
+
+        let resetAt = Date(timeIntervalSince1970: 1_234_568_999)
+        try harness.store.resetStuckTranscribingMeetings(updatedAt: resetAt)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .failed)
+        #expect(reloaded.updatedAt == resetAt)
+    }
+
+    @Test
+    func resetStuckTranscribingMeetingsDoesNotAffectOtherStatuses() throws {
+        let harness = try MeetingStoreHarness()
+        let recorded = try harness.createRecordedMeeting()
+        let originalUpdatedAt = recorded.updatedAt
+
+        try harness.store.resetStuckTranscribingMeetings(updatedAt: Date())
+
+        let reloaded = try harness.reloadMeeting(id: recorded.id)
+        #expect(try reloaded.status == .recorded)
+        #expect(reloaded.updatedAt == originalUpdatedAt)
     }
 
     @Test

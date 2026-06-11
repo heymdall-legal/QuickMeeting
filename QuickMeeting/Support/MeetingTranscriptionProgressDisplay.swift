@@ -15,18 +15,15 @@ enum TranscriptPaneState: Equatable {
 }
 
 func transcriptPaneState(
-    meetingStatus: MeetingStatus,
     hasTranscript: Bool,
     progress: Double?,
     diarizationProgress: Double?
 ) -> TranscriptPaneState {
-    if meetingStatus == .transcribing {
-        if let diarizationProgress {
-            return .diarizing(progress: min(max(diarizationProgress, 0), 1))
-        }
-        if let progress {
-            return .transcribing(progress: min(max(progress, 0), 1))
-        }
+    if let diarizationProgress {
+        return .diarizing(progress: min(max(diarizationProgress, 0), 1))
+    }
+    if let progress {
+        return .transcribing(progress: min(max(progress, 0), 1))
     }
 
     if hasTranscript {

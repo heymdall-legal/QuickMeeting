@@ -9,9 +9,8 @@ struct MeetingTranscriptionProgressDisplayTests {
     }
 
     @Test
-    func transcribingMeetingUsesProgressPane() {
+    func activeTranscriptionProgressUsesProgressPane() {
         let state = transcriptPaneState(
-            meetingStatus: .transcribing,
             hasTranscript: false,
             progress: 0.42,
             diarizationProgress: nil
@@ -21,9 +20,8 @@ struct MeetingTranscriptionProgressDisplayTests {
     }
 
     @Test
-    func completedMeetingKeepsTranscriptPaneEvenWithoutProgress() {
+    func completedMeetingKeepsTranscriptPaneWhenNoProgressIsActive() {
         let state = transcriptPaneState(
-            meetingStatus: .completed,
             hasTranscript: true,
             progress: nil,
             diarizationProgress: nil
@@ -33,9 +31,8 @@ struct MeetingTranscriptionProgressDisplayTests {
     }
 
     @Test
-    func diarizingMeetingUsesDiarizingPane() {
+    func activeDiarizationProgressUsesDiarizingPane() {
         let state = transcriptPaneState(
-            meetingStatus: .transcribing,
             hasTranscript: false,
             progress: nil,
             diarizationProgress: 0.6
@@ -47,7 +44,6 @@ struct MeetingTranscriptionProgressDisplayTests {
     @Test
     func diarizationTakesPrecedenceOverTranscriptionProgress() {
         let state = transcriptPaneState(
-            meetingStatus: .transcribing,
             hasTranscript: false,
             progress: 1.0,
             diarizationProgress: 0.3

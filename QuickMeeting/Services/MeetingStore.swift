@@ -167,4 +167,16 @@ struct MeetingStore {
         meeting.failTranscription(updatedAt: updatedAt)
         try modelContext.save()
     }
+
+    func resetStuckTranscribingMeetings(updatedAt: Date) throws {
+        let allMeetings = try modelContext.fetch(FetchDescriptor<Meeting>())
+        var didChange = false
+        for meeting in allMeetings where (try? meeting.status) == .transcribing {
+            meeting.failTranscription(updatedAt: updatedAt)
+            didChange = true
+        }
+        if didChange {
+            try modelContext.save()
+        }
+    }
 }

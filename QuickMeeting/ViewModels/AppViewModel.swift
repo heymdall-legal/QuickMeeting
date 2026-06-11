@@ -236,6 +236,10 @@ final class AppViewModel: ObservableObject {
             return false
         }
 
+        guard !transcriptionProgressCenter.isAnyTranscriptionActive else {
+            return false
+        }
+
         switch status {
         case .recorded, .failed, .completed:
             return true

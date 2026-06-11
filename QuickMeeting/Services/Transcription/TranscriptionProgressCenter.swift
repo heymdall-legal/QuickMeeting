@@ -53,4 +53,8 @@ final class TranscriptionProgressCenter: ObservableObject {
     func diarizationProgress(for meetingID: UUID) -> Double? {
         diarizationProgressByMeetingID[meetingID]
     }
+
+    var isAnyTranscriptionActive: Bool {
+        !progressByMeetingID.isEmpty
+    }
 }
