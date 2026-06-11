@@ -379,6 +379,8 @@ def transcribe_audio(audio_path, language=None, initial_prompt=None):
         "path_or_hf_repo": TRANSCRIPTION_MODEL,
         "word_timestamps": True,
         "verbose": False,
+        "condition_on_previous_text": False,
+        "no_speech_threshold": 0.5,
     }
     if language is not None:
         kwargs["language"] = language
@@ -512,14 +514,20 @@ def match_meeting_speakers(meeting_speakers, registry):
         best_similarity = None
 
         for profile in known_speakers:
-            known_centroid = profile.get("centroid")
-            if known_centroid is None:
-                known_centroid = average_centroids(profile.get("centroids", []))
-            similarity = cosine_similarity(speaker.get("centroid"), known_centroid)
-            if similarity is None:
+            profile_centroids = profile.get("centroids") or []
+            if not profile_centroids:
+                single = profile.get("centroid")
+                if single:
+                    profile_centroids = [single]
+            best_for_profile = None
+            for known_centroid in profile_centroids:
+                similarity = cosine_similarity(speaker.get("centroid"), known_centroid)
+                if similarity is not None and (best_for_profile is None or similarity > best_for_profile):
+                    best_for_profile = similarity
+            if best_for_profile is None:
                 continue
-            if best_similarity is None or similarity > best_similarity:
-                best_similarity = similarity
+            if best_similarity is None or best_for_profile > best_similarity:
+                best_similarity = best_for_profile
                 best_profile = profile
 
         if best_profile is not None and best_similarity is not None:
@@ -552,14 +560,28 @@ def normalize_known_speakers(payload):
         if not isinstance(item, dict):
             raise ValueError("known speaker entries must be objects")
         speaker_id = item.get("id")
-        centroid = item.get("centroid")
         if not isinstance(speaker_id, str) or not speaker_id:
             raise ValueError("known speaker id must be a non-empty string")
-        if not isinstance(centroid, list) or not centroid:
-            raise ValueError("known speaker centroid must be a non-empty array")
-        normalized.append(
-            {"id": speaker_id, "centroid": [float(value) for value in centroid]}
-        )
+
+        centroid = item.get("centroid")
+        centroids = item.get("centroids")
+
+        if centroid is not None:
+            if not isinstance(centroid, list) or not centroid:
+                raise ValueError("known speaker centroid must be a non-empty array")
+            all_centroids = [[float(v) for v in centroid]]
+        elif centroids is not None:
+            if not isinstance(centroids, list) or not centroids:
+                raise ValueError("known speaker centroids must be a non-empty array")
+            all_centroids = []
+            for c in centroids:
+                if not isinstance(c, list) or not c:
+                    raise ValueError("each centroid must be a non-empty array")
+                all_centroids.append([float(v) for v in c])
+        else:
+            raise ValueError("known speaker must have either 'centroid' or 'centroids'")
+
+        normalized.append({"id": speaker_id, "centroids": all_centroids})
     return normalized
 
 
