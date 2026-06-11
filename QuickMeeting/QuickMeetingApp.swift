@@ -15,6 +15,7 @@ struct QuickMeetingApp: App {
     @StateObject private var appViewModel: AppViewModel
     @StateObject private var calendarSettingsViewModel: CalendarSettingsViewModel
     @StateObject private var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
+    @StateObject private var huggingFaceTokenSettingsViewModel: HuggingFaceTokenSettingsViewModel
     @State private var menuBarController: MenuBarController?
 
     init() {
@@ -38,6 +39,7 @@ struct QuickMeetingApp: App {
                 audioCapturePipeline: NativeAudioCapturePipeline()
             )
             let transcriptionProgressCenter = TranscriptionProgressCenter()
+            let huggingFaceTokenSettingsStore = HuggingFaceTokenSettingsStore()
             let transcriptionService = SidecarTranscriptionService(
                 meetingStore: meetingStore,
                 progressCenter: transcriptionProgressCenter,
@@ -46,7 +48,7 @@ struct QuickMeetingApp: App {
                     SidecarTranscriptionService.defaultExecutableURL()
                 },
                 hfTokenProvider: {
-                    SidecarTranscriptionService.hardcodedHuggingFaceToken
+                    huggingFaceTokenSettingsStore.loadToken()
                 },
                 hfHomeURLProvider: {
                     SidecarTranscriptionService.defaultHFHomeURL()
@@ -86,6 +88,11 @@ struct QuickMeetingApp: App {
             _autoRecordingSettingsViewModel = StateObject(
                 wrappedValue: autoRecordingSettingsViewModel
             )
+            _huggingFaceTokenSettingsViewModel = StateObject(
+                wrappedValue: HuggingFaceTokenSettingsViewModel(
+                    settingsStore: huggingFaceTokenSettingsStore
+                )
+            )
             autoRecordingMonitor = MeetingAppMonitor(
                 settingsStore: autoRecordingSettingsStore,
                 activitySource: NativeMeetingAppActivitySource(),
@@ -101,7 +108,8 @@ struct QuickMeetingApp: App {
             ContentView(
                 appViewModel: appViewModel,
                 calendarSettingsViewModel: calendarSettingsViewModel,
-                autoRecordingSettingsViewModel: autoRecordingSettingsViewModel
+                autoRecordingSettingsViewModel: autoRecordingSettingsViewModel,
+                huggingFaceTokenSettingsViewModel: huggingFaceTokenSettingsViewModel
             )
                 .task {
                     if menuBarController == nil {
@@ -116,7 +124,8 @@ struct QuickMeetingApp: App {
         Settings {
             SettingsView(
                 calendarViewModel: calendarSettingsViewModel,
-                autoRecordingViewModel: autoRecordingSettingsViewModel
+                autoRecordingViewModel: autoRecordingSettingsViewModel,
+                huggingFaceTokenViewModel: huggingFaceTokenSettingsViewModel
             )
         }
     }

@@ -20,8 +20,6 @@ enum SidecarTranscriptionServiceError: LocalizedError, Equatable {
 
 @MainActor
 final class SidecarTranscriptionService: TranscriptionServicing {
-    nonisolated static let hardcodedHuggingFaceToken = "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"
-
     private let meetingStore: MeetingStore
     private let progressCenter: TranscriptionProgressCenter
     private let launcher: any SidecarProcessLaunching
@@ -78,6 +76,11 @@ final class SidecarTranscriptionService: TranscriptionServicing {
             throw SidecarTranscriptionServiceError.bundledExecutableMissing
         }
 
+        let huggingFaceToken = hfTokenProvider().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !huggingFaceToken.isEmpty else {
+            throw TranscriptionServiceError.missingHuggingFaceToken
+        }
+
         activeMeetingID = meetingID
         try meetingStore.startTranscription(meetingID: meetingID, updatedAt: dateProvider())
         progressCenter.startTracking(meetingID: meetingID)
@@ -104,7 +107,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
                         "--input-file",
                         preparedAudio.fileURL.path,
                         "--hf-token",
-                        hfTokenProvider(),
+                        huggingFaceToken,
                     ],
                     environment: [
                         "HF_HOME": hfHomeURLProvider().path,

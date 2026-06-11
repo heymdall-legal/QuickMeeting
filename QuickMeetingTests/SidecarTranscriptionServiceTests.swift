@@ -43,6 +43,21 @@ struct SidecarTranscriptionServiceTests {
     }
 
     @Test
+    func transcribeRejectsMissingHuggingFaceTokenBeforeLaunchingSidecar() async throws {
+        let harness = try SidecarTranscriptionHarness(hfToken: "  ")
+        let meeting = try harness.createRecordedMeeting()
+
+        await #expect(throws: TranscriptionServiceError.missingHuggingFaceToken) {
+            try await harness.service.transcribe(meetingID: meeting.id)
+        }
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .recorded)
+        let requests = await harness.launcher.requests
+        #expect(requests.isEmpty)
+    }
+
+    @Test
     func transcribeRejectsSecondJobWhileFirstIsActive() async throws {
         let harness = try SidecarTranscriptionHarness()
         let firstMeeting = try harness.createRecordedMeeting()
@@ -381,7 +396,7 @@ private struct SidecarTranscriptionHarness {
     let audioPreparer: StubSidecarTranscriptionAudioPreparer
     let service: SidecarTranscriptionService
 
-    init() throws {
+    init(hfToken: String = "hardcoded-token") throws {
         let schema = Schema([
             Meeting.self,
             PersistedTranscriptSpeaker.self,
@@ -405,7 +420,7 @@ private struct SidecarTranscriptionHarness {
             progressCenter: progressCenter,
             launcher: launcher,
             executableURLProvider: { runtimeConfiguration.executableURL },
-            hfTokenProvider: { "hardcoded-token" },
+            hfTokenProvider: { hfToken },
             hfHomeURLProvider: { runtimeConfiguration.hfHomeURL },
             audioPreparer: audioPreparer,
             fileManager: fileManager,

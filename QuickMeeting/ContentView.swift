@@ -12,6 +12,7 @@ struct ContentView: View {
     @ObservedObject var appViewModel: AppViewModel
     @ObservedObject var calendarSettingsViewModel: CalendarSettingsViewModel
     @ObservedObject var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
+    @ObservedObject var huggingFaceTokenSettingsViewModel: HuggingFaceTokenSettingsViewModel
     @Query(sort: \Meeting.startedAt, order: .reverse) private var meetings: [Meeting]
     @State private var selection = defaultSidebarSelection()
 
@@ -26,7 +27,8 @@ struct ContentView: View {
             case .settings:
                 SettingsView(
                     calendarViewModel: calendarSettingsViewModel,
-                    autoRecordingViewModel: autoRecordingSettingsViewModel
+                    autoRecordingViewModel: autoRecordingSettingsViewModel,
+                    huggingFaceTokenViewModel: huggingFaceTokenSettingsViewModel
                 )
             case .meeting(let meetingID):
                 if let selectedMeeting = meetings.first(where: { $0.id == meetingID }) {
@@ -35,7 +37,9 @@ struct ContentView: View {
                         transcriptionProgress: appViewModel.transcriptionProgress(for: selectedMeeting.id),
                         diarizationProgress: appViewModel.diarizationProgress(for: selectedMeeting.id),
                         canDelete: appViewModel.canDeleteMeeting(selectedMeeting),
-                        canTranscribe: appViewModel.canTranscribeMeeting(selectedMeeting),
+                        canTranscribe: huggingFaceTokenSettingsViewModel.hasToken
+                            && appViewModel.canTranscribeMeeting(selectedMeeting),
+                        transcriptionDisabledReason: transcriptionDisabledReason(for: selectedMeeting),
                         onTranscribe: {
                             Task {
                                 await appViewModel.transcribeMeeting(selectedMeeting)
@@ -176,7 +180,8 @@ struct ContentView: View {
     ContentView(
         appViewModel: previewAppViewModel(container: container),
         calendarSettingsViewModel: previewCalendarSettingsViewModel(),
-        autoRecordingSettingsViewModel: previewAutoRecordingSettingsViewModel()
+        autoRecordingSettingsViewModel: previewAutoRecordingSettingsViewModel(),
+        huggingFaceTokenSettingsViewModel: previewHuggingFaceTokenSettingsViewModel()
     )
         .modelContainer(container)
 }
@@ -224,6 +229,11 @@ private func previewAutoRecordingSettingsViewModel() -> AutoRecordingSettingsVie
 }
 
 @MainActor
+private func previewHuggingFaceTokenSettingsViewModel() -> HuggingFaceTokenSettingsViewModel {
+    HuggingFaceTokenSettingsViewModel(settingsStore: HuggingFaceTokenSettingsStore())
+}
+
+@MainActor
 private func previewAppViewModel(container: ModelContainer) -> AppViewModel {
     AppViewModel(
         meetingStore: MeetingStore(modelContext: container.mainContext),
@@ -248,4 +258,18 @@ private final class PreviewRecordingService: RecordingService {
     func startRecording(meeting _: Meeting, outputURL _: URL) async throws {}
 
     func stopRecording() async throws {}
+}
+
+private extension ContentView {
+    func transcriptionDisabledReason(for meeting: Meeting) -> String? {
+        guard !huggingFaceTokenSettingsViewModel.hasToken else {
+            return nil
+        }
+
+        guard appViewModel.canTranscribeMeeting(meeting) else {
+            return nil
+        }
+
+        return "Add your Hugging Face token in Settings to enable transcription."
+    }
 }

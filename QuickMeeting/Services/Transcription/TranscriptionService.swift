@@ -11,6 +11,7 @@ enum TranscriptionServiceError: LocalizedError, Equatable {
     case meetingNotTranscribable
     case audioFileMissing
     case transcriptionAlreadyActive
+    case missingHuggingFaceToken
 
     var errorDescription: String? {
         switch self {
@@ -20,6 +21,8 @@ enum TranscriptionServiceError: LocalizedError, Equatable {
             return "Recording file is missing."
         case .transcriptionAlreadyActive:
             return "Another transcription is already in progress."
+        case .missingHuggingFaceToken:
+            return "Add your Hugging Face token in Settings before starting transcription."
         }
     }
 }

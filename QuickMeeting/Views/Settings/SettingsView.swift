@@ -10,6 +10,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var calendarViewModel: CalendarSettingsViewModel
     @ObservedObject var autoRecordingViewModel: AutoRecordingSettingsViewModel
+    @ObservedObject var huggingFaceTokenViewModel: HuggingFaceTokenSettingsViewModel
 
     var body: some View {
         Form {
@@ -20,6 +21,10 @@ struct SettingsView: View {
             Section("Auto Recording") {
                 AutoRecordingSettingsContent(viewModel: autoRecordingViewModel)
             }
+
+            Section("Transcription") {
+                HuggingFaceTokenSettingsContent(viewModel: huggingFaceTokenViewModel)
+            }
         }
         .formStyle(.grouped)
         .frame(minWidth: 760, minHeight: 460)
@@ -27,6 +32,7 @@ struct SettingsView: View {
         .task {
             await autoRecordingViewModel.load()
             await calendarViewModel.reload()
+            await huggingFaceTokenViewModel.load()
         }
         .alert("Auto Recording App Error", isPresented: autoRecordingErrorIsPresented) {
             Button("OK") {

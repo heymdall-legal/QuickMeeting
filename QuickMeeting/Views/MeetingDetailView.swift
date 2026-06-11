@@ -16,6 +16,7 @@ struct MeetingDetailView: View {
     let diarizationProgress: Double?
     let canDelete: Bool
     let canTranscribe: Bool
+    let transcriptionDisabledReason: String?
     let onTranscribe: () -> Void
     let onDelete: () -> Void
     let onRenameMeeting: (String) async throws -> Void
@@ -149,6 +150,13 @@ struct MeetingDetailView: View {
             Button("Transcribe", action: handleTranscribeAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canTranscribe)
+
+            if let transcriptionDisabledReason {
+                Text(transcriptionDisabledReason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -166,6 +174,13 @@ struct MeetingDetailView: View {
             Button("Transcribe", action: handleTranscribeAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canTranscribe)
+
+            if let transcriptionDisabledReason {
+                Text(transcriptionDisabledReason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -268,6 +283,12 @@ struct MeetingDetailView: View {
             Button("Transcribe", action: handleTranscribeAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canTranscribe)
+
+            if let transcriptionDisabledReason {
+                Text(transcriptionDisabledReason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             if isTranscriptExportAvailable(from: meeting.storedTranscript) {
                 HStack(spacing: 10) {
