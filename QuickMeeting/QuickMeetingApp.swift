@@ -36,6 +36,8 @@ struct QuickMeetingApp: App {
             )
             sharedModelContainer = modelContainer
             let meetingStore = MeetingStore(modelContext: modelContainer.mainContext)
+            let knownSpeakerStore = KnownSpeakerStore(modelContext: modelContainer.mainContext)
+            let knownSpeakerEnrollmentService = KnownSpeakerEnrollmentService(store: knownSpeakerStore)
             try? meetingStore.resetStuckTranscribingMeetings(updatedAt: Date())
             let meetingFileStore = MeetingFileStore()
             let recordingService = DefaultRecordingService(
@@ -62,7 +64,9 @@ struct QuickMeetingApp: App {
                 },
                 hfHomeURLProvider: {
                     SidecarTranscriptionService.defaultHFHomeURL()
-                }
+                },
+                knownSpeakerStore: knownSpeakerStore,
+                knownSpeakerEnrollmentService: knownSpeakerEnrollmentService
             )
             let meetingTranscriptStore = MeetingTranscriptStore(meetingStore: meetingStore)
             let calendarSettingsStore = CalendarSettingsStore()
@@ -78,6 +82,7 @@ struct QuickMeetingApp: App {
                 transcriptionService: transcriptionService,
                 transcriptionProgressCenter: transcriptionProgressCenter,
                 meetingTranscriptStore: meetingTranscriptStore,
+                knownSpeakerEnrollmentService: knownSpeakerEnrollmentService,
                 calendarIntegration: calendarIntegration
             )
             let autoRecordingSettings = autoRecordingSettingsStore.load()

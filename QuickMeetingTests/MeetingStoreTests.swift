@@ -10,6 +10,8 @@ struct MeetingStoreTests {
             Meeting.self,
             PersistedTranscriptSpeaker.self,
             PersistedTranscriptSegment.self,
+            PersistedKnownSpeaker.self,
+            PersistedKnownSpeakerCentroid.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
@@ -60,6 +62,8 @@ struct MeetingStoreTests {
             Meeting.self,
             PersistedTranscriptSpeaker.self,
             PersistedTranscriptSegment.self,
+            PersistedKnownSpeaker.self,
+            PersistedKnownSpeakerCentroid.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
@@ -85,6 +89,8 @@ struct MeetingStoreTests {
             Meeting.self,
             PersistedTranscriptSpeaker.self,
             PersistedTranscriptSegment.self,
+            PersistedKnownSpeaker.self,
+            PersistedKnownSpeakerCentroid.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
@@ -131,6 +137,8 @@ struct MeetingStoreTests {
             Meeting.self,
             PersistedTranscriptSpeaker.self,
             PersistedTranscriptSegment.self,
+            PersistedKnownSpeaker.self,
+            PersistedKnownSpeakerCentroid.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
@@ -157,6 +165,8 @@ struct MeetingStoreTests {
             Meeting.self,
             PersistedTranscriptSpeaker.self,
             PersistedTranscriptSegment.self,
+            PersistedKnownSpeaker.self,
+            PersistedKnownSpeakerCentroid.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
@@ -406,6 +416,8 @@ private struct MeetingStoreHarness {
             Meeting.self,
             PersistedTranscriptSpeaker.self,
             PersistedTranscriptSegment.self,
+            PersistedKnownSpeaker.self,
+            PersistedKnownSpeakerCentroid.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         container = try ModelContainer(for: schema, configurations: [configuration])
