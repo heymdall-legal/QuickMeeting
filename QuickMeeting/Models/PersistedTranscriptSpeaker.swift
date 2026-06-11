@@ -12,22 +12,38 @@ import SwiftData
 final class PersistedTranscriptSpeaker {
     var id: String
     var displayName: String
-    var labelSourceRawValue: String
+    var labelSourceRawValue: String?
     var matchedKnownSpeakerID: String?
     var centroid: [Double]?
 
     init(
         id: String,
         displayName: String,
-        labelSource: TranscriptSpeakerLabelSource = .generic,
+        labelSourceRawValue: String?,
         matchedKnownSpeakerID: String? = nil,
         centroid: [Double]? = nil
     ) {
         self.id = id
         self.displayName = displayName
-        labelSourceRawValue = labelSource.rawValue
+        self.labelSourceRawValue = labelSourceRawValue
         self.matchedKnownSpeakerID = matchedKnownSpeakerID
         self.centroid = centroid
+    }
+
+    convenience init(
+        id: String,
+        displayName: String,
+        labelSource: TranscriptSpeakerLabelSource = .generic,
+        matchedKnownSpeakerID: String? = nil,
+        centroid: [Double]? = nil
+    ) {
+        self.init(
+            id: id,
+            displayName: displayName,
+            labelSourceRawValue: labelSource.rawValue,
+            matchedKnownSpeakerID: matchedKnownSpeakerID,
+            centroid: centroid
+        )
     }
 
     convenience init(_ speaker: TranscriptSpeaker) {
@@ -44,7 +60,7 @@ final class PersistedTranscriptSpeaker {
         TranscriptSpeaker(
             id: id,
             displayName: displayName,
-            labelSource: TranscriptSpeakerLabelSource(rawValue: labelSourceRawValue) ?? .generic,
+            labelSource: TranscriptSpeakerLabelSource(rawValue: labelSourceRawValue ?? "") ?? .generic,
             matchedKnownSpeakerID: matchedKnownSpeakerID,
             centroid: centroid
         )

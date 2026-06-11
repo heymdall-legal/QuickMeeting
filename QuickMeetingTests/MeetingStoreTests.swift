@@ -5,6 +5,19 @@ import Testing
 
 struct MeetingStoreTests {
     @Test
+    func persistedTranscriptSpeakerDefaultsToGenericWhenStoredLabelSourceIsMissing() {
+        let speaker = PersistedTranscriptSpeaker(
+            id: "speaker-1",
+            displayName: "Speaker 1",
+            labelSourceRawValue: nil,
+            matchedKnownSpeakerID: nil,
+            centroid: nil
+        )
+
+        #expect(speaker.value.labelSource == .generic)
+    }
+
+    @Test
     func createMeetingPersistsValidatedDefaultsAcrossFreshContext() throws {
         let schema = Schema([
             Meeting.self,
