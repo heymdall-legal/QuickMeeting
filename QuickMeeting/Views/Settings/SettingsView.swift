@@ -11,6 +11,7 @@ struct SettingsView: View {
     @ObservedObject var calendarViewModel: CalendarSettingsViewModel
     @ObservedObject var autoRecordingViewModel: AutoRecordingSettingsViewModel
     @ObservedObject var huggingFaceTokenViewModel: HuggingFaceTokenSettingsViewModel
+    @ObservedObject var transcriptionSettingsViewModel: TranscriptionSettingsViewModel
 
     var body: some View {
         Form {
@@ -23,7 +24,10 @@ struct SettingsView: View {
             }
 
             Section("Transcription") {
-                HuggingFaceTokenSettingsContent(viewModel: huggingFaceTokenViewModel)
+                TranscriptionSettingsContent(
+                    tokenViewModel: huggingFaceTokenViewModel,
+                    settingsViewModel: transcriptionSettingsViewModel
+                )
             }
         }
         .formStyle(.grouped)
@@ -33,6 +37,7 @@ struct SettingsView: View {
             await autoRecordingViewModel.load()
             await calendarViewModel.reload()
             await huggingFaceTokenViewModel.load()
+            await transcriptionSettingsViewModel.load()
         }
         .alert("Auto Recording App Error", isPresented: autoRecordingErrorIsPresented) {
             Button("OK") {

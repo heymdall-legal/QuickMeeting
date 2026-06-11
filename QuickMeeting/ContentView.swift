@@ -13,6 +13,7 @@ struct ContentView: View {
     @ObservedObject var calendarSettingsViewModel: CalendarSettingsViewModel
     @ObservedObject var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
     @ObservedObject var huggingFaceTokenSettingsViewModel: HuggingFaceTokenSettingsViewModel
+    @ObservedObject var transcriptionSettingsViewModel: TranscriptionSettingsViewModel
     @Query(sort: \Meeting.startedAt, order: .reverse) private var meetings: [Meeting]
     @State private var selection = defaultSidebarSelection()
 
@@ -28,7 +29,8 @@ struct ContentView: View {
                 SettingsView(
                     calendarViewModel: calendarSettingsViewModel,
                     autoRecordingViewModel: autoRecordingSettingsViewModel,
-                    huggingFaceTokenViewModel: huggingFaceTokenSettingsViewModel
+                    huggingFaceTokenViewModel: huggingFaceTokenSettingsViewModel,
+                    transcriptionSettingsViewModel: transcriptionSettingsViewModel
                 )
             case .meeting(let meetingID):
                 if let selectedMeeting = meetings.first(where: { $0.id == meetingID }) {
@@ -181,7 +183,8 @@ struct ContentView: View {
         appViewModel: previewAppViewModel(container: container),
         calendarSettingsViewModel: previewCalendarSettingsViewModel(),
         autoRecordingSettingsViewModel: previewAutoRecordingSettingsViewModel(),
-        huggingFaceTokenSettingsViewModel: previewHuggingFaceTokenSettingsViewModel()
+        huggingFaceTokenSettingsViewModel: previewHuggingFaceTokenSettingsViewModel(),
+        transcriptionSettingsViewModel: previewTranscriptionSettingsViewModel()
     )
         .modelContainer(container)
 }
@@ -231,6 +234,11 @@ private func previewAutoRecordingSettingsViewModel() -> AutoRecordingSettingsVie
 @MainActor
 private func previewHuggingFaceTokenSettingsViewModel() -> HuggingFaceTokenSettingsViewModel {
     HuggingFaceTokenSettingsViewModel(settingsStore: HuggingFaceTokenSettingsStore())
+}
+
+@MainActor
+private func previewTranscriptionSettingsViewModel() -> TranscriptionSettingsViewModel {
+    TranscriptionSettingsViewModel(settingsStore: TranscriptionSettingsStore())
 }
 
 @MainActor

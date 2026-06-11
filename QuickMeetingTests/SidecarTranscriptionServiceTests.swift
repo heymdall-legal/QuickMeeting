@@ -112,6 +112,60 @@ struct SidecarTranscriptionServiceTests {
     }
 
     @Test
+    func transcribePassesOptionalLanguageAndInitialPromptArguments() async throws {
+        let harness = try SidecarTranscriptionHarness(
+            transcriptionLanguage: .russian,
+            initialPrompt: "Alice, Bob, Kubernetes"
+        )
+        let meeting = try harness.createRecordedMeeting()
+        let wavURL = URL(fileURLWithPath: meeting.audioFilePath).deletingPathExtension().appendingPathExtension("wav")
+        await harness.audioPreparer.setPreparedAudioURL(wavURL)
+        await harness.launcher.setResult(.success([
+            #"{"status":"completed","speakers":[],"segments":[]}"#,
+        ]))
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let request = try await #require(harness.launcher.requests.first)
+        #expect(request.arguments == [
+            "main.py",
+            "--input-file",
+            wavURL.path,
+            "--hf-token",
+            "hardcoded-token",
+            "--language",
+            "ru",
+            "--initial-prompt",
+            "Alice, Bob, Kubernetes",
+        ])
+    }
+
+    @Test
+    func transcribeOmitsOptionalLanguageAndInitialPromptArgumentsWhenUnset() async throws {
+        let harness = try SidecarTranscriptionHarness(
+            transcriptionLanguage: .none,
+            initialPrompt: "   "
+        )
+        let meeting = try harness.createRecordedMeeting()
+        let wavURL = URL(fileURLWithPath: meeting.audioFilePath).deletingPathExtension().appendingPathExtension("wav")
+        await harness.audioPreparer.setPreparedAudioURL(wavURL)
+        await harness.launcher.setResult(.success([
+            #"{"status":"completed","speakers":[],"segments":[]}"#,
+        ]))
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let request = try await #require(harness.launcher.requests.first)
+        #expect(request.arguments == [
+            "main.py",
+            "--input-file",
+            wavURL.path,
+            "--hf-token",
+            "hardcoded-token",
+        ])
+    }
+
+    @Test
     func transcribeDeletesPreparedWAVAfterSuccess() async throws {
         let harness = try SidecarTranscriptionHarness()
         let meeting = try harness.createRecordedMeeting()
@@ -396,7 +450,11 @@ private struct SidecarTranscriptionHarness {
     let audioPreparer: StubSidecarTranscriptionAudioPreparer
     let service: SidecarTranscriptionService
 
-    init(hfToken: String = "hardcoded-token") throws {
+    init(
+        hfToken: String = "hardcoded-token",
+        transcriptionLanguage: TranscriptionLanguage = .none,
+        initialPrompt: String = ""
+    ) throws {
         let schema = Schema([
             Meeting.self,
             PersistedTranscriptSpeaker.self,
@@ -421,6 +479,8 @@ private struct SidecarTranscriptionHarness {
             launcher: launcher,
             executableURLProvider: { runtimeConfiguration.executableURL },
             hfTokenProvider: { hfToken },
+            transcriptionLanguageProvider: { transcriptionLanguage },
+            initialPromptProvider: { initialPrompt },
             hfHomeURLProvider: { runtimeConfiguration.hfHomeURL },
             audioPreparer: audioPreparer,
             fileManager: fileManager,

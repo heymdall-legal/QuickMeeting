@@ -26,6 +26,8 @@ final class SidecarTranscriptionService: TranscriptionServicing {
     private let eventDecoder: SidecarTranscriptionEventDecoder
     private let executableURLProvider: @Sendable () -> URL?
     private let hfTokenProvider: @Sendable () -> String
+    private let transcriptionLanguageProvider: @Sendable () -> TranscriptionLanguage
+    private let initialPromptProvider: @Sendable () -> String
     private let hfHomeURLProvider: @Sendable () -> URL
     private let audioPreparer: any SidecarTranscriptionAudioPreparing
     private let fileManager: FileManager
@@ -39,6 +41,8 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         eventDecoder: SidecarTranscriptionEventDecoder? = nil,
         executableURLProvider: @escaping @Sendable () -> URL?,
         hfTokenProvider: @escaping @Sendable () -> String,
+        transcriptionLanguageProvider: @escaping @Sendable () -> TranscriptionLanguage = { .none },
+        initialPromptProvider: @escaping @Sendable () -> String = { "" },
         hfHomeURLProvider: @escaping @Sendable () -> URL,
         audioPreparer: (any SidecarTranscriptionAudioPreparing)? = nil,
         fileManager: FileManager = .default,
@@ -50,6 +54,8 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         self.eventDecoder = eventDecoder ?? SidecarTranscriptionEventDecoder()
         self.executableURLProvider = executableURLProvider
         self.hfTokenProvider = hfTokenProvider
+        self.transcriptionLanguageProvider = transcriptionLanguageProvider
+        self.initialPromptProvider = initialPromptProvider
         self.hfHomeURLProvider = hfHomeURLProvider
         self.fileManager = fileManager
         self.audioPreparer = audioPreparer ?? DefaultSidecarTranscriptionAudioPreparer(fileManager: fileManager)
@@ -80,6 +86,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         guard !huggingFaceToken.isEmpty else {
             throw TranscriptionServiceError.missingHuggingFaceToken
         }
+        let initialPrompt = initialPromptProvider().trimmingCharacters(in: .whitespacesAndNewlines)
 
         activeMeetingID = meetingID
         try meetingStore.startTranscription(meetingID: meetingID, updatedAt: dateProvider())
@@ -95,6 +102,19 @@ final class SidecarTranscriptionService: TranscriptionServicing {
             defer {
                 preparedAudio.cleanup()
             }
+            var arguments = [
+                "main.py",
+                "--input-file",
+                preparedAudio.fileURL.path,
+                "--hf-token",
+                huggingFaceToken,
+            ]
+            if let languageArgument = transcriptionLanguageProvider().sidecarArgumentValue {
+                arguments.append(contentsOf: ["--language", languageArgument])
+            }
+            if !initialPrompt.isEmpty {
+                arguments.append(contentsOf: ["--initial-prompt", initialPrompt])
+            }
 
             let runState = SidecarTranscriptionRunState()
             let workingDirectory = Self.pythonRootURL(for: executableURL)
@@ -102,13 +122,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
                 SidecarLaunchRequest(
                     executableURL: executableURL,
                     workingDirectoryURL: workingDirectory,
-                    arguments: [
-                        "main.py",
-                        "--input-file",
-                        preparedAudio.fileURL.path,
-                        "--hf-token",
-                        huggingFaceToken,
-                    ],
+                    arguments: arguments,
                     environment: [
                         "HF_HOME": hfHomeURLProvider().path,
                         "MPLCONFIGDIR": NSTemporaryDirectory(),
