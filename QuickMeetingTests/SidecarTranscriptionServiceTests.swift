@@ -187,6 +187,28 @@ struct SidecarTranscriptionServiceTests {
     }
 
     @Test
+    func transcribePersistsTranscriptEvenWhenEnrollmentFailsForBankMatchedSpeaker() async throws {
+        let harness = try SidecarTranscriptionHarness(
+            enrollmentResult: .failure(SidecarTestError.failed)
+        )
+        let meeting = try harness.createRecordedMeeting()
+        try harness.insertKnownSpeaker(
+            id: "known-alice",
+            displayName: "Alice",
+            centroids: [[0.9, 0.8]]
+        )
+        await harness.launcher.setResult(.success([
+            #"{"status":"completed","speakers":[{"id":"SPEAKER_00","matched_id":"known-alice","probability":0.91,"centroid":[0.1,0.2]}],"segments":[{"speaker":"SPEAKER_00","start":0.0,"end":1.5,"text":"Hello"}]}"#,
+        ]))
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .completed)
+        #expect(await harness.enrollmentService.calls.count == 1)
+    }
+
+    @Test
     func transcribeOmitsOptionalLanguageAndInitialPromptArgumentsWhenUnset() async throws {
         let harness = try SidecarTranscriptionHarness(
             transcriptionLanguage: .none,
@@ -495,12 +517,14 @@ private struct SidecarTranscriptionHarness {
     let runtimeConfiguration: SidecarHarnessRuntimeConfiguration
     let launcher: SuspendedSidecarProcessLauncher
     let audioPreparer: StubSidecarTranscriptionAudioPreparer
+    let enrollmentService: StubKnownSpeakerEnrollmentService
     let service: SidecarTranscriptionService
 
     init(
         hfToken: String = "hardcoded-token",
         transcriptionLanguage: TranscriptionLanguage = .none,
-        initialPrompt: String = ""
+        initialPrompt: String = "",
+        enrollmentResult: Result<Void, Error> = .success(())
     ) throws {
         let schema = Schema([
             Meeting.self,
@@ -523,6 +547,7 @@ private struct SidecarTranscriptionHarness {
         self.runtimeConfiguration = runtimeConfiguration
         launcher = SuspendedSidecarProcessLauncher()
         audioPreparer = StubSidecarTranscriptionAudioPreparer(fileManager: fileManager)
+        enrollmentService = StubKnownSpeakerEnrollmentService(result: enrollmentResult)
         service = SidecarTranscriptionService(
             meetingStore: meetingStore,
             progressCenter: progressCenter,
@@ -533,6 +558,7 @@ private struct SidecarTranscriptionHarness {
             initialPromptProvider: { initialPrompt },
             hfHomeURLProvider: { runtimeConfiguration.hfHomeURL },
             knownSpeakerStore: knownSpeakerStore,
+            knownSpeakerEnrollmentService: enrollmentService,
             audioPreparer: audioPreparer,
             fileManager: fileManager,
             dateProvider: Date.init
@@ -635,6 +661,30 @@ private actor SuspendedSidecarProcessLauncher: SidecarProcessLaunching {
             try await onLine(line)
         }
     }
+}
+
+private actor StubKnownSpeakerEnrollmentService: KnownSpeakerEnrolling {
+    struct Call: Sendable {
+        let displayName: String
+        let speaker: TranscriptSpeaker
+        let meetingID: UUID
+    }
+
+    private(set) var calls = [Call]()
+    private let result: Result<Void, Error>
+
+    init(result: Result<Void, Error>) {
+        self.result = result
+    }
+
+    func enroll(displayName: String, speaker: TranscriptSpeaker, meetingID: UUID) async throws {
+        calls.append(Call(displayName: displayName, speaker: speaker, meetingID: meetingID))
+        try result.get()
+    }
+}
+
+private enum SidecarTestError: Error {
+    case failed
 }
 
 private final class SidecarHarnessRuntimeConfiguration: @unchecked Sendable {

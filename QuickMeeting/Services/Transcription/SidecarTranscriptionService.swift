@@ -31,6 +31,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
     private let hfHomeURLProvider: @Sendable () -> URL
     private let knownSpeakerStore: KnownSpeakerStore?
     private let knownSpeakerJSONWriter: KnownSpeakerJSONWriter
+    private let knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)?
     private let recognitionMapper: SpeakerRecognitionMapper
     private let audioPreparer: any SidecarTranscriptionAudioPreparing
     private let fileManager: FileManager
@@ -49,6 +50,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         hfHomeURLProvider: @escaping @Sendable () -> URL,
         knownSpeakerStore: KnownSpeakerStore? = nil,
         knownSpeakerJSONWriter: KnownSpeakerJSONWriter = KnownSpeakerJSONWriter(),
+        knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)? = nil,
         recognitionMapper: SpeakerRecognitionMapper = SpeakerRecognitionMapper(),
         audioPreparer: (any SidecarTranscriptionAudioPreparing)? = nil,
         fileManager: FileManager = .default,
@@ -65,6 +67,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         self.hfHomeURLProvider = hfHomeURLProvider
         self.knownSpeakerStore = knownSpeakerStore
         self.knownSpeakerJSONWriter = knownSpeakerJSONWriter
+        self.knownSpeakerEnrollmentService = knownSpeakerEnrollmentService
         self.recognitionMapper = recognitionMapper
         self.fileManager = fileManager
         self.audioPreparer = audioPreparer ?? DefaultSidecarTranscriptionAudioPreparer(fileManager: fileManager)
@@ -168,6 +171,17 @@ final class SidecarTranscriptionService: TranscriptionServicing {
                 transcriptPreview: transcript.fullText.trimmingCharacters(in: .whitespacesAndNewlines),
                 updatedAt: dateProvider()
             )
+            for speaker in transcript.speakers where speaker.labelSource == .bankMatched {
+                do {
+                    try await knownSpeakerEnrollmentService?.enroll(
+                        displayName: speaker.displayName,
+                        speaker: speaker,
+                        meetingID: meetingID
+                    )
+                } catch {
+                    // Keep the successful transcript even if centroid enrollment fails.
+                }
+            }
         } catch {
             try? meetingStore.failTranscription(meetingID: meetingID, updatedAt: dateProvider())
             throw map(error)

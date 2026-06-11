@@ -25,6 +25,7 @@ final class AppViewModel: ObservableObject {
     private let recordingService: any RecordingService
     private let transcriptionService: any TranscriptionServicing
     private let meetingTranscriptStore: any MeetingTranscriptStoring
+    private let knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)?
     private let recordingPermissions: any RecordingPermissions
     private let calendarIntegration: any CalendarIntegration
     private let dateProvider: () -> Date
@@ -42,6 +43,7 @@ final class AppViewModel: ObservableObject {
         transcriptionProgressCenter: TranscriptionProgressCenter? = nil,
         recordingPermissions: (any RecordingPermissions)? = nil,
         meetingTranscriptStore: (any MeetingTranscriptStoring)? = nil,
+        knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)? = nil,
         calendarIntegration: (any CalendarIntegration)? = nil,
         dateProvider: @escaping () -> Date = Date.init,
         meetingIDProvider: @escaping () -> UUID = UUID.init,
@@ -54,6 +56,7 @@ final class AppViewModel: ObservableObject {
         self.transcriptionService = transcriptionService ?? NoopTranscriptionService()
         self.recordingPermissions = recordingPermissions ?? NativeRecordingPermissions()
         self.meetingTranscriptStore = meetingTranscriptStore ?? MeetingTranscriptStore()
+        self.knownSpeakerEnrollmentService = knownSpeakerEnrollmentService
         self.calendarIntegration = calendarIntegration ?? NoopCalendarIntegration()
         self.dateProvider = dateProvider
         self.meetingIDProvider = meetingIDProvider
@@ -285,13 +288,27 @@ final class AppViewModel: ObservableObject {
         speakerID: String,
         displayName: String
     ) async throws {
+        let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+
         do {
-            _ = try meetingTranscriptStore.renameSpeaker(
+            let transcript = try meetingTranscriptStore.renameSpeaker(
                 id: speakerID,
-                to: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
+                to: trimmedName,
                 in: meetingID
             )
             renameSpeakerErrorMessage = nil
+
+            if let speaker = transcript.speakers.first(where: { $0.id == speakerID }) {
+                do {
+                    try await knownSpeakerEnrollmentService?.enroll(
+                        displayName: trimmedName,
+                        speaker: speaker,
+                        meetingID: meetingID
+                    )
+                } catch {
+                    // Best-effort enrollment. Keep the successful rename.
+                }
+            }
         } catch {
             renameSpeakerErrorMessage = error.localizedDescription
             throw error
