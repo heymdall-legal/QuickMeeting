@@ -152,6 +152,10 @@ struct MeetingStore {
         }
 
         speaker.displayName = displayName
+        speaker.labelSourceRawValue = TranscriptSpeakerLabelSource.userAssigned.rawValue
+        if speaker.matchedKnownSpeakerID != nil {
+            speaker.matchedKnownSpeakerID = nil
+        }
         meeting.setStatus(try meeting.status, updatedAt: updatedAt)
         try modelContext.save()
 

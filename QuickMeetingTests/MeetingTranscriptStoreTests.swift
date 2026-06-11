@@ -9,16 +9,32 @@ struct MeetingTranscriptStoreTests {
         let harness = try MeetingTranscriptStoreHarness()
         let meeting = try harness.createMeetingWithTranscript(
             StoredTranscript(
-                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                speakers: [
+                    TranscriptSpeaker(
+                        id: "speaker-1",
+                        displayName: "Speaker 1",
+                        labelSource: .bankMatched,
+                        matchedKnownSpeakerID: "known-speaker-1",
+                        centroid: [0.1, 0.2, 0.3]
+                    )
+                ],
                 segments: [TranscriptSegment(text: "Hello world", speakerID: "speaker-1")]
             )
         )
 
         let updated = try harness.transcriptStore.renameSpeaker(id: "speaker-1", to: "Masha", in: meeting.id)
 
-        #expect(updated.speakers.first?.displayName == "Masha")
+        let speaker = try #require(updated.speakers.first)
+        #expect(speaker.displayName == "Masha")
+        #expect(speaker.labelSource == .userAssigned)
+        #expect(speaker.matchedKnownSpeakerID == nil)
+        #expect(speaker.centroid == [0.1, 0.2, 0.3])
         let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
-        #expect(reloaded.transcriptSpeakers.map(\.displayName) == ["Masha"])
+        let persistedSpeaker = try #require(reloaded.storedTranscript?.speakers.first)
+        #expect(persistedSpeaker.displayName == "Masha")
+        #expect(persistedSpeaker.labelSource == .userAssigned)
+        #expect(persistedSpeaker.matchedKnownSpeakerID == nil)
+        #expect(persistedSpeaker.centroid == [0.1, 0.2, 0.3])
     }
 
     @Test

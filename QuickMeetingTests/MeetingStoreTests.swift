@@ -298,6 +298,40 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func renameSpeakerMarksSpeakerAsUserAssignedAndClearsMatchedKnownSpeakerID() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createCompletedMeeting(
+            transcript: StoredTranscript(
+                speakers: [
+                    TranscriptSpeaker(
+                        id: "speaker-1",
+                        displayName: "Alice",
+                        labelSource: .bankMatched,
+                        matchedKnownSpeakerID: "known-alice",
+                        centroid: [0.1, 0.2, 0.3]
+                    )
+                ],
+                segments: [TranscriptSegment(text: "Hello", speakerID: "speaker-1")]
+            ),
+            transcriptPreview: "Hello"
+        )
+
+        try harness.store.renameSpeaker(
+            meetingID: meeting.id,
+            speakerID: "speaker-1",
+            displayName: "Masha",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_200)
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        let speaker = try #require(reloaded.storedTranscript?.speakers.first)
+        #expect(speaker.displayName == "Masha")
+        #expect(speaker.labelSource == .userAssigned)
+        #expect(speaker.matchedKnownSpeakerID == nil)
+        #expect(speaker.centroid == [0.1, 0.2, 0.3])
+    }
+
+    @Test
     func renameMeetingUpdatesPersistedTitleAndUpdatedAt() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()
