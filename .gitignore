@@ -2,6 +2,8 @@
 .derived-data-*/
 QuickRecorder
 .idea
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
 python/.venv/
 python/lib/
 python/**/__pycache__/
