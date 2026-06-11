@@ -72,10 +72,25 @@ private struct SidecarTranscribingEnvelope: Codable {
     }
 }
 
-private struct SidecarDiarizationEnvelope: Codable {
+private struct SidecarDiarizationEnvelope: Decodable {
     let status: String
     let step: String
     let percent: Int
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case step
+        case stepName = "step_name"
+        case percent
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try container.decode(String.self, forKey: .status)
+        percent = try container.decode(Int.self, forKey: .percent)
+        step = try container.decodeIfPresent(String.self, forKey: .step)
+            ?? container.decode(String.self, forKey: .stepName)
+    }
 
     var progress: SidecarDiarizationProgress {
         SidecarDiarizationProgress(step: step, percent: percent)

@@ -35,10 +35,10 @@ struct MeetingTranscriptionProgressDisplayTests {
         let state = transcriptPaneState(
             hasTranscript: false,
             progress: nil,
-            diarizationProgress: 0.6
+            diarizationProgress: DiarizationProgressState(progress: 0.6, stepName: "embeddings")
         )
 
-        #expect(state == .diarizing(progress: 0.6))
+        #expect(state == .diarizing(DiarizationProgressState(progress: 0.6, stepName: "embeddings")))
     }
 
     @Test
@@ -46,9 +46,24 @@ struct MeetingTranscriptionProgressDisplayTests {
         let state = transcriptPaneState(
             hasTranscript: false,
             progress: 1.0,
-            diarizationProgress: 0.3
+            diarizationProgress: DiarizationProgressState(progress: 0.3, stepName: "diarization")
         )
 
-        #expect(state == .diarizing(progress: 0.3))
+        #expect(state == .diarizing(DiarizationProgressState(progress: 0.3, stepName: "diarization")))
+    }
+
+    @Test
+    func diarizationTitleUsesCurrentStepNameWhenAvailable() {
+        #expect(diarizationProgressTitle(stepName: "embeddings") == "Embeddings...")
+    }
+
+    @Test
+    func diarizationTitleFallsBackWhenStepNameIsMissing() {
+        #expect(diarizationProgressTitle(stepName: nil) == "Diarization...")
+    }
+
+    @Test
+    func diarizationTitleHumanizesDelimitedStepNames() {
+        #expect(diarizationProgressTitle(stepName: "speaker_embeddings") == "Speaker Embeddings...")
     }
 }

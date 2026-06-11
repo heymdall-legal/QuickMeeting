@@ -14,6 +14,7 @@ struct SidecarTranscriptionServiceTests {
             #"{"status":"running"}"#,
             #"{"status":"transcribing","percent":40}"#,
             #"{"status":"diarization","step":"segmentation","percent":100}"#,
+            #"{"status":"diarization","step":"embeddings","percent":25}"#,
             #"{"status":"completed","speakers":[{"id":"SPEAKER_00","matched_id":null,"probability":null,"centroid":null}],"segments":[{"speaker":"SPEAKER_00","start":0.0,"end":1.5,"text":"Hello"}]}"#,
         ]))
 

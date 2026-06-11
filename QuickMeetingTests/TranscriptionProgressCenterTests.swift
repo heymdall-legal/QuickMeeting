@@ -43,9 +43,12 @@ struct TranscriptionProgressCenterTests {
         let meetingID = UUID()
 
         let center = TranscriptionProgressCenter()
-        center.startDiarizationTracking(meetingID: meetingID)
+        center.startDiarizationTracking(meetingID: meetingID, stepName: "diarization")
 
-        #expect(center.diarizationProgress(for: meetingID) == 0)
+        #expect(center.diarizationProgress(for: meetingID) == DiarizationProgressState(
+            progress: 0,
+            stepName: "diarization"
+        ))
     }
 
     @Test
@@ -53,12 +56,30 @@ struct TranscriptionProgressCenterTests {
         let meetingID = UUID()
 
         let center = TranscriptionProgressCenter()
-        center.startDiarizationTracking(meetingID: meetingID)
-        center.updateDiarizationProgress(0.5, for: meetingID)
-        center.updateDiarizationProgress(1.8, for: meetingID)
-        center.updateDiarizationProgress(0.2, for: meetingID)
+        center.startDiarizationTracking(meetingID: meetingID, stepName: "diarization")
+        center.updateDiarizationProgress(0.5, stepName: "diarization", for: meetingID)
+        center.updateDiarizationProgress(1.8, stepName: "diarization", for: meetingID)
+        center.updateDiarizationProgress(0.2, stepName: "diarization", for: meetingID)
 
-        #expect(center.diarizationProgress(for: meetingID) == 1)
+        #expect(center.diarizationProgress(for: meetingID) == DiarizationProgressState(
+            progress: 1,
+            stepName: "diarization"
+        ))
+    }
+
+    @Test
+    func updateDiarizationProgressResetsWhenStepChanges() {
+        let meetingID = UUID()
+
+        let center = TranscriptionProgressCenter()
+        center.startDiarizationTracking(meetingID: meetingID, stepName: "diarization")
+        center.updateDiarizationProgress(1.0, stepName: "diarization", for: meetingID)
+        center.updateDiarizationProgress(0.2, stepName: "embeddings", for: meetingID)
+
+        #expect(center.diarizationProgress(for: meetingID) == DiarizationProgressState(
+            progress: 0.2,
+            stepName: "embeddings"
+        ))
     }
 
     @Test
@@ -67,7 +88,7 @@ struct TranscriptionProgressCenterTests {
 
         let center = TranscriptionProgressCenter()
         center.startTracking(meetingID: meetingID)
-        center.startDiarizationTracking(meetingID: meetingID)
+        center.startDiarizationTracking(meetingID: meetingID, stepName: "diarization")
         center.finishTracking(meetingID: meetingID)
 
         #expect(center.progress(for: meetingID) == nil)

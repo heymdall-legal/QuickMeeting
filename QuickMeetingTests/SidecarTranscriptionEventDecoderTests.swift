@@ -40,4 +40,19 @@ struct SidecarTranscriptionEventDecoderTests {
         #expect(payload.step == "segmentation")
         #expect(payload.percent == 15)
     }
+
+    @Test
+    func decodesDiarizationProgressFromStepNameKey() throws {
+        let line = #"{"status":"diarization","step_name":"embeddings","percent":42}"#
+
+        let event = try SidecarTranscriptionEventDecoder().decode(line: line)
+
+        guard case .diarization(let payload) = event else {
+            Issue.record("Expected diarization event")
+            return
+        }
+
+        #expect(payload.step == "embeddings")
+        #expect(payload.percent == 42)
+    }
 }

@@ -13,7 +13,7 @@ import SwiftUI
 struct MeetingDetailView: View {
     let meeting: Meeting
     let transcriptionProgress: Double?
-    let diarizationProgress: Double?
+    let diarizationProgress: DiarizationProgressState?
     let canDelete: Bool
     let canTranscribe: Bool
     let transcriptionDisabledReason: String?
@@ -112,8 +112,8 @@ struct MeetingDetailView: View {
                 transcriptEmptyState
             case .transcribing(let progress):
                 transcriptionProgressState(progress: progress)
-            case .diarizing(let progress):
-                diarizationProgressState(progress: progress)
+            case .diarizing(let state):
+                diarizationProgressState(state: state)
             case .transcript:
                 switch transcriptContent {
                 case .transcript(let display):
@@ -200,16 +200,16 @@ struct MeetingDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func diarizationProgressState(progress: Double) -> some View {
+    private func diarizationProgressState(state: DiarizationProgressState) -> some View {
         VStack(spacing: 12) {
-            Text("Diarization")
+            Text(diarizationProgressTitle(stepName: state.stepName))
                 .font(.title3)
                 .fontWeight(.semibold)
 
-            ProgressView(value: progress)
+            ProgressView(value: state.progress)
                 .frame(maxWidth: 280)
 
-            Text(diarizationProgressText(progress))
+            Text(diarizationProgressText(state.progress))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

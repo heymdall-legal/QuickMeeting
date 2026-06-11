@@ -310,7 +310,7 @@ final class AppViewModel: ObservableObject {
         transcriptionProgressCenter.progress(for: meetingID)
     }
 
-    func diarizationProgress(for meetingID: UUID) -> Double? {
+    func diarizationProgress(for meetingID: UUID) -> DiarizationProgressState? {
         transcriptionProgressCenter.diarizationProgress(for: meetingID)
     }
 

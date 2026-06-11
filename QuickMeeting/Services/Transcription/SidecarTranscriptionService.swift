@@ -174,9 +174,13 @@ final class SidecarTranscriptionService: TranscriptionServicing {
             progressCenter.updateProgress(Double(progress.percent) / 100, for: meetingID)
         case .diarization(let progress):
             if progressCenter.diarizationProgress(for: meetingID) == nil {
-                progressCenter.startDiarizationTracking(meetingID: meetingID)
+                progressCenter.startDiarizationTracking(meetingID: meetingID, stepName: progress.step)
             }
-            progressCenter.updateDiarizationProgress(Double(progress.percent) / 100, for: meetingID)
+            progressCenter.updateDiarizationProgress(
+                Double(progress.percent) / 100,
+                stepName: progress.step,
+                for: meetingID
+            )
         case .completed(let payload):
             await runState.setCompletedPayload(payload)
         case .error(let payload):
