@@ -142,6 +142,28 @@ struct SidecarTranscriptionServiceTests {
     }
 
     @Test
+    func transcribePassesKnownSpeakersFileWhenStoreHasCentroids() async throws {
+        let harness = try SidecarTranscriptionHarness()
+        let meeting = try harness.createRecordedMeeting()
+        try harness.knownSpeakerStore.findOrCreateSpeaker(named: "Alice", now: .now)
+        try harness.knownSpeakerStore.appendCentroid(
+            [0.1, 0.2],
+            to: try harness.firstKnownSpeakerID(),
+            sourceMeetingID: nil,
+            sourceSpeakerID: nil,
+            now: .now
+        )
+        await harness.launcher.setResult(.success([
+            #"{"status":"completed","speakers":[],"segments":[]}"#,
+        ]))
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let request = try await #require(harness.launcher.requests.first)
+        #expect(request.arguments.contains("--known-speakers-file"))
+    }
+
+    @Test
     func transcribeOmitsOptionalLanguageAndInitialPromptArgumentsWhenUnset() async throws {
         let harness = try SidecarTranscriptionHarness(
             transcriptionLanguage: .none,
@@ -443,6 +465,7 @@ private struct SidecarTranscriptionHarness {
     let container: ModelContainer
     let context: ModelContext
     let meetingStore: MeetingStore
+    let knownSpeakerStore: KnownSpeakerStore
     let progressCenter: TranscriptionProgressCenter
     let fileManager: FileManager
     let meetingFileStore: MeetingFileStore
@@ -460,11 +483,14 @@ private struct SidecarTranscriptionHarness {
             Meeting.self,
             PersistedTranscriptSpeaker.self,
             PersistedTranscriptSegment.self,
+            PersistedKnownSpeaker.self,
+            PersistedKnownSpeakerCentroid.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         container = try ModelContainer(for: schema, configurations: [modelConfiguration])
         context = ModelContext(container)
         meetingStore = MeetingStore(modelContext: context)
+        knownSpeakerStore = KnownSpeakerStore(modelContext: context)
         progressCenter = TranscriptionProgressCenter()
         fileManager = .default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -483,6 +509,7 @@ private struct SidecarTranscriptionHarness {
             transcriptionLanguageProvider: { transcriptionLanguage },
             initialPromptProvider: { initialPrompt },
             hfHomeURLProvider: { runtimeConfiguration.hfHomeURL },
+            knownSpeakerStore: knownSpeakerStore,
             audioPreparer: audioPreparer,
             fileManager: fileManager,
             dateProvider: Date.init
@@ -512,6 +539,10 @@ private struct SidecarTranscriptionHarness {
             }
         )
         return try #require(verificationContext.fetch(descriptor).first)
+    }
+
+    func firstKnownSpeakerID() throws -> String {
+        try #require(knownSpeakerStore.allSpeakers().first?.id)
     }
 }
 

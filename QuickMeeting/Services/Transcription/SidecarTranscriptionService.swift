@@ -29,6 +29,8 @@ final class SidecarTranscriptionService: TranscriptionServicing {
     private let transcriptionLanguageProvider: @Sendable () -> TranscriptionLanguage
     private let initialPromptProvider: @Sendable () -> String
     private let hfHomeURLProvider: @Sendable () -> URL
+    private let knownSpeakerStore: KnownSpeakerStore?
+    private let knownSpeakerJSONWriter: KnownSpeakerJSONWriter
     private let audioPreparer: any SidecarTranscriptionAudioPreparing
     private let fileManager: FileManager
     private let dateProvider: () -> Date
@@ -44,6 +46,8 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         transcriptionLanguageProvider: @escaping @Sendable () -> TranscriptionLanguage = { .none },
         initialPromptProvider: @escaping @Sendable () -> String = { "" },
         hfHomeURLProvider: @escaping @Sendable () -> URL,
+        knownSpeakerStore: KnownSpeakerStore? = nil,
+        knownSpeakerJSONWriter: KnownSpeakerJSONWriter = KnownSpeakerJSONWriter(),
         audioPreparer: (any SidecarTranscriptionAudioPreparing)? = nil,
         fileManager: FileManager = .default,
         dateProvider: @escaping () -> Date = Date.init
@@ -57,6 +61,8 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         self.transcriptionLanguageProvider = transcriptionLanguageProvider
         self.initialPromptProvider = initialPromptProvider
         self.hfHomeURLProvider = hfHomeURLProvider
+        self.knownSpeakerStore = knownSpeakerStore
+        self.knownSpeakerJSONWriter = knownSpeakerJSONWriter
         self.fileManager = fileManager
         self.audioPreparer = audioPreparer ?? DefaultSidecarTranscriptionAudioPreparer(fileManager: fileManager)
         self.dateProvider = dateProvider
@@ -102,6 +108,12 @@ final class SidecarTranscriptionService: TranscriptionServicing {
             defer {
                 preparedAudio.cleanup()
             }
+            let knownSpeakerFileURL = try makeKnownSpeakersFileIfNeeded()
+            defer {
+                if let knownSpeakerFileURL {
+                    try? fileManager.removeItem(at: knownSpeakerFileURL)
+                }
+            }
             var arguments = [
                 "main.py",
                 "--input-file",
@@ -114,6 +126,9 @@ final class SidecarTranscriptionService: TranscriptionServicing {
             }
             if !initialPrompt.isEmpty {
                 arguments.append(contentsOf: ["--initial-prompt", initialPrompt])
+            }
+            if let knownSpeakerFileURL {
+                arguments.append(contentsOf: ["--known-speakers-file", knownSpeakerFileURL.path])
             }
 
             let runState = SidecarTranscriptionRunState()
@@ -154,6 +169,32 @@ final class SidecarTranscriptionService: TranscriptionServicing {
             try? meetingStore.failTranscription(meetingID: meetingID, updatedAt: dateProvider())
             throw map(error)
         }
+    }
+
+    private func makeKnownSpeakersFileIfNeeded() throws -> URL? {
+        guard let knownSpeakerStore else {
+            return nil
+        }
+
+        let exports = try knownSpeakerStore.allSpeakers()
+            .map { speaker in
+                KnownSpeakerExport(
+                    id: speaker.id,
+                    centroids: speaker.centroids
+                        .sorted { $0.createdAt < $1.createdAt }
+                        .map(\.values)
+                )
+            }
+            .filter { !$0.centroids.isEmpty }
+
+        guard !exports.isEmpty else {
+            return nil
+        }
+
+        return try knownSpeakerJSONWriter.write(
+            speakers: exports,
+            directoryURL: fileManager.temporaryDirectory
+        )
     }
 
     private func consume(
