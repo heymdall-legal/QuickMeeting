@@ -31,6 +31,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
     private let hfHomeURLProvider: @Sendable () -> URL
     private let knownSpeakerStore: KnownSpeakerStore?
     private let knownSpeakerJSONWriter: KnownSpeakerJSONWriter
+    private let recognitionMapper: SpeakerRecognitionMapper
     private let audioPreparer: any SidecarTranscriptionAudioPreparing
     private let fileManager: FileManager
     private let dateProvider: () -> Date
@@ -48,6 +49,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         hfHomeURLProvider: @escaping @Sendable () -> URL,
         knownSpeakerStore: KnownSpeakerStore? = nil,
         knownSpeakerJSONWriter: KnownSpeakerJSONWriter = KnownSpeakerJSONWriter(),
+        recognitionMapper: SpeakerRecognitionMapper = SpeakerRecognitionMapper(),
         audioPreparer: (any SidecarTranscriptionAudioPreparing)? = nil,
         fileManager: FileManager = .default,
         dateProvider: @escaping () -> Date = Date.init
@@ -63,6 +65,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         self.hfHomeURLProvider = hfHomeURLProvider
         self.knownSpeakerStore = knownSpeakerStore
         self.knownSpeakerJSONWriter = knownSpeakerJSONWriter
+        self.recognitionMapper = recognitionMapper
         self.fileManager = fileManager
         self.audioPreparer = audioPreparer ?? DefaultSidecarTranscriptionAudioPreparer(fileManager: fileManager)
         self.dateProvider = dateProvider
@@ -158,7 +161,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
                 throw SidecarLaunchError.terminatedWithoutTerminalEvent
             }
 
-            let transcript = makeStoredTranscript(from: completedPayload)
+            let transcript = try makeStoredTranscript(from: completedPayload)
             try meetingStore.completeTranscription(
                 meetingID: meetingID,
                 transcript: transcript,
@@ -229,17 +232,15 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         }
     }
 
-    private func makeStoredTranscript(from payload: SidecarCompletedPayload) -> StoredTranscript {
-        let orderedSpeakerIDs = payload.segments.reduce(into: [String]()) { result, segment in
-            guard !result.contains(segment.speaker) else {
-                return
-            }
-
-            result.append(segment.speaker)
-        }
-        let speakers = orderedSpeakerIDs.enumerated().map { index, speakerID in
-            TranscriptSpeaker(id: speakerID, displayName: "Speaker \(index + 1)")
-        }
+    private func makeStoredTranscript(from payload: SidecarCompletedPayload) throws -> StoredTranscript {
+        let knownSpeakerNamesByID = try Dictionary(
+            uniqueKeysWithValues: (knownSpeakerStore?.allSpeakers() ?? []).map { ($0.id, $0.displayName) }
+        )
+        let speakers = recognitionMapper.makeTranscriptSpeakers(
+            sidecarSpeakers: payload.speakers,
+            segments: payload.segments,
+            knownSpeakerNamesByID: knownSpeakerNamesByID
+        )
         let segments = payload.segments.map { segment in
             TranscriptSegment(
                 text: segment.text,

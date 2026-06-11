@@ -164,6 +164,29 @@ struct SidecarTranscriptionServiceTests {
     }
 
     @Test
+    func transcribePersistsBankMatchedSpeakerMetadata() async throws {
+        let harness = try SidecarTranscriptionHarness()
+        let meeting = try harness.createRecordedMeeting()
+        try harness.insertKnownSpeaker(
+            id: "known-alice",
+            displayName: "Alice",
+            centroids: [[0.9, 0.8]]
+        )
+        await harness.launcher.setResult(.success([
+            #"{"status":"completed","speakers":[{"id":"SPEAKER_00","matched_id":"known-alice","probability":0.91,"centroid":[0.1,0.2]}],"segments":[{"speaker":"SPEAKER_00","start":0.0,"end":1.5,"text":"Hello"}]}"#,
+        ]))
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        let speaker = try #require(reloaded.storedTranscript?.speakers.first)
+        #expect(speaker.displayName == "Alice")
+        #expect(speaker.labelSource == .bankMatched)
+        #expect(speaker.matchedKnownSpeakerID == "known-alice")
+        #expect(speaker.centroid == [0.1, 0.2])
+    }
+
+    @Test
     func transcribeOmitsOptionalLanguageAndInitialPromptArgumentsWhenUnset() async throws {
         let harness = try SidecarTranscriptionHarness(
             transcriptionLanguage: .none,
@@ -543,6 +566,25 @@ private struct SidecarTranscriptionHarness {
 
     func firstKnownSpeakerID() throws -> String {
         try #require(knownSpeakerStore.allSpeakers().first?.id)
+    }
+
+    func insertKnownSpeaker(id: String, displayName: String, centroids: [[Double]]) throws {
+        let speaker = PersistedKnownSpeaker(
+            id: id,
+            displayName: displayName,
+            createdAt: .now,
+            updatedAt: .now
+        )
+        speaker.centroids = centroids.enumerated().map { index, values in
+            PersistedKnownSpeakerCentroid(
+                values: values,
+                sourceMeetingID: nil,
+                sourceSpeakerID: nil,
+                createdAt: Date(timeIntervalSince1970: Double(index + 1))
+            )
+        }
+        context.insert(speaker)
+        try context.save()
     }
 }
 
