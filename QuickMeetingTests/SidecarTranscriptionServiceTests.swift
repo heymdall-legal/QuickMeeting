@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import SwiftData
 import Testing
@@ -71,9 +72,11 @@ struct SidecarTranscriptionServiceTests {
         let executableURL = URL(fileURLWithPath: "/tmp/QuickMeetingSidecar/python/lib/bin/python")
         let workingDirectoryURL = URL(fileURLWithPath: "/tmp/QuickMeetingSidecar/python", isDirectory: true)
         let hfHomeURL = URL(fileURLWithPath: "/tmp/Application Support/QuickMeeting/HuggingFace")
+        let wavURL = URL(fileURLWithPath: meeting.audioFilePath).deletingPathExtension().appendingPathExtension("wav")
         harness.runtimeConfiguration.executableURL = executableURL
         harness.runtimeConfiguration.workingDirectoryURL = workingDirectoryURL
         harness.runtimeConfiguration.hfHomeURL = hfHomeURL
+        await harness.audioPreparer.setPreparedAudioURL(wavURL)
         await harness.launcher.setResult(.success([
             #"{"status":"completed","speakers":[],"segments":[]}"#,
         ]))
@@ -86,11 +89,95 @@ struct SidecarTranscriptionServiceTests {
         #expect(request.arguments == [
             "main.py",
             "--input-file",
-            meeting.audioFilePath.replacing(".m4a", with: ".wav"),
+            wavURL.path,
             "--hf-token",
             "hardcoded-token",
         ])
         #expect(request.environment["HF_HOME"] == hfHomeURL.path)
+    }
+
+    @Test
+    func transcribeDeletesPreparedWAVAfterSuccess() async throws {
+        let harness = try SidecarTranscriptionHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let wavURL = URL(fileURLWithPath: meeting.audioFilePath).deletingPathExtension().appendingPathExtension("wav")
+        harness.fileManager.createFile(atPath: wavURL.path, contents: Data("wav".utf8))
+        await harness.audioPreparer.setPreparedAudioURL(wavURL)
+        await harness.launcher.setResult(.success([
+            #"{"status":"completed","speakers":[],"segments":[]}"#,
+        ]))
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let preparedSourceURL = await harness.audioPreparer.preparedSourceURL
+        #expect(preparedSourceURL?.path == meeting.audioFilePath)
+        #expect(!harness.fileManager.fileExists(atPath: wavURL.path))
+    }
+
+    @Test
+    func transcribeDeletesPreparedWAVAfterFailure() async throws {
+        let harness = try SidecarTranscriptionHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let wavURL = URL(fileURLWithPath: meeting.audioFilePath).deletingPathExtension().appendingPathExtension("wav")
+        harness.fileManager.createFile(atPath: wavURL.path, contents: Data("wav".utf8))
+        await harness.audioPreparer.setPreparedAudioURL(wavURL)
+        await harness.launcher.setResult(.failure(.sidecarReported("python failed")))
+
+        await #expect(throws: SidecarTranscriptionServiceError.sidecarFailed("python failed")) {
+            try await harness.service.transcribe(meetingID: meeting.id)
+        }
+
+        #expect(!harness.fileManager.fileExists(atPath: wavURL.path))
+    }
+
+    @Test
+    func defaultAudioPreparerUsesExistingWAVAndCleanupRemovesIt() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let sourceURL = rootURL.appendingPathComponent("audio.m4a")
+        fileManager.createFile(atPath: sourceURL.path, contents: Data("m4a".utf8))
+        let existingWAVURL = rootURL.appendingPathComponent("audio.wav")
+        fileManager.createFile(atPath: existingWAVURL.path, contents: Data("wav".utf8))
+        let preparer = DefaultSidecarTranscriptionAudioPreparer(fileManager: fileManager)
+
+        let preparedAudio = try await preparer.prepareAudioFile(for: sourceURL)
+
+        #expect(preparedAudio.fileURL == existingWAVURL)
+        #expect(fileManager.fileExists(atPath: preparedAudio.fileURL.path))
+
+        preparedAudio.cleanup()
+
+        #expect(!fileManager.fileExists(atPath: preparedAudio.fileURL.path))
+    }
+
+    @Test
+    func defaultAudioPreparerConvertsRecordedM4AToNonEmptyWAV() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let sourceURL = rootURL.appendingPathComponent("audio.m4a")
+        try createRecordedM4ATestFile(at: sourceURL)
+        let sourceFile = try AVAudioFile(forReading: sourceURL)
+        #expect(sourceFile.length > 0)
+        let preparer = DefaultSidecarTranscriptionAudioPreparer(fileManager: fileManager)
+
+        let preparedAudio: PreparedSidecarTranscriptionAudio
+        do {
+            preparedAudio = try await preparer.prepareAudioFile(for: sourceURL)
+        } catch {
+            throw TestFailure("prepareAudioFile threw: \(String(describing: error))")
+        }
+
+        #expect(fileManager.fileExists(atPath: preparedAudio.fileURL.path))
+        let fileSize = try fileSize(at: preparedAudio.fileURL, fileManager: fileManager)
+        #expect(fileSize > 44, "Expected converted WAV to contain audio data, size was \(fileSize) bytes")
+        let wavFile = try AVAudioFile(forReading: preparedAudio.fileURL)
+        #expect(wavFile.length > 0)
+        #expect(wavFile.processingFormat.sampleRate == 16_000)
+        #expect(wavFile.processingFormat.channelCount == 1)
+
+        preparedAudio.cleanup()
     }
 
     @Test
@@ -291,6 +378,7 @@ private struct SidecarTranscriptionHarness {
     let meetingFileStore: MeetingFileStore
     let runtimeConfiguration: SidecarHarnessRuntimeConfiguration
     let launcher: SuspendedSidecarProcessLauncher
+    let audioPreparer: StubSidecarTranscriptionAudioPreparer
     let service: SidecarTranscriptionService
 
     init() throws {
@@ -311,6 +399,7 @@ private struct SidecarTranscriptionHarness {
         let runtimeConfiguration = SidecarHarnessRuntimeConfiguration()
         self.runtimeConfiguration = runtimeConfiguration
         launcher = SuspendedSidecarProcessLauncher()
+        audioPreparer = StubSidecarTranscriptionAudioPreparer(fileManager: fileManager)
         service = SidecarTranscriptionService(
             meetingStore: meetingStore,
             progressCenter: progressCenter,
@@ -318,6 +407,7 @@ private struct SidecarTranscriptionHarness {
             executableURLProvider: { runtimeConfiguration.executableURL },
             hfTokenProvider: { "hardcoded-token" },
             hfHomeURLProvider: { runtimeConfiguration.hfHomeURL },
+            audioPreparer: audioPreparer,
             fileManager: fileManager,
             dateProvider: Date.init
         )
@@ -402,4 +492,77 @@ private final class SidecarHarnessRuntimeConfiguration: @unchecked Sendable {
     var executableURL = URL(fileURLWithPath: "/tmp/example/python/lib/bin/python")
     var workingDirectoryURL = URL(fileURLWithPath: "/tmp/example/python", isDirectory: true)
     var hfHomeURL = URL(fileURLWithPath: "/tmp/HuggingFace")
+}
+
+private actor StubSidecarTranscriptionAudioPreparer: SidecarTranscriptionAudioPreparing {
+    private let fileManager: FileManager
+    private(set) var preparedSourceURL: URL?
+    private var preparedAudioURL: URL?
+
+    init(fileManager: FileManager) {
+        self.fileManager = fileManager
+    }
+
+    func setPreparedAudioURL(_ url: URL) {
+        preparedAudioURL = url
+    }
+
+    func prepareAudioFile(for sourceURL: URL) async throws -> PreparedSidecarTranscriptionAudio {
+        preparedSourceURL = sourceURL
+        let targetURL = preparedAudioURL ?? sourceURL.deletingPathExtension().appendingPathExtension("wav")
+        if !fileManager.fileExists(atPath: targetURL.path) {
+            fileManager.createFile(atPath: targetURL.path, contents: Data("wav".utf8))
+        }
+
+        return PreparedSidecarTranscriptionAudio(fileURL: targetURL) {
+            let fileManager = FileManager.default
+            guard fileManager.fileExists(atPath: targetURL.path) else {
+                return
+            }
+
+            try? fileManager.removeItem(at: targetURL)
+        }
+    }
+}
+
+private func createRecordedM4ATestFile(at url: URL) throws {
+    let writer = try AACM4AAudioFileWriter(outputURL: url)
+    let format = CanonicalAudioBufferConverter.canonicalFormat
+    let frameCount: AVAudioFrameCount = 48_000
+    let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount))
+    buffer.frameLength = frameCount
+    let channels = try #require(buffer.floatChannelData)
+    let sampleRate = Float(format.sampleRate)
+
+    for channelIndex in 0 ..< Int(format.channelCount) {
+        let channel = channels[channelIndex]
+        for frameIndex in 0 ..< Int(frameCount) {
+            let sample = sin((2 * Float.pi * 220 * Float(frameIndex)) / sampleRate)
+            channel[frameIndex] = channelIndex == 0 ? sample : sample * 0.5
+        }
+    }
+
+    try writer.append(buffer)
+    try writer.finish()
+}
+
+private func fileSize(at url: URL, fileManager: FileManager) throws -> UInt64 {
+    let attributes = try fileManager.attributesOfItem(atPath: url.path)
+    guard let size = attributes[.size] as? NSNumber else {
+        throw TestFailure("Could not read file size for \(url.path)")
+    }
+
+    return size.uint64Value
+}
+
+private struct TestFailure: LocalizedError {
+    let message: String
+
+    init(_ message: String) {
+        self.message = message
+    }
+
+    var errorDescription: String? {
+        message
+    }
 }

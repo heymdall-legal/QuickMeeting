@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 enum SidecarTranscriptionServiceError: LocalizedError, Equatable {
@@ -28,6 +29,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
     private let executableURLProvider: @Sendable () -> URL?
     private let hfTokenProvider: @Sendable () -> String
     private let hfHomeURLProvider: @Sendable () -> URL
+    private let audioPreparer: any SidecarTranscriptionAudioPreparing
     private let fileManager: FileManager
     private let dateProvider: () -> Date
     private var activeMeetingID: UUID?
@@ -36,21 +38,23 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         meetingStore: MeetingStore,
         progressCenter: TranscriptionProgressCenter,
         launcher: any SidecarProcessLaunching,
-        eventDecoder: SidecarTranscriptionEventDecoder = SidecarTranscriptionEventDecoder(),
+        eventDecoder: SidecarTranscriptionEventDecoder? = nil,
         executableURLProvider: @escaping @Sendable () -> URL?,
         hfTokenProvider: @escaping @Sendable () -> String,
         hfHomeURLProvider: @escaping @Sendable () -> URL,
+        audioPreparer: (any SidecarTranscriptionAudioPreparing)? = nil,
         fileManager: FileManager = .default,
         dateProvider: @escaping () -> Date = Date.init
     ) {
         self.meetingStore = meetingStore
         self.progressCenter = progressCenter
         self.launcher = launcher
-        self.eventDecoder = eventDecoder
+        self.eventDecoder = eventDecoder ?? SidecarTranscriptionEventDecoder()
         self.executableURLProvider = executableURLProvider
         self.hfTokenProvider = hfTokenProvider
         self.hfHomeURLProvider = hfHomeURLProvider
         self.fileManager = fileManager
+        self.audioPreparer = audioPreparer ?? DefaultSidecarTranscriptionAudioPreparer(fileManager: fileManager)
         self.dateProvider = dateProvider
     }
 
@@ -84,6 +88,11 @@ final class SidecarTranscriptionService: TranscriptionServicing {
         }
 
         do {
+            let preparedAudio = try await audioPreparer.prepareAudioFile(for: audioFileURL)
+            defer {
+                preparedAudio.cleanup()
+            }
+
             let runState = SidecarTranscriptionRunState()
             let workingDirectory = Self.pythonRootURL(for: executableURL)
             try await launcher.run(
@@ -93,7 +102,7 @@ final class SidecarTranscriptionService: TranscriptionServicing {
                     arguments: [
                         "main.py",
                         "--input-file",
-                        audioFileURL.path.replacing(".m4a", with: ".wav"),
+                        preparedAudio.fileURL.path,
                         "--hf-token",
                         hfTokenProvider(),
                     ],
@@ -245,5 +254,207 @@ private actor SidecarTranscriptionRunState {
 
     func setCompletedPayload(_ payload: SidecarCompletedPayload) {
         completedPayload = payload
+    }
+}
+
+struct PreparedSidecarTranscriptionAudio: Sendable {
+    let fileURL: URL
+    let cleanup: @Sendable () -> Void
+}
+
+protocol SidecarTranscriptionAudioPreparing: Sendable {
+    func prepareAudioFile(for sourceURL: URL) async throws -> PreparedSidecarTranscriptionAudio
+}
+
+struct SidecarTranscriptionAudioPreparationError: LocalizedError {
+    let operation: String
+    let underlyingError: Error?
+
+    var errorDescription: String? {
+        if let underlyingError {
+            return "\(operation): \(underlyingError.localizedDescription)"
+        }
+
+        return operation
+    }
+}
+
+struct DefaultSidecarTranscriptionAudioPreparer: SidecarTranscriptionAudioPreparing {
+    private static let wavFileSettings: [String: Any] = [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: 16_000,
+        AVNumberOfChannelsKey: 1,
+        AVLinearPCMBitDepthKey: 32,
+        AVLinearPCMIsFloatKey: true,
+        AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsNonInterleaved: true,
+    ]
+
+    private static let outputFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: 16_000,
+        channels: 1,
+        interleaved: false
+    )!
+
+    private let fileManager: FileManager
+
+    init(fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+    }
+
+    func prepareAudioFile(for sourceURL: URL) async throws -> PreparedSidecarTranscriptionAudio {
+        guard sourceURL.pathExtension.caseInsensitiveCompare("wav") != .orderedSame else {
+            return PreparedSidecarTranscriptionAudio(fileURL: sourceURL, cleanup: {})
+        }
+
+        let wavURL = sourceURL.deletingPathExtension().appendingPathExtension("wav")
+        if !fileManager.fileExists(atPath: wavURL.path) {
+            try await convertToWAV(sourceURL: sourceURL, destinationURL: wavURL)
+        }
+
+        return PreparedSidecarTranscriptionAudio(fileURL: wavURL) {
+            Self.removeItemIfPresent(at: wavURL)
+        }
+    }
+
+    private func convertToWAV(sourceURL: URL, destinationURL: URL) async throws {
+        try fileManager.createDirectory(
+            at: destinationURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+
+        let asset = AVURLAsset(url: sourceURL)
+        let track = try await Self.firstAudioTrack(in: asset)
+        let reader: AVAssetReader
+        do {
+            reader = try AVAssetReader(asset: asset)
+        } catch {
+            throw SidecarTranscriptionAudioPreparationError(
+                operation: "Failed to create audio reader",
+                underlyingError: error
+            )
+        }
+
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: Self.wavFileSettings)
+        output.alwaysCopiesSampleData = false
+        guard reader.canAdd(output) else {
+            throw SidecarTranscriptionAudioPreparationError(
+                operation: "Failed to attach audio reader output",
+                underlyingError: nil
+            )
+        }
+        reader.add(output)
+
+        let destinationFile: AVAudioFile
+        do {
+            destinationFile = try AVAudioFile(
+                forWriting: destinationURL,
+                settings: Self.wavFileSettings,
+                commonFormat: Self.outputFormat.commonFormat,
+                interleaved: Self.outputFormat.isInterleaved
+            )
+        } catch {
+            throw SidecarTranscriptionAudioPreparationError(
+                operation: "Failed to open destination WAV file for writing",
+                underlyingError: error
+            )
+        }
+
+        guard reader.startReading() else {
+            throw SidecarTranscriptionAudioPreparationError(
+                operation: "Failed to start audio reader",
+                underlyingError: reader.error
+            )
+        }
+
+        var wroteFrames = false
+        while let sampleBuffer = output.copyNextSampleBuffer() {
+            guard CMSampleBufferGetNumSamples(sampleBuffer) > 0 else {
+                continue
+            }
+
+            let pcmBuffer: AVAudioPCMBuffer
+            do {
+                pcmBuffer = try Self.makePCMBuffer(from: sampleBuffer)
+            } catch {
+                throw SidecarTranscriptionAudioPreparationError(
+                    operation: "Failed to decode source audio sample buffer",
+                    underlyingError: error
+                )
+            }
+
+            do {
+                try destinationFile.write(from: pcmBuffer)
+            } catch {
+                throw SidecarTranscriptionAudioPreparationError(
+                    operation: "Failed while writing converted WAV frames",
+                    underlyingError: error
+                )
+            }
+            wroteFrames = true
+        }
+
+        if reader.status == .failed {
+            throw SidecarTranscriptionAudioPreparationError(
+                operation: "Audio reader failed while decoding source audio",
+                underlyingError: reader.error
+            )
+        }
+
+        guard wroteFrames else {
+            throw SidecarTranscriptionServiceError.invalidCompletedPayload
+        }
+    }
+
+    private nonisolated static func removeItemIfPresent(at url: URL) {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: url.path) else {
+            return
+        }
+
+        try? fileManager.removeItem(at: url)
+    }
+
+    private static func firstAudioTrack(in asset: AVURLAsset) async throws -> AVAssetTrack {
+        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        guard let track = tracks.first else {
+            throw SidecarTranscriptionAudioPreparationError(
+                operation: "Source audio file does not contain an audio track",
+                underlyingError: nil
+            )
+        }
+
+        return track
+    }
+
+    private static func makePCMBuffer(from sampleBuffer: CMSampleBuffer) throws -> AVAudioPCMBuffer {
+        let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard frameCount > 0,
+              let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+                let pcmBuffer = AVAudioPCMBuffer(
+                  pcmFormat: AVAudioFormat(cmAudioFormatDescription: formatDescription),
+                  frameCapacity: AVAudioFrameCount(frameCount)
+              )
+        else {
+            throw SidecarTranscriptionServiceError.invalidCompletedPayload
+        }
+
+        pcmBuffer.frameLength = pcmBuffer.frameCapacity
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(frameCount),
+            into: pcmBuffer.mutableAudioBufferList
+        )
+        guard status == noErr else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
+
+        return pcmBuffer
     }
 }
