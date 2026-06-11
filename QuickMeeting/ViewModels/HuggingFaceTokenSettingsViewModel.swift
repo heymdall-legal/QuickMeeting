@@ -3,12 +3,13 @@ import Foundation
 
 @MainActor
 final class HuggingFaceTokenSettingsViewModel: ObservableObject {
-    @Published var token = ""
+    @Published var token: String
 
     private let settingsStore: any HuggingFaceTokenSettingsStoring
 
     init(settingsStore: any HuggingFaceTokenSettingsStoring) {
         self.settingsStore = settingsStore
+        token = settingsStore.loadToken()
     }
 
     var hasToken: Bool {

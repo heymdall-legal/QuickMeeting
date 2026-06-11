@@ -5,6 +5,15 @@ import Testing
 @MainActor
 struct HuggingFaceTokenSettingsViewModelTests {
     @Test
+    func initExposesPersistedTokenImmediately() {
+        let store = InMemoryHuggingFaceTokenSettingsStore(token: "hf_saved_token")
+        let viewModel = HuggingFaceTokenSettingsViewModel(settingsStore: store)
+
+        #expect(viewModel.token == "hf_saved_token")
+        #expect(viewModel.hasToken)
+    }
+
+    @Test
     func loadExposesPersistedToken() async {
         let store = InMemoryHuggingFaceTokenSettingsStore(token: "hf_saved_token")
         let viewModel = HuggingFaceTokenSettingsViewModel(settingsStore: store)
