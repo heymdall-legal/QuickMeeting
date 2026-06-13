@@ -46,25 +46,9 @@ struct QuickMeetingApp: App {
             let transcriptionProgressCenter = TranscriptionProgressCenter()
             let huggingFaceTokenSettingsStore = HuggingFaceTokenSettingsStore()
             let transcriptionSettingsStore = TranscriptionSettingsStore()
-            let transcriptionService = SidecarTranscriptionService(
+            let transcriptionService = FluidTranscriptionService(
                 meetingStore: meetingStore,
                 progressCenter: transcriptionProgressCenter,
-                launcher: DefaultSidecarProcessLauncher(),
-                executableURLProvider: {
-                    SidecarTranscriptionService.defaultExecutableURL()
-                },
-                hfTokenProvider: {
-                    huggingFaceTokenSettingsStore.loadToken()
-                },
-                transcriptionLanguageProvider: {
-                    transcriptionSettingsStore.load().language
-                },
-                initialPromptProvider: {
-                    transcriptionSettingsStore.load().initialPrompt
-                },
-                hfHomeURLProvider: {
-                    SidecarTranscriptionService.defaultHFHomeURL()
-                },
                 knownSpeakerStore: knownSpeakerStore,
                 knownSpeakerEnrollmentService: knownSpeakerEnrollmentService
             )

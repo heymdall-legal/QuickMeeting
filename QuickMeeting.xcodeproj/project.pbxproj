@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4BC1217C2FDD582400E215D3 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 4BC1217B2FDD582400E215D3 /* FluidAudio */; };
 		4BFD10012FC0000000A1B2C3 /* python in Resources */ = {isa = PBXBuildFile; fileRef = 4BFD10002FC0000000A1B2C3 /* python */; };
 /* End PBXBuildFile section */
 
@@ -44,6 +45,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4BC1217C2FDD582400E215D3 /* FluidAudio in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -96,6 +98,7 @@
 			);
 			name = QuickMeeting;
 			packageProductDependencies = (
+				4BC1217B2FDD582400E215D3 /* FluidAudio */,
 			);
 			productName = QuickMeeting;
 			productReference = 4BD1296B2FA9197200DC589F /* QuickMeeting.app */;
@@ -152,6 +155,9 @@
 			);
 			mainGroup = 4BD129622FA9197200DC589F;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				4BC1217A2FDD582400E215D3 /* XCRemoteSwiftPackageReference "FluidAudio" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4BD1296C2FA9197200DC589F /* Products */;
 			projectDirPath = "";
@@ -492,6 +498,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		4BC1217A2FDD582400E215D3 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/FluidInference/FluidAudio.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4BC1217B2FDD582400E215D3 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4BC1217A2FDD582400E215D3 /* XCRemoteSwiftPackageReference "FluidAudio" */;
+			productName = FluidAudio;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 4BD129632FA9197200DC589F /* Project object */;
 }
