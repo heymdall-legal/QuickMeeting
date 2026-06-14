@@ -2,9 +2,8 @@
 //  FluidTranscriptionService.swift
 //  QuickMeeting
 //
-//  In-process transcription + diarization powered by FluidAudio. Designed as a
-//  drop-in replacement for `SidecarTranscriptionService` that runs entirely on
-//  device, without the bundled Python helper or a Hugging Face token.
+//  In-process transcription + diarization powered by FluidAudio and running
+//  entirely on device.
 //
 
 import FluidAudio

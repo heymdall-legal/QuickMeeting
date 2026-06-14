@@ -42,7 +42,7 @@ struct MeetingTranscriptStoreTests {
         let harness = try MeetingTranscriptStoreHarness()
         let meeting = try harness.createRecordedMeeting()
 
-        #expect(throws: MeetingTranscriptStoreError.sidecarMissing) {
+        #expect(throws: MeetingTranscriptStoreError.transcriptMissing) {
             try harness.transcriptStore.renameSpeaker(id: "speaker-1", to: "Masha", in: meeting.id)
         }
     }

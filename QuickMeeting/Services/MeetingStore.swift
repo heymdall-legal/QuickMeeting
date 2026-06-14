@@ -144,7 +144,7 @@ struct MeetingStore {
     ) throws -> StoredTranscript {
         let meeting = try fetchMeeting(id: meetingID)
         guard meeting.storedTranscript != nil else {
-            throw MeetingTranscriptStoreError.sidecarMissing
+            throw MeetingTranscriptStoreError.transcriptMissing
         }
 
         guard let speaker = meeting.transcriptSpeakers.first(where: { $0.id == speakerID }) else {
@@ -160,7 +160,7 @@ struct MeetingStore {
         try modelContext.save()
 
         guard let transcript = meeting.storedTranscript else {
-            throw MeetingTranscriptStoreError.sidecarMissing
+            throw MeetingTranscriptStoreError.transcriptMissing
         }
 
         return transcript

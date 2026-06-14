@@ -12,12 +12,12 @@ protocol MeetingTranscriptStoring: Sendable {
 }
 
 enum MeetingTranscriptStoreError: LocalizedError, Equatable {
-    case sidecarMissing
+    case transcriptMissing
     case speakerNotFound
 
     var errorDescription: String? {
         switch self {
-        case .sidecarMissing:
+        case .transcriptMissing:
             return "Transcript data is unavailable."
         case .speakerNotFound:
             return "Speaker could not be updated."
@@ -39,12 +39,12 @@ struct MeetingTranscriptStore: MeetingTranscriptStoring {
 
     func loadTranscript(meetingID: UUID) throws -> StoredTranscript {
         guard let meetingStore else {
-            throw MeetingTranscriptStoreError.sidecarMissing
+            throw MeetingTranscriptStoreError.transcriptMissing
         }
 
         let meeting = try meetingStore.fetchMeeting(id: meetingID)
         guard let transcript = meeting.storedTranscript else {
-            throw MeetingTranscriptStoreError.sidecarMissing
+            throw MeetingTranscriptStoreError.transcriptMissing
         }
 
         return transcript
@@ -53,7 +53,7 @@ struct MeetingTranscriptStore: MeetingTranscriptStoring {
     @discardableResult
     func renameSpeaker(id: String, to displayName: String, in meetingID: UUID) throws -> StoredTranscript {
         guard let meetingStore else {
-            throw MeetingTranscriptStoreError.sidecarMissing
+            throw MeetingTranscriptStoreError.transcriptMissing
         }
 
         return try meetingStore.renameSpeaker(
