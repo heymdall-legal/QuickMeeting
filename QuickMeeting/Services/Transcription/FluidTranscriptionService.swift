@@ -48,6 +48,7 @@ protocol FluidAudioTranscribing: Sendable {
         audioFileURL: URL,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         similarityThreshold: Float,
+        languageCode: String?,
         progress: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult
 }
@@ -61,6 +62,7 @@ final class FluidTranscriptionService: TranscriptionServicing {
     private let pipeline: any FluidAudioTranscribing
     private let knownSpeakerStore: KnownSpeakerStore?
     private let knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)?
+    private let languageStore: (any TranscriptionLanguageStoring)?
     private let similarityThreshold: Float
     private let fileManager: FileManager
     private let dateProvider: () -> Date
@@ -72,6 +74,7 @@ final class FluidTranscriptionService: TranscriptionServicing {
         pipeline: (any FluidAudioTranscribing)? = nil,
         knownSpeakerStore: KnownSpeakerStore? = nil,
         knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)? = nil,
+        languageStore: (any TranscriptionLanguageStoring)? = nil,
         similarityThreshold: Float = 0.8,
         fileManager: FileManager = .default,
         dateProvider: @escaping () -> Date = Date.init
@@ -81,6 +84,7 @@ final class FluidTranscriptionService: TranscriptionServicing {
         self.pipeline = pipeline ?? DefaultFluidAudioPipeline()
         self.knownSpeakerStore = knownSpeakerStore
         self.knownSpeakerEnrollmentService = knownSpeakerEnrollmentService
+        self.languageStore = languageStore
         self.similarityThreshold = similarityThreshold
         self.fileManager = fileManager
         self.dateProvider = dateProvider
@@ -114,10 +118,12 @@ final class FluidTranscriptionService: TranscriptionServicing {
         do {
             let knownSpeakers = try makeKnownSpeakerSnapshots()
             let progressCenter = progressCenter
+            let languageCode = languageStore?.languageCode()
             let result = try await pipeline.transcribe(
                 audioFileURL: audioFileURL,
                 knownSpeakers: knownSpeakers,
-                similarityThreshold: similarityThreshold
+                similarityThreshold: similarityThreshold,
+                languageCode: languageCode
             ) { update in
                 Task { @MainActor in
                     Self.applyProgress(update, meetingID: meetingID, progressCenter: progressCenter)
@@ -225,12 +231,16 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         audioFileURL: URL,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         similarityThreshold: Float,
+        languageCode: String?,
         progress: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult {
         let samples = try AudioConverter().resampleAudioFile(path: audioFileURL.path)
         guard !samples.isEmpty else {
             throw FluidTranscriptionServiceError.noAudioDecoded
         }
+
+        // A nil code (or an unrecognised one) means auto-detect — no hint passed.
+        let language = languageCode.flatMap(Language.init(rawValue:))
 
         // 1) Transcription.
         let asrManager = try await loadASRManager()
@@ -244,7 +254,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         }
         let transcriptionResult: ASRResult
         do {
-            transcriptionResult = try await asrManager.transcribe(samples, decoderState: &decoderState)
+            transcriptionResult = try await asrManager.transcribe(samples, decoderState: &decoderState, language: language)
         } catch {
             transcriptionProgressTask.cancel()
             throw error

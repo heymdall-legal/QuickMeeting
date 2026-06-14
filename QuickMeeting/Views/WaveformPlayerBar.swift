@@ -1,0 +1,79 @@
+//
+//  WaveformPlayerBar.swift
+//  QuickMeeting
+//
+//  The sage waveform scrubber from QuickMeeting.dc.html — play/pause,
+//  click-to-seek, and the played portion tinted sage.
+//
+
+import SwiftUI
+
+struct WaveformPlayerBar: View {
+    let currentTime: TimeInterval
+    let duration: TimeInterval
+    let isPlaying: Bool
+    let isAvailable: Bool
+    let onToggle: () -> Void
+    /// Called with a 0...1 fraction of the timeline.
+    let onSeek: (Double) -> Void
+
+    private var fraction: Double {
+        guard duration > 0 else { return 0 }
+        return min(1, max(0, currentTime / duration))
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Button(action: onToggle) {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(QMTheme.sage, in: Circle())
+                    .shadow(color: QMTheme.sage.opacity(0.45), radius: 6, y: 2)
+            }
+            .buttonStyle(.plain)
+            .disabled(!isAvailable)
+            .opacity(isAvailable ? 1 : 0.5)
+
+            waveform
+
+            Text("\(timeString(currentTime)) / \(timeString(duration))")
+                .font(.system(size: 12.5).monospacedDigit())
+                .foregroundStyle(QMTheme.tertiary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(QMTheme.cardBorder, lineWidth: 1))
+        .shadow(color: Color(hex: "#28241e").opacity(0.18), radius: 16, y: 10)
+    }
+
+    private var waveform: some View {
+        GeometryReader { proxy in
+            let barCount = QMWaveform.heights.count
+            HStack(spacing: 2) {
+                ForEach(Array(QMWaveform.heights.enumerated()), id: \.offset) { index, height in
+                    Capsule()
+                        .fill(Double(index) / Double(barCount) < fraction ? QMTheme.sage : QMTheme.recordedDot)
+                        .frame(width: 3, height: height)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onEnded { value in
+                        guard isAvailable, proxy.size.width > 0 else { return }
+                        onSeek(min(1, max(0, value.location.x / proxy.size.width)))
+                    }
+            )
+        }
+        .frame(height: 34)
+    }
+
+    private func timeString(_ time: TimeInterval) -> String {
+        let total = max(0, Int(time.rounded(.down)))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}

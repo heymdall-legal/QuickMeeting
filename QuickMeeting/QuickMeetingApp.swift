@@ -15,6 +15,7 @@ struct QuickMeetingApp: App {
     @StateObject private var appViewModel: AppViewModel
     @StateObject private var calendarSettingsViewModel: CalendarSettingsViewModel
     @StateObject private var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
+    @StateObject private var transcriptionSettingsViewModel: TranscriptionSettingsViewModel
     @State private var menuBarController: MenuBarController?
 
     init() {
@@ -42,11 +43,13 @@ struct QuickMeetingApp: App {
                 audioCapturePipeline: NativeAudioCapturePipeline()
             )
             let transcriptionProgressCenter = TranscriptionProgressCenter()
+            let transcriptionSettingsStore = TranscriptionSettingsStore()
             let transcriptionService = FluidTranscriptionService(
                 meetingStore: meetingStore,
                 progressCenter: transcriptionProgressCenter,
                 knownSpeakerStore: knownSpeakerStore,
-                knownSpeakerEnrollmentService: knownSpeakerEnrollmentService
+                knownSpeakerEnrollmentService: knownSpeakerEnrollmentService,
+                languageStore: transcriptionSettingsStore
             )
             let meetingTranscriptStore = MeetingTranscriptStore(meetingStore: meetingStore)
             let calendarSettingsStore = CalendarSettingsStore()
@@ -83,6 +86,9 @@ struct QuickMeetingApp: App {
             _autoRecordingSettingsViewModel = StateObject(
                 wrappedValue: autoRecordingSettingsViewModel
             )
+            _transcriptionSettingsViewModel = StateObject(
+                wrappedValue: TranscriptionSettingsViewModel(settingsStore: transcriptionSettingsStore)
+            )
             autoRecordingMonitor = MeetingAppMonitor(
                 settingsStore: autoRecordingSettingsStore,
                 activitySource: NativeMeetingAppActivitySource(),
@@ -98,7 +104,8 @@ struct QuickMeetingApp: App {
             ContentView(
                 appViewModel: appViewModel,
                 calendarSettingsViewModel: calendarSettingsViewModel,
-                autoRecordingSettingsViewModel: autoRecordingSettingsViewModel
+                autoRecordingSettingsViewModel: autoRecordingSettingsViewModel,
+                transcriptionSettingsViewModel: transcriptionSettingsViewModel
             )
                 .task {
                     if menuBarController == nil {
@@ -108,6 +115,7 @@ struct QuickMeetingApp: App {
                     autoRecordingMonitor.start()
                 }
         }
+        .windowStyle(.hiddenTitleBar)
         .modelContainer(sharedModelContainer)
 
         Settings {

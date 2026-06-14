@@ -12,13 +12,20 @@ struct ContentView: View {
     @ObservedObject var appViewModel: AppViewModel
     @ObservedObject var calendarSettingsViewModel: CalendarSettingsViewModel
     @ObservedObject var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
+    @ObservedObject var transcriptionSettingsViewModel: TranscriptionSettingsViewModel
     @Query(sort: \Meeting.startedAt, order: .reverse) private var meetings: [Meeting]
     @State private var selection = defaultSidebarSelection()
+    @State private var isSettingsPresented = false
 
     var body: some View {
         NavigationSplitView {
-            AppSidebarView(meetings: meetings, selection: $selection)
-                .navigationSplitViewColumnWidth(min: 180, ideal: 220)
+            AppSidebarView(
+                appViewModel: appViewModel,
+                meetings: meetings,
+                selection: $selection,
+                onOpenSettings: { isSettingsPresented = true }
+            )
+                .navigationSplitViewColumnWidth(min: 280, ideal: 312)
         } detail: {
             switch selection {
             case .home:
@@ -45,6 +52,11 @@ struct ContentView: View {
                         onDelete: {
                             appViewModel.deleteMeeting(selectedMeeting)
                         },
+                        onStop: {
+                            Task {
+                                await appViewModel.stopRecording()
+                            }
+                        },
                         onRenameMeeting: { title in
                             try await appViewModel.renameMeeting(selectedMeeting, title: title)
                         },
@@ -68,6 +80,14 @@ struct ContentView: View {
         }
         .onChange(of: meetings.map(\.id)) { _, _ in
             syncSelection()
+        }
+        .sheet(isPresented: $isSettingsPresented) {
+            QMSettingsSheet(
+                calendarViewModel: calendarSettingsViewModel,
+                autoRecordingViewModel: autoRecordingSettingsViewModel,
+                transcriptionViewModel: transcriptionSettingsViewModel,
+                onClose: { isSettingsPresented = false }
+            )
         }
         .alert(
             "Unable to Delete Meeting",
@@ -177,7 +197,8 @@ struct ContentView: View {
     ContentView(
         appViewModel: previewAppViewModel(container: container),
         calendarSettingsViewModel: previewCalendarSettingsViewModel(),
-        autoRecordingSettingsViewModel: previewAutoRecordingSettingsViewModel()
+        autoRecordingSettingsViewModel: previewAutoRecordingSettingsViewModel(),
+        transcriptionSettingsViewModel: TranscriptionSettingsViewModel(settingsStore: TranscriptionSettingsStore())
     )
         .modelContainer(container)
 }

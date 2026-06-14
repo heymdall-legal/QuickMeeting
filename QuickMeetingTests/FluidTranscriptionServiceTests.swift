@@ -58,6 +58,26 @@ struct FluidTranscriptionServiceTests {
     }
 
     @Test
+    func transcribeForwardsConfiguredLanguageToPipeline() async throws {
+        let harness = try FluidTranscriptionHarness(outcome: .success(.empty), languageCode: "de")
+        let meeting = try harness.createRecordedMeeting()
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        #expect(await harness.pipeline.receivedLanguageCode == "de")
+    }
+
+    @Test
+    func transcribeForwardsNilLanguageForAutoDetect() async throws {
+        let harness = try FluidTranscriptionHarness(outcome: .success(.empty), languageCode: nil)
+        let meeting = try harness.createRecordedMeeting()
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        #expect(await harness.pipeline.receivedLanguageCode == nil)
+    }
+
+    @Test
     func transcribeOmitsKnownSpeakersWithoutCentroids() async throws {
         let harness = try FluidTranscriptionHarness(outcome: .success(.empty))
         let meeting = try harness.createRecordedMeeting()
@@ -404,7 +424,8 @@ private struct FluidTranscriptionHarness {
     init(
         outcome: StubFluidAudioPipeline.Outcome,
         similarityThreshold: Float = 0.8,
-        enrollmentResult: Result<Void, Error> = .success(())
+        enrollmentResult: Result<Void, Error> = .success(()),
+        languageCode: String? = nil
     ) throws {
         let schema = Schema([
             Meeting.self,
@@ -431,6 +452,7 @@ private struct FluidTranscriptionHarness {
             pipeline: pipeline,
             knownSpeakerStore: knownSpeakerStore,
             knownSpeakerEnrollmentService: enrollmentService,
+            languageStore: StubTranscriptionLanguageStore(code: languageCode),
             similarityThreshold: similarityThreshold,
             fileManager: fileManager
         )
@@ -466,6 +488,12 @@ private struct FluidTranscriptionHarness {
     }
 }
 
+private struct StubTranscriptionLanguageStore: TranscriptionLanguageStoring {
+    let code: String?
+    func languageCode() -> String? { code }
+    func saveLanguageCode(_: String?) {}
+}
+
 private actor StubFluidAudioPipeline: FluidAudioTranscribing {
     enum Outcome {
         case success(FluidTranscriptionResult)
@@ -475,6 +503,7 @@ private actor StubFluidAudioPipeline: FluidAudioTranscribing {
     private var outcome: Outcome
     private(set) var receivedKnownSpeakers: [FluidKnownSpeakerSnapshot] = []
     private(set) var receivedThreshold: Float?
+    private(set) var receivedLanguageCode: String?
     private var shouldSuspendNextRun = false
     private var pendingRunCount = 0
     private var pendingContinuation: CheckedContinuation<Void, Never>?
@@ -503,10 +532,12 @@ private actor StubFluidAudioPipeline: FluidAudioTranscribing {
         audioFileURL _: URL,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         similarityThreshold: Float,
+        languageCode: String?,
         progress _: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult {
         receivedKnownSpeakers = knownSpeakers
         receivedThreshold = similarityThreshold
+        receivedLanguageCode = languageCode
 
         if shouldSuspendNextRun {
             shouldSuspendNextRun = false
