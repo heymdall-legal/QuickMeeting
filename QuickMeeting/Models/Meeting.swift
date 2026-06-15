@@ -23,6 +23,7 @@ final class Meeting {
     private(set) var transcriptPreview: String?
     @Relationship(deleteRule: .cascade) private(set) var transcriptSpeakers: [PersistedTranscriptSpeaker]
     @Relationship(deleteRule: .cascade) private(set) var transcriptSegments: [PersistedTranscriptSegment]
+    private(set) var summaryText: String?
     private(set) var duration: TimeInterval?
     private(set) var calendarEventID: String?
     @Attribute(originalName: "attendeeNames") private var attendeeNamesStorage: [String]?
@@ -67,6 +68,7 @@ final class Meeting {
         transcriptPreview: String? = nil,
         transcriptSpeakers: [PersistedTranscriptSpeaker] = [],
         transcriptSegments: [PersistedTranscriptSegment] = [],
+        summaryText: String? = nil,
         duration: TimeInterval? = nil,
         calendarEventID: String? = nil,
         attendeeNames: [String] = [],
@@ -82,6 +84,7 @@ final class Meeting {
         self.transcriptPreview = transcriptPreview
         self.transcriptSpeakers = transcriptSpeakers
         self.transcriptSegments = transcriptSegments
+        self.summaryText = summaryText
         self.duration = duration
         self.calendarEventID = calendarEventID
         attendeeNamesStorage = attendeeNames
@@ -110,6 +113,7 @@ final class Meeting {
         transcriptPreview = nil
         transcriptSpeakers.removeAll()
         transcriptSegments.removeAll()
+        summaryText = nil
         touch(updatedAt: updatedAt)
     }
 
@@ -121,6 +125,7 @@ final class Meeting {
         self.transcriptPreview = transcriptPreview
         transcriptSpeakers = transcript.speakers.map(PersistedTranscriptSpeaker.init)
         transcriptSegments = transcript.segments.map(PersistedTranscriptSegment.init)
+        summaryText = nil
         statusRawValue = MeetingStatus.completed.rawValue
         touch(updatedAt: updatedAt)
     }
@@ -132,6 +137,11 @@ final class Meeting {
 
     func storeWaveform(_ samples: [Double], updatedAt: Date = Date()) {
         waveformSamples = samples
+        touch(updatedAt: updatedAt)
+    }
+
+    func storeSummary(_ summary: String, updatedAt: Date = Date()) {
+        summaryText = summary
         touch(updatedAt: updatedAt)
     }
 

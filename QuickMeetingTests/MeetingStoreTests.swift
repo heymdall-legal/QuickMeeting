@@ -265,6 +265,72 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func saveSummaryPersistsTextAndUpdatesMeetingTimestamp() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let previousUpdatedAt = meeting.updatedAt
+
+        try harness.store.saveSummary(
+            meetingID: meeting.id,
+            summary: "Short recap",
+            updatedAt: Date(timeIntervalSince1970: 1_715_325_000)
+        )
+
+        let reloaded = try harness.store.fetchMeeting(id: meeting.id)
+        #expect(reloaded.summaryText == "Short recap")
+        #expect(reloaded.updatedAt > previousUpdatedAt)
+    }
+
+    @Test
+    func saveSummaryReplacesExistingText() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+        try harness.store.saveSummary(
+            meetingID: meeting.id,
+            summary: "Old summary",
+            updatedAt: Date(timeIntervalSince1970: 1_715_325_000)
+        )
+
+        try harness.store.saveSummary(
+            meetingID: meeting.id,
+            summary: "New summary",
+            updatedAt: Date(timeIntervalSince1970: 1_715_325_060)
+        )
+
+        let reloaded = try harness.store.fetchMeeting(id: meeting.id)
+        #expect(reloaded.summaryText == "New summary")
+    }
+
+    @Test
+    func startingOrCompletingTranscriptionClearsStoredSummary() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Alice")],
+            segments: [TranscriptSegment(text: "First pass", speakerID: "speaker-1")]
+        )
+        try harness.store.saveSummary(
+            meetingID: meeting.id,
+            summary: "Old summary",
+            updatedAt: Date(timeIntervalSince1970: 1_715_325_000)
+        )
+
+        try harness.store.startTranscription(
+            meetingID: meeting.id,
+            updatedAt: Date(timeIntervalSince1970: 1_715_325_060)
+        )
+        #expect(try harness.store.fetchMeeting(id: meeting.id).summaryText == nil)
+
+        try harness.store.completeTranscription(
+            meetingID: meeting.id,
+            transcript: transcript,
+            transcriptPreview: transcript.fullText,
+            updatedAt: Date(timeIntervalSince1970: 1_715_325_120)
+        )
+        #expect(try harness.store.fetchMeeting(id: meeting.id).summaryText == nil)
+    }
+
+    @Test
     func failTranscriptionMarksMeetingAsFailedWithoutRemovingTranscriptMetadata() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()

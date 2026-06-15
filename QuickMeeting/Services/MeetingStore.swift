@@ -135,6 +135,12 @@ struct MeetingStore {
         try modelContext.save()
     }
 
+    func saveSummary(meetingID: UUID, summary: String, updatedAt: Date) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.storeSummary(summary, updatedAt: updatedAt)
+        try modelContext.save()
+    }
+
     @discardableResult
     func renameSpeaker(
         meetingID: UUID,
