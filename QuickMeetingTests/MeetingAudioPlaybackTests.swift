@@ -6,14 +6,23 @@ import Testing
 struct MeetingAudioPlaybackTests {
     actor DeferredLoadGate {
         private var continuations = [CheckedContinuation<Void, Never>]()
+        private var pendingWaitCount = 0
 
         func wait() async {
+            pendingWaitCount += 1
             await withCheckedContinuation { continuation in
                 continuations.append(continuation)
             }
         }
 
+        func waitUntilBlocked() async {
+            while pendingWaitCount == 0 {
+                await Task.yield()
+            }
+        }
+
         func open() {
+            pendingWaitCount = max(0, pendingWaitCount - continuations.count)
             let pendingContinuations = continuations
             continuations.removeAll()
             pendingContinuations.forEach { $0.resume() }
@@ -109,7 +118,7 @@ struct MeetingAudioPlaybackTests {
             await playback.loadAudioFileDeferred(at: audioURL)
         }
 
-        await Task.yield()
+        await gate.waitUntilBlocked()
 
         #expect(nativePlayer.loadedURL == nil)
         #expect(nativePlayer.prepareToPlayCallCount == 0)
