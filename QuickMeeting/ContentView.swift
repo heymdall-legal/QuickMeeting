@@ -29,7 +29,13 @@ struct ContentView: View {
         } detail: {
             switch selection {
             case .home:
-                HomeView(appViewModel: appViewModel)
+                HomeView(
+                    appViewModel: appViewModel,
+                    autoRecordingViewModel: autoRecordingSettingsViewModel,
+                    meetings: meetings,
+                    onSelectMeeting: { id in selection = .meeting(id) },
+                    onOpenSettings: { isSettingsPresented = true }
+                )
             case .settings:
                 SettingsView(
                     calendarViewModel: calendarSettingsViewModel,
@@ -71,7 +77,13 @@ struct ContentView: View {
                         }
                     )
                 } else {
-                    HomeView(appViewModel: appViewModel)
+                    HomeView(
+                        appViewModel: appViewModel,
+                        autoRecordingViewModel: autoRecordingSettingsViewModel,
+                        meetings: meetings,
+                        onSelectMeeting: { id in selection = .meeting(id) },
+                        onOpenSettings: { isSettingsPresented = true }
+                    )
                 }
             }
         }

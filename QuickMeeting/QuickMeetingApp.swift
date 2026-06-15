@@ -37,6 +37,7 @@ struct QuickMeetingApp: App {
             let meetingStore = MeetingStore(modelContext: modelContainer.mainContext)
             let knownSpeakerStore = KnownSpeakerStore(modelContext: modelContainer.mainContext)
             let knownSpeakerEnrollmentService = KnownSpeakerEnrollmentService(store: knownSpeakerStore)
+            try? meetingStore.resetStuckRecordingMeetings(updatedAt: Date())
             try? meetingStore.resetStuckTranscribingMeetings(updatedAt: Date())
             let meetingFileStore = MeetingFileStore()
             let recordingService = DefaultRecordingService(
@@ -112,6 +113,7 @@ struct QuickMeetingApp: App {
                         menuBarController = MenuBarController(viewModel: appViewModel)
                     }
 
+                    await autoRecordingSettingsViewModel.load()
                     autoRecordingMonitor.start()
                 }
         }

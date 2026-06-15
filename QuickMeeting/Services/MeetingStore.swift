@@ -183,4 +183,20 @@ struct MeetingStore {
             try modelContext.save()
         }
     }
+
+    func resetStuckRecordingMeetings(updatedAt: Date) throws {
+        let allMeetings = try modelContext.fetch(FetchDescriptor<Meeting>())
+        var didChange = false
+        for meeting in allMeetings where (try? meeting.status) == .recording {
+            meeting.finishRecording(
+                endedAt: updatedAt,
+                duration: updatedAt.timeIntervalSince(meeting.startedAt),
+                updatedAt: updatedAt
+            )
+            didChange = true
+        }
+        if didChange {
+            try modelContext.save()
+        }
+    }
 }

@@ -42,6 +42,9 @@ struct MeetingDetailView: View {
     @State private var renameValue = ""
     @State private var toastText: String?
     @State private var toastTask: Task<Void, Never>?
+    #if canImport(AppKit)
+    @State private var hostWindow: NSWindow?
+    #endif
 
     var body: some View {
         ZStack {
@@ -72,6 +75,12 @@ struct MeetingDetailView: View {
         .onChange(of: meeting.id) { _, _ in
             resetMeetingTitleDraft()
             renameOpenSegmentID = nil
+            isMeetingTitleFocused = false
+            #if canImport(AppKit)
+            Task { @MainActor in
+                clearMeetingDetailFocus(in: hostWindow)
+            }
+            #endif
         }
         .onChange(of: meeting.title) { _, newValue in
             guard !isMeetingTitleFocused, !isCommittingMeetingTitle else { return }
@@ -94,6 +103,9 @@ struct MeetingDetailView: View {
         } message: {
             Text("Starting transcription again will overwrite the existing transcript for this meeting.")
         }
+        #if canImport(AppKit)
+        .background(WindowReader(window: $hostWindow).frame(width: 0, height: 0))
+        #endif
     }
 
     // MARK: Mode routing

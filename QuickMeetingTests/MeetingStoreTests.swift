@@ -401,6 +401,52 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func resetStuckRecordingMeetingsMarksMeetingsAsRecorded() throws {
+        let harness = try MeetingStoreHarness()
+        let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
+        let updatedAt = Date(timeIntervalSince1970: 1_234_568_000)
+        let resetAt = Date(timeIntervalSince1970: 1_234_568_999)
+        let folderURL = URL(fileURLWithPath: "/tmp/meeting-\(UUID().uuidString)")
+        let audioFileURL = folderURL.appendingPathComponent("audio.wav")
+
+        let meeting = try harness.store.createMeeting(
+            title: "Interrupted Recording",
+            startedAt: startedAt,
+            folderURL: folderURL,
+            audioFileURL: audioFileURL
+        )
+        meeting.setStatus(.recording, updatedAt: updatedAt)
+        try harness.store.modelContext.save()
+
+        try harness.store.resetStuckRecordingMeetings(updatedAt: resetAt)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .recorded)
+        #expect(reloaded.endedAt == resetAt)
+        #expect(reloaded.duration == resetAt.timeIntervalSince(startedAt))
+        #expect(reloaded.updatedAt == resetAt)
+    }
+
+    @Test
+    func resetStuckRecordingMeetingsDoesNotAffectFinishedMeetings() throws {
+        let harness = try MeetingStoreHarness()
+        let recorded = try harness.createRecordedMeeting()
+        let originalEndedAt = recorded.endedAt
+        let originalDuration = recorded.duration
+        let originalUpdatedAt = recorded.updatedAt
+
+        try harness.store.resetStuckRecordingMeetings(
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_999)
+        )
+
+        let reloaded = try harness.reloadMeeting(id: recorded.id)
+        #expect(try reloaded.status == .recorded)
+        #expect(reloaded.endedAt == originalEndedAt)
+        #expect(reloaded.duration == originalDuration)
+        #expect(reloaded.updatedAt == originalUpdatedAt)
+    }
+
+    @Test
     func renameMeetingRejectsEmptyTrimmedTitle() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()

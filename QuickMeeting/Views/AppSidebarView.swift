@@ -82,23 +82,75 @@ struct AppSidebarView: View {
     private var recordingsList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(groupedMeetings, id: \.title) { group in
-                    Text(group.title.uppercased())
-                        .font(.system(size: 11, weight: .bold))
-                        .tracking(0.9)
-                        .foregroundStyle(QMTheme.muted)
-                        .padding(.horizontal, 8)
-                        .padding(.top, 12)
-                        .padding(.bottom, 6)
+                if !meetings.isEmpty {
+                    homeRow
+                }
 
-                    ForEach(group.meetings) { meeting in
-                        recordingRow(meeting)
+                if meetings.isEmpty {
+                    emptyState
+                } else {
+                    ForEach(groupedMeetings, id: \.title) { group in
+                        Text(group.title.uppercased())
+                            .font(.system(size: 11, weight: .bold))
+                            .tracking(0.9)
+                            .foregroundStyle(QMTheme.muted)
+                            .padding(.horizontal, 8)
+                            .padding(.top, 12)
+                            .padding(.bottom, 6)
+
+                        ForEach(group.meetings) { meeting in
+                            recordingRow(meeting)
+                        }
                     }
                 }
             }
             .padding(.horizontal, 10)
             .padding(.bottom, 12)
         }
+    }
+
+    private var homeRow: some View {
+        let isSelected = selection == .home
+        return Button {
+            selection = .home
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "house")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(QMTheme.secondary)
+                    .frame(width: 8)
+                Text("Home")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(QMTheme.ink)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(isSelected ? QMTheme.selectedRow : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 5) {
+            Text("No recordings yet")
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(QMTheme.tertiary)
+            Text("Your meetings will appear here once you start recording.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(QMTheme.muted)
+                .multilineTextAlignment(.center)
+                .lineSpacing(2)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 44)
+        .frame(maxWidth: .infinity)
     }
 
     private func recordingRow(_ meeting: Meeting) -> some View {
