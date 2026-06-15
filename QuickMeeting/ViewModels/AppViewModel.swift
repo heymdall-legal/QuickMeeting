@@ -18,6 +18,9 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var autoRecordingDetectedAt: Date?
     @Published private(set) var deletionErrorMessage: String?
     @Published private(set) var transcriptionErrorMessage: String?
+    @Published private(set) var summaryErrorMessage: String?
+    @Published private(set) var summaryConfirmationMeetingID: UUID?
+    @Published private(set) var summarizingMeetingID: UUID?
     @Published private(set) var renameSpeakerErrorMessage: String?
     @Published private(set) var renameMeetingErrorMessage: String?
     @Published private(set) var upcomingCalendarEvent: UpcomingCalendarEvent?
@@ -27,6 +30,7 @@ final class AppViewModel: ObservableObject {
     private let meetingFileStore: MeetingFileStore
     private let recordingService: any RecordingService
     private let transcriptionService: any TranscriptionServicing
+    private let meetingSummaryService: any MeetingSummaryServicing
     private let meetingTranscriptStore: any MeetingTranscriptStoring
     private let knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)?
     private let recordingPermissions: any RecordingPermissions
@@ -36,6 +40,7 @@ final class AppViewModel: ObservableObject {
     private let meetingTitleFormatter: DateFormatter
     private var autoRecordingCoordinator: AutoRecordingCoordinator?
     private var recoverableRecordingMeetingID: UUID?
+    private var pendingSummaryReplacementMeetingID: UUID?
     private var cancellables = Set<AnyCancellable>()
 
     init(
@@ -43,6 +48,7 @@ final class AppViewModel: ObservableObject {
         meetingFileStore: MeetingFileStore,
         recordingService: any RecordingService,
         transcriptionService: (any TranscriptionServicing)? = nil,
+        meetingSummaryService: (any MeetingSummaryServicing)? = nil,
         transcriptionProgressCenter: TranscriptionProgressCenter? = nil,
         recordingPermissions: (any RecordingPermissions)? = nil,
         meetingTranscriptStore: (any MeetingTranscriptStoring)? = nil,
@@ -57,6 +63,7 @@ final class AppViewModel: ObservableObject {
         self.meetingFileStore = meetingFileStore
         self.recordingService = recordingService
         self.transcriptionService = transcriptionService ?? NoopTranscriptionService()
+        self.meetingSummaryService = meetingSummaryService ?? NoopMeetingSummaryService()
         self.recordingPermissions = recordingPermissions ?? NativeRecordingPermissions()
         self.meetingTranscriptStore = meetingTranscriptStore ?? MeetingTranscriptStore()
         self.knownSpeakerEnrollmentService = knownSpeakerEnrollmentService
@@ -278,6 +285,33 @@ final class AppViewModel: ObservableObject {
         transcriptionErrorMessage = nil
     }
 
+    func generateSummary(for meeting: Meeting) async {
+        summaryErrorMessage = nil
+
+        if meeting.summaryText != nil {
+            pendingSummaryReplacementMeetingID = meeting.id
+            summaryConfirmationMeetingID = meeting.id
+            return
+        }
+
+        await runSummaryGeneration(for: meeting.id)
+    }
+
+    func confirmSummaryReplacement() async {
+        guard let meetingID = pendingSummaryReplacementMeetingID else {
+            return
+        }
+
+        pendingSummaryReplacementMeetingID = nil
+        summaryConfirmationMeetingID = nil
+        await runSummaryGeneration(for: meetingID)
+    }
+
+    func cancelSummaryReplacement() {
+        pendingSummaryReplacementMeetingID = nil
+        summaryConfirmationMeetingID = nil
+    }
+
     func renameMeeting(_ meeting: Meeting, title: String) async throws {
         do {
             try meetingStore.renameMeeting(
@@ -398,6 +432,22 @@ final class AppViewModel: ObservableObject {
 
         try fileManager.removeItem(at: meetingFolderURL)
     }
+
+    private func runSummaryGeneration(for meetingID: UUID) async {
+        summarizingMeetingID = meetingID
+        defer { summarizingMeetingID = nil }
+
+        do {
+            let summary = try await meetingSummaryService.summarize(meetingID: meetingID)
+            try meetingStore.saveSummary(
+                meetingID: meetingID,
+                summary: summary,
+                updatedAt: dateProvider()
+            )
+        } catch {
+            summaryErrorMessage = error.localizedDescription
+        }
+    }
 }
 
 extension AppViewModel: AutoRecordingIntentSink {
@@ -432,3 +482,9 @@ extension AppViewModel: AutoRecordingIntentSink {
 }
 
 extension AppViewModel: AutoRecordingPresenceUpdating {}
+
+private struct NoopMeetingSummaryService: MeetingSummaryServicing {
+    func summarize(meetingID _: UUID) async throws -> String {
+        throw MeetingSummaryServiceError.settingsIncomplete
+    }
+}

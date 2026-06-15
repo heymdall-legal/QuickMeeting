@@ -6,6 +6,59 @@ import Testing
 @MainActor
 struct AppViewModelTests {
     @Test
+    func generateSummaryWithoutExistingSummarySavesResult() async throws {
+        let harness = try AppViewModelHarness()
+        let meeting = try harness.createCompletedMeeting(summaryText: nil)
+        await harness.summaryService.setSummaryResult(.success("Fresh summary"))
+
+        await harness.viewModel.generateSummary(for: meeting)
+
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.summaryText == "Fresh summary")
+        #expect(harness.viewModel.summaryConfirmationMeetingID == nil)
+        #expect(harness.viewModel.summaryErrorMessage == nil)
+    }
+
+    @Test
+    func generateSummaryWithExistingSummaryRequestsConfirmation() async throws {
+        let harness = try AppViewModelHarness()
+        let meeting = try harness.createCompletedMeeting(summaryText: "Existing summary")
+
+        await harness.viewModel.generateSummary(for: meeting)
+
+        #expect(harness.viewModel.summaryConfirmationMeetingID == meeting.id)
+        #expect(await harness.summaryService.invocationCount == 0)
+    }
+
+    @Test
+    func confirmSummaryReplacementOverwritesStoredSummary() async throws {
+        let harness = try AppViewModelHarness()
+        let meeting = try harness.createCompletedMeeting(summaryText: "Old summary")
+        await harness.summaryService.setSummaryResult(.success("New summary"))
+
+        await harness.viewModel.generateSummary(for: meeting)
+        await harness.viewModel.confirmSummaryReplacement()
+
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.summaryText == "New summary")
+        #expect(harness.viewModel.summaryConfirmationMeetingID == nil)
+    }
+
+    @Test
+    func failedReplacementPreservesExistingSummary() async throws {
+        let harness = try AppViewModelHarness()
+        let meeting = try harness.createCompletedMeeting(summaryText: "Old summary")
+        await harness.summaryService.setSummaryResult(.failure(MeetingSummaryServiceError.responseInvalid))
+
+        await harness.viewModel.generateSummary(for: meeting)
+        await harness.viewModel.confirmSummaryReplacement()
+
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.summaryText == "Old summary")
+        #expect(harness.viewModel.summaryErrorMessage == MeetingSummaryServiceError.responseInvalid.localizedDescription)
+    }
+
+    @Test
     func renameSpeakerPersistsMeetingRenameEvenWhenEnrollmentFails() async throws {
         let harness = try AppViewModelHarness(enrollmentResult: .failure(TestError.failed))
         let meeting = try harness.createMeetingWithTranscript(
@@ -42,10 +95,11 @@ private struct AppViewModelHarness {
     let meetingStore: MeetingStore
     let meetingTranscriptStore: MeetingTranscriptStore
     let enrollmentService: StubKnownSpeakerEnrollmentService
+    let summaryService: StubMeetingSummaryService
     let viewModel: AppViewModel
     let meetingFileStore: MeetingFileStore
 
-    init(enrollmentResult: Result<Void, Error>) throws {
+    init(enrollmentResult: Result<Void, Error> = .success(())) throws {
         let schema = Schema([
             Meeting.self,
             PersistedTranscriptSpeaker.self,
@@ -59,6 +113,7 @@ private struct AppViewModelHarness {
         meetingStore = MeetingStore(modelContext: context)
         meetingTranscriptStore = MeetingTranscriptStore(meetingStore: meetingStore)
         enrollmentService = StubKnownSpeakerEnrollmentService(result: enrollmentResult)
+        summaryService = StubMeetingSummaryService()
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
@@ -67,6 +122,7 @@ private struct AppViewModelHarness {
             meetingStore: meetingStore,
             meetingFileStore: meetingFileStore,
             recordingService: StubRecordingService(),
+            meetingSummaryService: summaryService,
             meetingTranscriptStore: meetingTranscriptStore,
             knownSpeakerEnrollmentService: enrollmentService,
             calendarIntegration: NoopCalendarIntegration()
@@ -93,6 +149,24 @@ private struct AppViewModelHarness {
         )
         return try meetingStore.fetchMeeting(id: meeting.id)
     }
+
+    func createCompletedMeeting(summaryText: String?) throws -> Meeting {
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Alice")],
+            segments: [TranscriptSegment(text: "Wrapped up launch prep.", speakerID: "speaker-1")]
+        )
+        let meeting = try createMeetingWithTranscript(transcript)
+
+        if let summaryText {
+            try meetingStore.saveSummary(
+                meetingID: meeting.id,
+                summary: summaryText,
+                updatedAt: Date(timeIntervalSince1970: 1_234_568_250)
+            )
+        }
+
+        return try meetingStore.fetchMeeting(id: meeting.id)
+    }
 }
 
 private actor StubKnownSpeakerEnrollmentService: KnownSpeakerEnrolling {
@@ -112,6 +186,20 @@ private actor StubKnownSpeakerEnrollmentService: KnownSpeakerEnrolling {
     func enroll(displayName: String, speaker: TranscriptSpeaker, meetingID: UUID) async throws {
         calls.append(Call(displayName: displayName, speaker: speaker, meetingID: meetingID))
         try result.get()
+    }
+}
+
+private actor StubMeetingSummaryService: MeetingSummaryServicing {
+    private(set) var invocationCount = 0
+    private var summaryResult: Result<String, Error> = .failure(MeetingSummaryServiceError.responseInvalid)
+
+    func setSummaryResult(_ result: Result<String, Error>) {
+        summaryResult = result
+    }
+
+    func summarize(meetingID _: UUID) async throws -> String {
+        invocationCount += 1
+        return try summaryResult.get()
     }
 }
 

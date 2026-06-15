@@ -1,5 +1,9 @@
 import Foundation
 
+protocol MeetingSummaryServicing {
+    func summarize(meetingID: UUID) async throws -> String
+}
+
 enum MeetingSummaryServiceError: LocalizedError, Equatable {
     case transcriptMissing
     case transcriptEmpty
@@ -45,19 +49,19 @@ struct URLSessionMeetingSummaryTransport: MeetingSummaryTransporting {
     }
 }
 
-struct MeetingSummaryService {
+struct MeetingSummaryService: MeetingSummaryServicing {
     private let meetingStore: MeetingStore
     private let settingsStore: any MeetingSummarySettingsStoring
     private let transport: any MeetingSummaryTransporting
 
     init(
         meetingStore: MeetingStore,
-        settingsStore: any MeetingSummarySettingsStoring = MeetingSummarySettingsStore(),
-        transport: any MeetingSummaryTransporting = URLSessionMeetingSummaryTransport()
+        settingsStore: (any MeetingSummarySettingsStoring)? = nil,
+        transport: (any MeetingSummaryTransporting)? = nil
     ) {
         self.meetingStore = meetingStore
-        self.settingsStore = settingsStore
-        self.transport = transport
+        self.settingsStore = settingsStore ?? MeetingSummarySettingsStore()
+        self.transport = transport ?? URLSessionMeetingSummaryTransport()
     }
 
     func summarize(meetingID: UUID) async throws -> String {

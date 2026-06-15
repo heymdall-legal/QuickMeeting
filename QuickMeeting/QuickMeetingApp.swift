@@ -58,6 +58,10 @@ struct QuickMeetingApp: App {
             let calendarIntegration = NativeCalendarIntegration(settingsStore: calendarSettingsStore)
             let autoRecordingSettingsStore = AutoRecordingSettingsStore()
             let meetingSummarySettingsStore = MeetingSummarySettingsStore()
+            let meetingSummaryService = MeetingSummaryService(
+                meetingStore: meetingStore,
+                settingsStore: meetingSummarySettingsStore
+            )
             let autoRecordingSettingsViewModel = AutoRecordingSettingsViewModel(
                 settingsStore: autoRecordingSettingsStore
             )
@@ -66,6 +70,7 @@ struct QuickMeetingApp: App {
                 meetingFileStore: meetingFileStore,
                 recordingService: recordingService,
                 transcriptionService: transcriptionService,
+                meetingSummaryService: meetingSummaryService,
                 transcriptionProgressCenter: transcriptionProgressCenter,
                 meetingTranscriptStore: meetingTranscriptStore,
                 knownSpeakerEnrollmentService: knownSpeakerEnrollmentService,
