@@ -9,6 +9,5 @@ import Foundation
 
 enum AppSidebarSelection: Hashable {
     case home
-    case settings
     case meeting(UUID)
 }

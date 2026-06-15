@@ -36,11 +36,6 @@ struct ContentView: View {
                     onSelectMeeting: { id in selection = .meeting(id) },
                     onOpenSettings: { isSettingsPresented = true }
                 )
-            case .settings:
-                SettingsView(
-                    calendarViewModel: calendarSettingsViewModel,
-                    autoRecordingViewModel: autoRecordingSettingsViewModel
-                )
             case .meeting(let meetingID):
                 if let selectedMeeting = meetings.first(where: { $0.id == meetingID }) {
                     MeetingDetailView(

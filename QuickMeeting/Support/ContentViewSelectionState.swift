@@ -22,7 +22,7 @@ func reconciledSidebarSelection(
         }
 
         return .home
-    case .home, .settings:
+    case .home:
         return currentSelection
     }
 }

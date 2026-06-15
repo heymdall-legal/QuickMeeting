@@ -139,12 +139,5 @@ struct QuickMeetingApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .modelContainer(sharedModelContainer)
-
-        Settings {
-            SettingsView(
-                calendarViewModel: calendarSettingsViewModel,
-                autoRecordingViewModel: autoRecordingSettingsViewModel
-            )
-        }
     }
 }
