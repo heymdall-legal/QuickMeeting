@@ -1,0 +1,229 @@
+#if canImport(AppKit)
+import AppKit
+#endif
+import SwiftUI
+
+enum SummaryPaneState {
+    case idle
+    case generating
+    case ready(String)
+    case failed(String)
+}
+
+struct MeetingSummaryPane: View {
+    let state: SummaryPaneState
+    let onGenerate: () -> Void
+
+    var body: some View {
+        switch state {
+        case .idle:
+            idleView
+        case .generating:
+            generatingView
+        case .ready(let text):
+            readyView(text: text)
+        case .failed(let message):
+            failedView(message: message)
+        }
+    }
+
+    // MARK: Idle
+
+    private var idleView: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 24))
+                .foregroundStyle(QMTheme.faint)
+                .frame(width: 56, height: 56)
+                .background(QMTheme.chip, in: Circle())
+                .padding(.bottom, 18)
+
+            Text("No summary yet")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(QMTheme.ink)
+                .padding(.bottom, 6)
+
+            Text("Generate an AI summary with key decisions, action items, and next steps.")
+                .font(.system(size: 13.5))
+                .foregroundStyle(QMTheme.tertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 340)
+                .padding(.bottom, 20)
+
+            Button(action: onGenerate) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 13, weight: .bold))
+                    Text("Generate Summary")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(QMTheme.sage, in: RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(30)
+    }
+
+    // MARK: Generating
+
+    private var generatingView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Generating summary…")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(QMTheme.ink)
+                .padding(.bottom, 4)
+            Text("This may take a moment.")
+                .font(.system(size: 13))
+                .foregroundStyle(QMTheme.tertiary)
+                .padding(.bottom, 18)
+
+            SummaryShimmerBar()
+                .frame(height: 5)
+                .padding(.bottom, 22)
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(skeletonWidths.enumerated()), id: \.offset) { _, width in
+                    SummarySkeletonLine(maxWidth: width)
+                }
+            }
+        }
+        .padding(.horizontal, 30)
+        .padding(.top, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private let skeletonWidths: [CGFloat?] = [nil, nil, 280, nil, nil, 220, nil, nil, 300, nil, 180]
+
+    // MARK: Ready
+
+    private func readyView(text: String) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer(minLength: 0)
+                Button { copySummary(text) } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(QMTheme.secondary)
+                        .frame(width: 32, height: 32)
+                        .background(QMTheme.card, in: Circle())
+                        .overlay(Circle().stroke(QMTheme.cardBorder, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Copy summary")
+            }
+            .padding(.horizontal, 30)
+            .padding(.top, 4)
+            .padding(.bottom, 8)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(text)
+                        .font(.system(size: 14.5))
+                        .lineSpacing(4)
+                        .foregroundStyle(QMTheme.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                    Color.clear.frame(height: 32)
+                }
+                .padding(.horizontal, 30)
+            }
+            .scrollIndicators(.never)
+        }
+    }
+
+    // MARK: Failed
+
+    private func failedView(message: String) -> some View {
+        VStack(spacing: 0) {
+            Image(systemName: "exclamationmark.circle")
+                .font(.system(size: 24))
+                .foregroundStyle(QMTheme.danger)
+                .frame(width: 56, height: 56)
+                .background(QMTheme.chip, in: Circle())
+                .padding(.bottom, 18)
+
+            Text("Summary failed")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(QMTheme.ink)
+                .padding(.bottom, 6)
+
+            Text(message)
+                .font(.system(size: 13.5))
+                .foregroundStyle(QMTheme.tertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 340)
+                .padding(.bottom, 20)
+
+            Button(action: onGenerate) {
+                Text("Try Again")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(QMTheme.sage)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(QMTheme.cardBorder, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(30)
+    }
+
+    // MARK: Helpers
+
+    private func copySummary(_ text: String) {
+        #if canImport(AppKit)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #endif
+    }
+}
+
+// MARK: - Private components
+
+private struct SummaryShimmerBar: View {
+    @State private var phase: CGFloat = -1
+
+    var body: some View {
+        GeometryReader { proxy in
+            Capsule().fill(QMTheme.searchField)
+                .overlay(
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [QMTheme.sage.opacity(0), QMTheme.sage, QMTheme.sage.opacity(0)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: proxy.size.width * 0.4)
+                        .offset(x: phase * proxy.size.width)
+                )
+                .clipShape(Capsule())
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: false)) {
+                        phase = 1.2
+                    }
+                }
+        }
+    }
+}
+
+private struct SummarySkeletonLine: View {
+    var maxWidth: CGFloat?
+    @State private var pulsing = false
+
+    var body: some View {
+        Capsule()
+            .fill(QMTheme.faint)
+            .frame(maxWidth: maxWidth ?? .infinity, alignment: .leading)
+            .frame(height: 13)
+            .opacity(pulsing ? 0.55 : 1)
+            .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulsing)
+            .onAppear { pulsing = true }
+    }
+}

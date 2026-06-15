@@ -68,6 +68,8 @@ struct MeetingDetailView: View {
     @FocusState private var isMeetingTitleFocused: Bool
     @State private var transcriptContent: MeetingTranscriptContent = .notAvailable
     @State private var transcriptSpeakers = [TranscriptSpeaker]()
+    @State private var activeTab: DetailTab = .transcript
+    @State private var summaryPaneState: SummaryPaneState = .idle
     /// The meeting whose transcript is currently reflected in `transcriptContent`.
     /// Until this matches the selected meeting, the detail shows a loading
     /// placeholder instead of the previously selected meeting's transcript.
@@ -121,6 +123,8 @@ struct MeetingDetailView: View {
             resetMeetingTitleDraft()
             renameOpenSegmentID = nil
             isMeetingTitleFocused = false
+            activeTab = .transcript
+            summaryPaneState = .idle
             #if canImport(AppKit)
             Task { @MainActor in
                 clearMeetingDetailFocus(in: hostWindow)
@@ -151,6 +155,45 @@ struct MeetingDetailView: View {
         #if canImport(AppKit)
         .background(WindowReader(window: $hostWindow).frame(width: 0, height: 0))
         #endif
+    }
+
+    // MARK: Tab routing
+
+    private enum DetailTab: CaseIterable {
+        case transcript, summary
+        var label: String {
+            switch self {
+            case .transcript: "Transcript"
+            case .summary: "Summary"
+            }
+        }
+    }
+
+    private var contentTabPicker: some View {
+        HStack(spacing: 2) {
+            ForEach(DetailTab.allCases, id: \.self) { tab in
+                Button { activeTab = tab } label: {
+                    Text(tab.label)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(activeTab == tab ? QMTheme.sage : QMTheme.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background {
+                            if activeTab == tab {
+                                Capsule()
+                                    .fill(QMTheme.card)
+                                    .shadow(color: Color(hex: "#28241e").opacity(0.08), radius: 4, y: 1)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(QMTheme.chip, in: Capsule())
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 30)
+        .padding(.bottom, 14)
     }
 
     // MARK: Mode routing
@@ -214,20 +257,29 @@ struct MeetingDetailView: View {
     private var transcribedView: some View {
         VStack(spacing: 0) {
             transcribedHeader
-            transcriptScroll
-        }
-        .overlay(alignment: .bottom) {
-            WaveformPlayerBar(
-                currentTime: playback.currentTime,
-                duration: playback.duration,
-                isPlaying: playback.state == .playing,
-                isAvailable: playback.isPlaybackAvailable,
-                waveformSamples: playback.waveformSamples,
-                onToggle: playback.togglePlayback,
-                onSeek: seek(toFraction:)
-            )
-            .padding(.horizontal, 30)
-            .padding(.bottom, 18)
+            contentTabPicker
+            if activeTab == .transcript {
+                transcriptScroll
+                    .overlay(alignment: .bottom) {
+                        WaveformPlayerBar(
+                            currentTime: playback.currentTime,
+                            duration: playback.duration,
+                            isPlaying: playback.state == .playing,
+                            isAvailable: playback.isPlaybackAvailable,
+                            waveformSamples: playback.waveformSamples,
+                            onToggle: playback.togglePlayback,
+                            onSeek: seek(toFraction:)
+                        )
+                        .padding(.horizontal, 30)
+                        .padding(.bottom, 18)
+                    }
+            } else {
+                MeetingSummaryPane(
+                    state: summaryPaneState,
+                    onGenerate: {}
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 
@@ -244,8 +296,10 @@ struct MeetingDetailView: View {
                 Spacer(minLength: 0)
 
                 HStack(spacing: 6) {
-                    iconButton(systemName: "doc.on.doc", tint: QMTheme.secondary, help: "Copy transcript", action: copyTranscriptExport)
-                    iconButton(systemName: "arrow.clockwise", tint: QMTheme.secondary, help: "Re-transcribe", action: handleTranscribeAction)
+                    if activeTab == .transcript {
+                        iconButton(systemName: "doc.on.doc", tint: QMTheme.secondary, help: "Copy transcript", action: copyTranscriptExport)
+                        iconButton(systemName: "arrow.clockwise", tint: QMTheme.secondary, help: "Re-transcribe", action: handleTranscribeAction)
+                    }
                     iconButton(systemName: "trash", tint: QMTheme.danger, help: "Delete") {
                         isShowingDeleteConfirmation = true
                     }

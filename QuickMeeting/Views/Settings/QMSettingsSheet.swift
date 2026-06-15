@@ -22,6 +22,12 @@ struct QMSettingsSheet: View {
     @State private var isCalendarDropdownOpen = false
     @State private var isAppImporterPresented = false
 
+    // AI Summarization — view-only state (not wired to settings store)
+    @State private var summBaseURL = ""
+    @State private var summModel = ""
+    @State private var summToken = ""
+    @State private var summTemplate = "Summarize the following meeting transcript from {date}.\n\nReturn:\n• A 2–3 sentence overview\n• Key decisions\n• Action items (owner — task)\n\nTranscript:\n{text}"
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -34,6 +40,8 @@ struct QMSettingsSheet: View {
                     calendarsSection
                     Divider().overlay(QMTheme.hairline).padding(.vertical, 22)
                     autoRecordingSection
+                    Divider().overlay(QMTheme.hairline).padding(.vertical, 22)
+                    aiSummarizationSection
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 22)
@@ -477,6 +485,113 @@ struct QMSettingsSheet: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: AI Summarization
+
+    private var aiSummarizationSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("AI Summarization")
+                .padding(.bottom, 4)
+            Text("Connect a language-model endpoint to turn transcripts into summaries.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(QMTheme.tertiary)
+                .padding(.bottom, 16)
+
+            summaryTextField(label: "API base URL", placeholder: "https://api.openai.com/v1", hint: "The chat-completions endpoint of your provider.", text: $summBaseURL)
+                .padding(.bottom, 18)
+
+            summaryTextField(label: "Model", placeholder: "gpt-4o-mini", hint: "The model identifier to request from your endpoint.", text: $summModel)
+                .padding(.bottom, 18)
+
+            summarySecureField(label: "API token", placeholder: "sk-…", hint: "Stored on this Mac only — never leaves your device except to call your endpoint.", text: $summToken)
+                .padding(.bottom, 18)
+
+            summaryTemplateField
+                .padding(.bottom, 8)
+        }
+    }
+
+    private func summaryTextField(label: String, placeholder: String, hint: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.system(size: 14.5, weight: .semibold))
+                .foregroundStyle(QMTheme.ink)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5, design: .monospaced))
+                .foregroundStyle(QMTheme.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
+            Text(hint)
+                .font(.system(size: 12))
+                .foregroundStyle(QMTheme.muted)
+        }
+    }
+
+    private func summarySecureField(label: String, placeholder: String, hint: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.system(size: 14.5, weight: .semibold))
+                .foregroundStyle(QMTheme.ink)
+            SecureField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5, design: .monospaced))
+                .foregroundStyle(QMTheme.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
+            Text(hint)
+                .font(.system(size: 12))
+                .foregroundStyle(QMTheme.muted)
+        }
+    }
+
+    private var summaryTemplateField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Summarization template")
+                .font(.system(size: 14.5, weight: .semibold))
+                .foregroundStyle(QMTheme.ink)
+            Text("The prompt sent to the model. Insert these placeholders anywhere and they'll be filled in for each meeting:")
+                .font(.system(size: 12.5))
+                .foregroundStyle(QMTheme.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                summaryPlaceholderChip("{text}", description: "full transcript")
+                summaryPlaceholderChip("{date}", description: "meeting date")
+            }
+            .padding(.top, 5)
+            TextEditor(text: $summTemplate)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(QMTheme.ink)
+                .frame(minHeight: 132)
+                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(QMTheme.fieldBorder, lineWidth: 1))
+            Text("Tip: ask for a specific structure — action items, decisions, key points — to get consistent summaries.")
+                .font(.system(size: 12))
+                .foregroundStyle(QMTheme.muted)
+        }
+    }
+
+    private func summaryPlaceholderChip(_ code: String, description: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Text(code)
+                .font(.system(size: 12.5, design: .monospaced).weight(.bold))
+                .foregroundStyle(QMTheme.sage)
+            Text(description)
+                .font(.system(size: 12))
+                .foregroundStyle(QMTheme.tertiary)
+        }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 10)
+        .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.cardBorder, lineWidth: 1))
     }
 
     // MARK: Helpers
