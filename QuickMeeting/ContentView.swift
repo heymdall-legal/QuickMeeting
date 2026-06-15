@@ -13,6 +13,7 @@ struct ContentView: View {
     @ObservedObject var calendarSettingsViewModel: CalendarSettingsViewModel
     @ObservedObject var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
     @ObservedObject var transcriptionSettingsViewModel: TranscriptionSettingsViewModel
+    @ObservedObject var meetingSummarySettingsViewModel: MeetingSummarySettingsViewModel
     @Query(sort: \Meeting.startedAt, order: .reverse) private var meetings: [Meeting]
     @State private var selection = defaultSidebarSelection()
     @State private var isSettingsPresented = false
@@ -102,6 +103,7 @@ struct ContentView: View {
                 calendarViewModel: calendarSettingsViewModel,
                 autoRecordingViewModel: autoRecordingSettingsViewModel,
                 transcriptionViewModel: transcriptionSettingsViewModel,
+                meetingSummaryViewModel: meetingSummarySettingsViewModel,
                 onClose: { isSettingsPresented = false }
             )
         }
@@ -218,7 +220,10 @@ extension Notification.Name {
         appViewModel: previewAppViewModel(container: container),
         calendarSettingsViewModel: previewCalendarSettingsViewModel(),
         autoRecordingSettingsViewModel: previewAutoRecordingSettingsViewModel(),
-        transcriptionSettingsViewModel: TranscriptionSettingsViewModel(settingsStore: TranscriptionSettingsStore())
+        transcriptionSettingsViewModel: TranscriptionSettingsViewModel(settingsStore: TranscriptionSettingsStore()),
+        meetingSummarySettingsViewModel: MeetingSummarySettingsViewModel(
+            settingsStore: MeetingSummarySettingsStore()
+        )
     )
         .modelContainer(container)
 }

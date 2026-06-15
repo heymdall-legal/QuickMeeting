@@ -17,16 +17,11 @@ struct QMSettingsSheet: View {
     @ObservedObject var calendarViewModel: CalendarSettingsViewModel
     @ObservedObject var autoRecordingViewModel: AutoRecordingSettingsViewModel
     @ObservedObject var transcriptionViewModel: TranscriptionSettingsViewModel
+    @ObservedObject var meetingSummaryViewModel: MeetingSummarySettingsViewModel
     let onClose: () -> Void
 
     @State private var isCalendarDropdownOpen = false
     @State private var isAppImporterPresented = false
-
-    // AI Summarization — view-only state (not wired to settings store)
-    @State private var summBaseURL = ""
-    @State private var summModel = ""
-    @State private var summToken = ""
-    @State private var summTemplate = "Summarize the following meeting transcript from {date}.\n\nReturn:\n• A 2–3 sentence overview\n• Key decisions\n• Action items (owner — task)\n\nTranscript:\n{text}"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -498,13 +493,16 @@ struct QMSettingsSheet: View {
                 .foregroundStyle(QMTheme.tertiary)
                 .padding(.bottom, 16)
 
-            summaryTextField(label: "API base URL", placeholder: "https://api.openai.com/v1", hint: "The chat-completions endpoint of your provider.", text: $summBaseURL)
+            summaryTextField(label: "API base URL", placeholder: "https://api.openai.com/v1", hint: "The chat-completions endpoint of your provider.", text: $meetingSummaryViewModel.baseURL)
+                .onChange(of: meetingSummaryViewModel.baseURL) { _, _ in meetingSummaryViewModel.save() }
                 .padding(.bottom, 18)
 
-            summaryTextField(label: "Model", placeholder: "gpt-4o-mini", hint: "The model identifier to request from your endpoint.", text: $summModel)
+            summaryTextField(label: "Model", placeholder: "gpt-4o-mini", hint: "The model identifier to request from your endpoint.", text: $meetingSummaryViewModel.modelName)
+                .onChange(of: meetingSummaryViewModel.modelName) { _, _ in meetingSummaryViewModel.save() }
                 .padding(.bottom, 18)
 
-            summarySecureField(label: "API token", placeholder: "sk-…", hint: "Stored on this Mac only — never leaves your device except to call your endpoint.", text: $summToken)
+            summarySecureField(label: "API token", placeholder: "sk-…", hint: "Stored on this Mac only — never leaves your device except to call your endpoint.", text: $meetingSummaryViewModel.authToken)
+                .onChange(of: meetingSummaryViewModel.authToken) { _, _ in meetingSummaryViewModel.save() }
                 .padding(.bottom, 18)
 
             summaryTemplateField
@@ -564,7 +562,8 @@ struct QMSettingsSheet: View {
                 summaryPlaceholderChip("{date}", description: "meeting date")
             }
             .padding(.top, 5)
-            TextEditor(text: $summTemplate)
+            TextEditor(text: $meetingSummaryViewModel.promptTemplate)
+                .onChange(of: meetingSummaryViewModel.promptTemplate) { _, _ in meetingSummaryViewModel.save() }
                 .font(.system(size: 13, design: .monospaced))
                 .foregroundStyle(QMTheme.ink)
                 .frame(minHeight: 132)

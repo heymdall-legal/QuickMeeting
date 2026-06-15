@@ -16,6 +16,7 @@ struct QuickMeetingApp: App {
     @StateObject private var calendarSettingsViewModel: CalendarSettingsViewModel
     @StateObject private var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
     @StateObject private var transcriptionSettingsViewModel: TranscriptionSettingsViewModel
+    @StateObject private var meetingSummarySettingsViewModel: MeetingSummarySettingsViewModel
     @State private var menuBarController: MenuBarController?
 
     init() {
@@ -56,6 +57,7 @@ struct QuickMeetingApp: App {
             let calendarSettingsStore = CalendarSettingsStore()
             let calendarIntegration = NativeCalendarIntegration(settingsStore: calendarSettingsStore)
             let autoRecordingSettingsStore = AutoRecordingSettingsStore()
+            let meetingSummarySettingsStore = MeetingSummarySettingsStore()
             let autoRecordingSettingsViewModel = AutoRecordingSettingsViewModel(
                 settingsStore: autoRecordingSettingsStore
             )
@@ -90,6 +92,11 @@ struct QuickMeetingApp: App {
             _transcriptionSettingsViewModel = StateObject(
                 wrappedValue: TranscriptionSettingsViewModel(settingsStore: transcriptionSettingsStore)
             )
+            _meetingSummarySettingsViewModel = StateObject(
+                wrappedValue: MeetingSummarySettingsViewModel(
+                    settingsStore: meetingSummarySettingsStore
+                )
+            )
             autoRecordingMonitor = MeetingAppMonitor(
                 settingsStore: autoRecordingSettingsStore,
                 activitySource: NativeMeetingAppActivitySource(),
@@ -108,7 +115,8 @@ struct QuickMeetingApp: App {
                 appViewModel: appViewModel,
                 calendarSettingsViewModel: calendarSettingsViewModel,
                 autoRecordingSettingsViewModel: autoRecordingSettingsViewModel,
-                transcriptionSettingsViewModel: transcriptionSettingsViewModel
+                transcriptionSettingsViewModel: transcriptionSettingsViewModel,
+                meetingSummarySettingsViewModel: meetingSummarySettingsViewModel
             )
                 .task {
                     if menuBarController == nil {
