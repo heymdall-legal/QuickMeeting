@@ -2,32 +2,29 @@
 
 ## Goal
 
-Add internal summarization logic that can generate a meeting summary from an existing transcript by calling an OpenAI-compatible `chat/completions` API.
-
-This iteration does not add any UI. It builds the service, settings persistence, prompt rendering, and tests that later UI can depend on.
+Connect the existing meeting summary UI and summarization service so users can generate summaries from recorded transcripts, configure the LLM settings from the Settings sheet, and persist generated summaries on each meeting.
 
 ## Scope
 
 In scope:
 
-- Persist summarization settings needed by the future settings UI
+- Wire the existing summarization settings UI to persisted settings
 - Validate that a meeting has transcript content before summarization starts
 - Render a prompt template with `{text}` and `{date}` placeholders
 - Call an OpenAI-compatible API with a configured base URL, auth token, and model name
-- Return the generated summary text to the caller
+- Persist generated summaries on meetings
+- Show stored summaries in the meeting detail UI
+- Require confirmation before replacing an existing stored summary
 - Cover the behavior with targeted tests
 
 Out of scope:
 
-- Any settings UI
-- Any meeting detail UI or action wiring
-- Persisting summaries back onto meetings
 - Streaming responses
 - Additional model parameters such as temperature, top-p, or max tokens
 
 ## User Settings
 
-Add a new `MeetingSummarySettingsStore` backed by `UserDefaults`.
+Use the existing `MeetingSummarySettingsStore` backed by `UserDefaults`.
 
 Persisted values:
 
@@ -38,9 +35,18 @@ Persisted values:
 
 Behavior:
 
-- Reads return the raw persisted strings for future UI binding.
+- Reads return the raw persisted strings for direct UI binding.
 - The service uses a validated read path that trims whitespace and treats empty values as missing.
 - Missing settings fail fast before any network request is built.
+
+Add a focused `MeetingSummarySettingsViewModel` that:
+
+- Loads current persisted values on initialization
+- Exposes bindable fields for the settings sheet
+- Saves edits back through `MeetingSummarySettingsStore`
+- Supplies the default prompt template when the stored value is missing
+
+`QMSettingsSheet` should stop using local `@State` for AI summarization settings and bind to the real view model instead.
 
 ## Prompt Rendering
 
@@ -67,7 +73,7 @@ To support this, extend `MeetingTranscriptExport` with a rendering mode or compa
 
 ## Service Architecture
 
-Add a new internal `MeetingSummaryService` with an async entry point:
+Keep `MeetingSummaryService` as the summary generation boundary with the existing async entry point:
 
 ```swift
 func summarize(meetingID: UUID) async throws -> String
@@ -80,7 +86,7 @@ Responsibilities:
 - Load and validate summarization settings
 - Render prompt template values
 - Build and send the OpenAI-compatible request
-- Parse the response and return summary text
+- Parse the response and return summary text to the caller
 
 Dependencies:
 
@@ -89,7 +95,66 @@ Dependencies:
 - A small injectable HTTP transport seam for testing
 - Date formatting and JSON encoding/decoding helpers kept private to the service module
 
-This keeps meeting lookup, settings, transcript rendering, and network transport separated so later UI can call one focused service without owning the low-level work.
+This keeps meeting lookup, settings, transcript rendering, and network transport separated so `AppViewModel` can coordinate persistence and UI behavior without owning low-level request construction.
+
+## Summary Persistence
+
+Extend `Meeting` to store the generated summary text directly on the meeting record.
+
+New persisted behavior:
+
+- Meetings may have zero or one stored summary
+- Saving a summary updates the meeting `updatedAt`
+- Starting or completing transcription clears any previously stored summary because the transcript content has changed
+
+Add `MeetingStore` APIs for:
+
+- Reading the stored summary through the existing meeting fetch path
+- Saving or replacing a summary for a meeting
+
+Persisting on `Meeting` keeps summary data aligned with the transcript and available immediately when the user reopens the app.
+
+## UI Wiring
+
+`MeetingSummaryPane` remains a presentational view, but its state must now come from real meeting data and view-model actions.
+
+Display rules:
+
+- If a meeting has no stored summary and generation is idle, show the empty state and `Generate Summary`
+- If generation is in flight, show the loading state
+- If a stored summary exists, show the summary content from the meeting record
+- If the latest generation attempt fails, show the error state with retry affordance
+
+Interaction rules:
+
+- Generate with no existing summary: start generation immediately
+- Generate with an existing summary: ask for confirmation before replacement
+- Confirm replacement: run summarization and overwrite the stored summary on success
+- Cancel replacement: leave the existing summary unchanged and visible
+
+The confirmation should be owned by the screen-level view model flow rather than by `MeetingSummaryPane`, so the pane stays reusable and stateless.
+
+## View-Model Flow
+
+`AppViewModel` should own summary generation, replacement confirmation, and surfaceable errors.
+
+Add state for:
+
+- The meeting currently being summarized, if any
+- Summary generation errors
+- A pending confirmation target when the user tries to regenerate a meeting that already has a stored summary
+
+Flow:
+
+1. User requests summary generation
+2. `AppViewModel` checks whether the meeting already has a stored summary
+3. If not, generation starts immediately
+4. If yes, `AppViewModel` exposes a confirmation state
+5. On confirmation, `AppViewModel` calls `MeetingSummaryService`
+6. On success, `AppViewModel` persists the returned text through `MeetingStore`
+7. On failure, `AppViewModel` leaves the old summary untouched and exposes the error
+
+This ensures accidental clicks cannot destroy an existing summary and that persistence only changes on successful regeneration.
 
 ## Request Contract
 
@@ -157,6 +222,12 @@ For non-2xx responses:
 - Include the HTTP status code
 - Include a short response body snippet when it can be decoded as text
 
+For replacement flow:
+
+- If confirmation is dismissed, treat it as a no-op, not an error
+- If regeneration fails after confirmation, preserve the existing stored summary
+- If saving the new summary fails, report the persistence error and preserve the previously stored summary in the UI until a successful reload shows otherwise
+
 ## Testing
 
 Follow targeted red-green coverage for the new behavior.
@@ -164,6 +235,7 @@ Follow targeted red-green coverage for the new behavior.
 Add tests for:
 
 - Settings store persistence and trimming-aware validation
+- Settings view-model load/save behavior
 - Transcript body rendering without title/date/duration headers
 - Prompt template replacement for `{text}` and `{date}`
 - Successful request construction:
@@ -178,6 +250,11 @@ Add tests for:
 - Failure on non-2xx API response
 - Failure on malformed or content-less API response
 - Success path returning the trimmed summary string
+- Meeting summary persistence and replacement in `MeetingStore`
+- Clearing stored summary when transcription restarts or completes
+- `AppViewModel` generation flow with no existing summary
+- `AppViewModel` confirmation flow when a summary already exists
+- `AppViewModel` failure path preserving the prior stored summary
 
 Use an injected fake transport so tests stay local and deterministic.
 
@@ -185,9 +262,15 @@ Use an injected fake transport so tests stay local and deterministic.
 
 Keep the first version intentionally narrow:
 
-- Do not persist generated summaries yet
-- Do not modify `Meeting` schema yet
 - Do not introduce retry logic yet
 - Do not add generic LLM abstractions beyond a small HTTP seam needed for testing
 
-This gives the next UI step a stable service contract without prematurely freezing broader AI architecture decisions.
+Recommended integration boundaries:
+
+- `MeetingSummaryService` generates text
+- `MeetingStore` owns summary persistence
+- `MeetingSummarySettingsViewModel` owns settings UI state
+- `AppViewModel` owns generation and replacement confirmation
+- `MeetingSummaryPane` stays presentation-only
+
+This preserves the current architecture style while connecting the feature end to end.
