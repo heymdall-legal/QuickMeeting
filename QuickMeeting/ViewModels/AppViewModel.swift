@@ -296,6 +296,10 @@ final class AppViewModel: ObservableObject {
         renameMeetingErrorMessage = nil
     }
 
+    func storeWaveform(meetingID: UUID, samples: [Double]) {
+        try? meetingStore.storeWaveform(meetingID: meetingID, samples: samples)
+    }
+
     func renameSpeaker(
         meetingID: UUID,
         speakerID: String,

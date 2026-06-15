@@ -24,6 +24,7 @@ struct MeetingDetailView: View {
     let onStop: () -> Void
     let onRenameMeeting: (String) async throws -> Void
     let onRenameSpeaker: (String, String) -> Void
+    let onStoreWaveform: ([Double]) -> Void
 
     @StateObject private var playback = MeetingAudioPlayback()
     @FocusState private var isMeetingTitleFocused: Bool
@@ -69,7 +70,13 @@ struct MeetingDetailView: View {
             loadedMeetingID = meeting.id
         }
         .task(id: meetingAudioReloadKey(for: meeting)) {
-            await playback.loadAudioFileDeferred(at: URL(fileURLWithPath: meeting.audioFilePath))
+            await playback.loadAudioFileDeferred(
+                at: URL(fileURLWithPath: meeting.audioFilePath),
+                existingSamples: meeting.waveformSamples,
+                onWaveformExtracted: { samples in
+                    onStoreWaveform(samples)
+                }
+            )
         }
         .onAppear(perform: resetMeetingTitleDraft)
         .onChange(of: meeting.id) { _, _ in
@@ -177,6 +184,7 @@ struct MeetingDetailView: View {
                 duration: playback.duration,
                 isPlaying: playback.state == .playing,
                 isAvailable: playback.isPlaybackAvailable,
+                waveformSamples: playback.waveformSamples,
                 onToggle: playback.togglePlayback,
                 onSeek: seek(toFraction:)
             )
@@ -206,31 +214,10 @@ struct MeetingDetailView: View {
                     .disabled(!canDelete)
                 }
             }
-
-            if !attendeeChips.isEmpty {
-                attendeeChipRow
-            }
         }
         .padding(.horizontal, 30)
         .padding(.top, 22)
         .padding(.bottom, 16)
-    }
-
-    private var attendeeChipRow: some View {
-        HFlow(spacing: 7, rowSpacing: 7) {
-            ForEach(attendeeChips, id: \.name) { chip in
-                HStack(spacing: 7) {
-                    Circle().fill(chip.color).frame(width: 8, height: 8)
-                    Text(chip.name)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(QMTheme.secondary)
-                }
-                .padding(.leading, 9)
-                .padding(.trailing, 12)
-                .padding(.vertical, 4)
-                .background(QMTheme.chip, in: Capsule())
-            }
-        }
     }
 
     private var transcriptScroll: some View {
@@ -400,6 +387,7 @@ struct MeetingDetailView: View {
                 duration: playback.duration,
                 isPlaying: playback.state == .playing,
                 isAvailable: playback.isPlaybackAvailable,
+                waveformSamples: playback.waveformSamples,
                 onToggle: playback.togglePlayback,
                 onSeek: seek(toFraction:)
             )

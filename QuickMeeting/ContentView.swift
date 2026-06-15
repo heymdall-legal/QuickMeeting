@@ -69,6 +69,12 @@ struct ContentView: View {
                                     displayName: displayName
                                 )
                             }
+                        },
+                        onStoreWaveform: { samples in
+                            appViewModel.storeWaveform(
+                                meetingID: selectedMeeting.id,
+                                samples: samples
+                            )
                         }
                     )
                 } else {

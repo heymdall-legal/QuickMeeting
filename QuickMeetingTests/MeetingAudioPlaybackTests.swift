@@ -101,7 +101,8 @@ struct MeetingAudioPlaybackTests {
             },
             deferredLoadHook: {
                 await gate.wait()
-            }
+            },
+            waveformExtractor: { _ in nil }
         )
 
         let loadingTask = Task {

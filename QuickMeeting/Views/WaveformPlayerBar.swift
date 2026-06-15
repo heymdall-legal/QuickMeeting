@@ -2,9 +2,6 @@
 //  WaveformPlayerBar.swift
 //  QuickMeeting
 //
-//  The sage waveform scrubber from QuickMeeting.dc.html — play/pause,
-//  click-to-seek, and the played portion tinted sage.
-//
 
 import SwiftUI
 
@@ -13,6 +10,7 @@ struct WaveformPlayerBar: View {
     let duration: TimeInterval
     let isPlaying: Bool
     let isAvailable: Bool
+    let waveformSamples: [Double]
     let onToggle: () -> Void
     /// Called with a 0...1 fraction of the timeline.
     let onSeek: (Double) -> Void
@@ -51,11 +49,14 @@ struct WaveformPlayerBar: View {
 
     private var waveform: some View {
         GeometryReader { proxy in
-            let barCount = QMWaveform.heights.count
+            let barStride: CGFloat = 5  // 3 px bar + 2 px gap
+            let displayCount = max(1, Int(proxy.size.width / barStride))
+            let heights = waveformDisplayHeights(from: waveformSamples, displayCount: displayCount)
             HStack(spacing: 2) {
-                ForEach(Array(QMWaveform.heights.enumerated()), id: \.offset) { index, height in
+                ForEach(Array(heights.enumerated()), id: \.offset) { index, height in
                     Capsule()
-                        .fill(Double(index) / Double(barCount) < fraction ? QMTheme.sage : QMTheme.recordedDot)
+                        .fill(Double(index) / Double(displayCount) < fraction
+                              ? QMTheme.sage : QMTheme.recordedDot)
                         .frame(width: 3, height: height)
                 }
             }
@@ -69,7 +70,7 @@ struct WaveformPlayerBar: View {
                     }
             )
         }
-        .frame(height: 34)
+        .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34)
     }
 
     private func timeString(_ time: TimeInterval) -> String {
