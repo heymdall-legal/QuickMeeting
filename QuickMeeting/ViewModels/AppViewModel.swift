@@ -13,6 +13,9 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var recordingState: RecordingState = .idle
     @Published private(set) var autoRecordingStatusText: String?
     @Published private(set) var isAutoRecordingStartPending = false
+    @Published private(set) var recordingStartedAt: Date?
+    @Published private(set) var activeRecordingTitle: String?
+    @Published private(set) var autoRecordingDetectedAt: Date?
     @Published private(set) var deletionErrorMessage: String?
     @Published private(set) var transcriptionErrorMessage: String?
     @Published private(set) var renameSpeakerErrorMessage: String?
@@ -114,6 +117,8 @@ final class AppViewModel: ObservableObject {
             )
 
             recordingState = .recording(meetingID: meetingID)
+            recordingStartedAt = dateProvider()
+            activeRecordingTitle = meeting.title
         } catch {
             let startupFailureMessage = error.localizedDescription
             do {
@@ -148,6 +153,8 @@ final class AppViewModel: ObservableObject {
             )
             recoverableRecordingMeetingID = nil
             recordingState = .idle
+            recordingStartedAt = nil
+            activeRecordingTitle = nil
             autoRecordingCoordinator?.recordingDidStop()
         } catch {
             recoverableRecordingMeetingID = meetingID
@@ -162,13 +169,19 @@ final class AppViewModel: ObservableObject {
     func updateAutoRecordingPresence(_ presence: MeetingAppPresence) async {
         switch presence {
         case .candidateActive, .activeMeeting:
+            let wasAlreadyPending = isAutoRecordingStartPending
             isAutoRecordingStartPending = !canStopRecording
+            if isAutoRecordingStartPending && !wasAlreadyPending {
+                autoRecordingDetectedAt = Date()
+            }
             autoRecordingStatusText = "Detected meeting activity, waiting 10s"
         case .ending:
             isAutoRecordingStartPending = false
+            autoRecordingDetectedAt = nil
             autoRecordingStatusText = "Meeting activity lost, stopping soon"
         case .inactive:
             isAutoRecordingStartPending = false
+            autoRecordingDetectedAt = nil
             autoRecordingStatusText = nil
         }
 

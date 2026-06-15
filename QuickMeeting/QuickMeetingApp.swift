@@ -100,8 +100,10 @@ struct QuickMeetingApp: App {
         }
     }
 
+    @Environment(\.openWindow) private var openWindow
+
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             ContentView(
                 appViewModel: appViewModel,
                 calendarSettingsViewModel: calendarSettingsViewModel,
@@ -110,7 +112,16 @@ struct QuickMeetingApp: App {
             )
                 .task {
                     if menuBarController == nil {
-                        menuBarController = MenuBarController(viewModel: appViewModel)
+                        let openWindowAction = openWindow
+                        menuBarController = MenuBarController(
+                            viewModel: appViewModel,
+                            autoRecordingViewModel: autoRecordingSettingsViewModel,
+                            modelContainer: sharedModelContainer,
+                            onOpenMainWindow: {
+                                openWindowAction(id: "main")
+                                NSApp.activate(ignoringOtherApps: true)
+                            }
+                        )
                     }
 
                     await autoRecordingSettingsViewModel.load()
