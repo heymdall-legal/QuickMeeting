@@ -87,6 +87,9 @@ struct ContentView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .qmOpenSettings)) { _ in
+            isSettingsPresented = true
+        }
         .onAppear {
             syncSelection()
         }
@@ -201,6 +204,10 @@ struct ContentView: View {
             }
         )
     }
+}
+
+extension Notification.Name {
+    static let qmOpenSettings = Notification.Name("QuickMeeting.openSettings")
 }
 
 #Preview {

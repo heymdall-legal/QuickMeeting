@@ -468,12 +468,8 @@ struct MenuBarView: View {
     }
 
     private func openSettings() {
-        if #available(macOS 13, *) {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        } else {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        }
-        NSApp.activate(ignoringOtherApps: true)
+        onOpenMainWindow()
+        NotificationCenter.default.post(name: .qmOpenSettings, object: nil)
     }
 
     private func relativeTime(from date: Date) -> String {

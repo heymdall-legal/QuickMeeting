@@ -118,8 +118,17 @@ struct QuickMeetingApp: App {
                             autoRecordingViewModel: autoRecordingSettingsViewModel,
                             modelContainer: sharedModelContainer,
                             onOpenMainWindow: {
-                                openWindowAction(id: "main")
                                 NSApp.activate(ignoringOtherApps: true)
+                                let mainWindow = NSApp.windows.first { window in
+                                    guard !(window is NSPanel), window.canBecomeMain else { return false }
+                                    let title = window.title.lowercased()
+                                    return title != "settings" && title != "preferences"
+                                }
+                                if let mainWindow {
+                                    mainWindow.makeKeyAndOrderFront(nil)
+                                } else {
+                                    openWindowAction(id: "main")
+                                }
                             }
                         )
                     }
