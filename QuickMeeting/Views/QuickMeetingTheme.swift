@@ -96,6 +96,13 @@ enum QMSpeakerPalette {
         ("#7d8a52", "#f1f3e8"),
         ("#a8694e", "#f5ece6"),
         ("#6b8a86", "#eaf1f0"),
+        ("#9a7a45", "#f4efe5"),
+        ("#5f8291", "#ebf1f3"),
+        ("#80698d", "#f1edf3"),
+        ("#9b665e", "#f4ecea"),
+        ("#6f8059", "#eef1e9"),
+        ("#66749a", "#edf0f5"),
+        ("#a26f78", "#f5edef"),
     ]
 
     private static let unknown = QMSpeakerStyle(color: Color(hex: "#b3ab9e"), tint: Color(hex: "#f2efe9"))
