@@ -31,6 +31,7 @@ final class AppViewModel: ObservableObject {
     private let recordingService: any RecordingService
     private let transcriptionService: any TranscriptionServicing
     private let meetingSummaryService: any MeetingSummaryServicing
+    private let meetingSummarySettingsStore: any MeetingSummarySettingsStoring
     private let meetingTranscriptStore: any MeetingTranscriptStoring
     private let knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)?
     private let recordingPermissions: any RecordingPermissions
@@ -49,6 +50,7 @@ final class AppViewModel: ObservableObject {
         recordingService: any RecordingService,
         transcriptionService: (any TranscriptionServicing)? = nil,
         meetingSummaryService: (any MeetingSummaryServicing)? = nil,
+        meetingSummarySettingsStore: (any MeetingSummarySettingsStoring)? = nil,
         transcriptionProgressCenter: TranscriptionProgressCenter? = nil,
         recordingPermissions: (any RecordingPermissions)? = nil,
         meetingTranscriptStore: (any MeetingTranscriptStoring)? = nil,
@@ -64,6 +66,7 @@ final class AppViewModel: ObservableObject {
         self.recordingService = recordingService
         self.transcriptionService = transcriptionService ?? NoopTranscriptionService()
         self.meetingSummaryService = meetingSummaryService ?? NoopMeetingSummaryService()
+        self.meetingSummarySettingsStore = meetingSummarySettingsStore ?? MeetingSummarySettingsStore()
         self.recordingPermissions = recordingPermissions ?? NativeRecordingPermissions()
         self.meetingTranscriptStore = meetingTranscriptStore ?? MeetingTranscriptStore()
         self.knownSpeakerEnrollmentService = knownSpeakerEnrollmentService
@@ -287,6 +290,11 @@ final class AppViewModel: ObservableObject {
 
     func generateSummary(for meeting: Meeting) async {
         summaryErrorMessage = nil
+
+        guard meetingSummarySettingsStore.validatedSettings() != nil else {
+            summaryErrorMessage = MeetingSummaryServiceError.settingsIncomplete.localizedDescription
+            return
+        }
 
         if meeting.summaryText != nil {
             pendingSummaryReplacementMeetingID = meeting.id

@@ -20,6 +20,19 @@ struct AppViewModelTests {
     }
 
     @Test
+    func generateSummaryWithoutConfiguredSettingsDoesNotInvokeService() async throws {
+        let harness = try AppViewModelHarness(summarySettings: nil)
+        let meeting = try harness.createCompletedMeeting(summaryText: nil)
+
+        await harness.viewModel.generateSummary(for: meeting)
+
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.summaryText == nil)
+        #expect(harness.viewModel.summaryErrorMessage == MeetingSummaryServiceError.settingsIncomplete.localizedDescription)
+        #expect(await harness.summaryService.invocationCount == 0)
+    }
+
+    @Test
     func generateSummaryWithExistingSummaryRequestsConfirmation() async throws {
         let harness = try AppViewModelHarness()
         let meeting = try harness.createCompletedMeeting(summaryText: "Existing summary")
@@ -96,10 +109,19 @@ private struct AppViewModelHarness {
     let meetingTranscriptStore: MeetingTranscriptStore
     let enrollmentService: StubKnownSpeakerEnrollmentService
     let summaryService: StubMeetingSummaryService
+    let summarySettingsStore: StubMeetingSummarySettingsStore
     let viewModel: AppViewModel
     let meetingFileStore: MeetingFileStore
 
-    init(enrollmentResult: Result<Void, Error> = .success(())) throws {
+    init(
+        enrollmentResult: Result<Void, Error> = .success(()),
+        summarySettings: ValidatedMeetingSummarySettings? = .init(
+            baseURL: "https://example.com",
+            authToken: "secret-token",
+            modelName: "gpt-4o-mini",
+            promptTemplate: "Summarize {text} on {date}"
+        )
+    ) throws {
         let schema = Schema([
             Meeting.self,
             PersistedTranscriptSpeaker.self,
@@ -114,6 +136,7 @@ private struct AppViewModelHarness {
         meetingTranscriptStore = MeetingTranscriptStore(meetingStore: meetingStore)
         enrollmentService = StubKnownSpeakerEnrollmentService(result: enrollmentResult)
         summaryService = StubMeetingSummaryService()
+        summarySettingsStore = StubMeetingSummarySettingsStore(settingsValue: summarySettings)
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
@@ -123,6 +146,7 @@ private struct AppViewModelHarness {
             meetingFileStore: meetingFileStore,
             recordingService: StubRecordingService(),
             meetingSummaryService: summaryService,
+            meetingSummarySettingsStore: summarySettingsStore,
             meetingTranscriptStore: meetingTranscriptStore,
             knownSpeakerEnrollmentService: enrollmentService,
             calendarIntegration: NoopCalendarIntegration()
@@ -201,6 +225,34 @@ private actor StubMeetingSummaryService: MeetingSummaryServicing {
         invocationCount += 1
         return try summaryResult.get()
     }
+}
+
+private struct StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring {
+    let settingsValue: ValidatedMeetingSummarySettings?
+
+    func settings() -> MeetingSummarySettings {
+        if let settingsValue {
+            return MeetingSummarySettings(
+                baseURL: settingsValue.baseURL,
+                authToken: settingsValue.authToken,
+                modelName: settingsValue.modelName,
+                promptTemplate: settingsValue.promptTemplate
+            )
+        }
+
+        return MeetingSummarySettings(
+            baseURL: nil,
+            authToken: nil,
+            modelName: nil,
+            promptTemplate: nil
+        )
+    }
+
+    func validatedSettings() -> ValidatedMeetingSummarySettings? {
+        settingsValue
+    }
+
+    func saveSettings(_: MeetingSummarySettings) {}
 }
 
 @MainActor

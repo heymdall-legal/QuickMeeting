@@ -375,7 +375,9 @@ struct MeetingDetailView: View {
     }
 
     private func segmentBubble(_ bubble: TranscriptBubble) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let metrics = MeetingBubbleShellMetrics.transcript
+
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
                 Button {
                     openRename(segmentID: bubble.id, currentName: bubble.speakerName)
@@ -416,14 +418,14 @@ struct MeetingDetailView: View {
                 .foregroundStyle(QMTheme.body)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 13)
-        .background(bubble.style.tint, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(QMTheme.sage, lineWidth: bubble.isActive ? 2 : 0)
+        .modifier(
+            MeetingBubbleShell(
+                metrics: metrics,
+                background: bubble.style.tint,
+                borderColor: QMTheme.sage,
+                borderWidth: bubble.isActive ? 2 : 0
+            )
         )
-        .contentShape(RoundedRectangle(cornerRadius: 16))
         .onTapGesture {
             if let start = bubble.startTime {
                 seek(to: start)

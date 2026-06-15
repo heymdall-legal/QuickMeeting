@@ -19,7 +19,7 @@ enum MeetingSummaryServiceError: LocalizedError, Equatable {
         case .transcriptEmpty:
             return "Transcript does not contain any usable text."
         case .settingsIncomplete:
-            return "Summary settings are incomplete."
+            return "Before generating a summary, open Settings and fill in the summary API base URL, API token, model, and prompt template."
         case .invalidBaseURL:
             return "Summary API base URL is invalid."
         case .requestFailed(let statusCode, let message):

@@ -71,6 +71,7 @@ struct QuickMeetingApp: App {
                 recordingService: recordingService,
                 transcriptionService: transcriptionService,
                 meetingSummaryService: meetingSummaryService,
+                meetingSummarySettingsStore: meetingSummarySettingsStore,
                 transcriptionProgressCenter: transcriptionProgressCenter,
                 meetingTranscriptStore: meetingTranscriptStore,
                 knownSpeakerEnrollmentService: knownSpeakerEnrollmentService,

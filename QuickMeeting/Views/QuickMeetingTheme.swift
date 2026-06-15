@@ -77,6 +77,37 @@ struct QMSpeakerStyle: Equatable {
     let tint: Color
 }
 
+struct MeetingBubbleShellMetrics: Equatable {
+    let cornerRadius: CGFloat
+    let horizontalPadding: CGFloat
+    let verticalPadding: CGFloat
+
+    static let transcript = MeetingBubbleShellMetrics(
+        cornerRadius: 16,
+        horizontalPadding: 18,
+        verticalPadding: 13
+    )
+}
+
+struct MeetingBubbleShell: ViewModifier {
+    let metrics: MeetingBubbleShellMetrics
+    let background: Color
+    let borderColor: Color
+    let borderWidth: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, metrics.horizontalPadding)
+            .padding(.vertical, metrics.verticalPadding)
+            .background(background, in: RoundedRectangle(cornerRadius: metrics.cornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: metrics.cornerRadius)
+                    .stroke(borderColor, lineWidth: borderWidth)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: metrics.cornerRadius))
+    }
+}
+
 enum QMSpeakerPalette {
     /// Named speakers from the design get hand-tuned pairs; everyone else is
     /// assigned deterministically from the same harmonious palette.
