@@ -134,4 +134,20 @@ enum QMWaveform {
             return CGFloat(min(30, 4 + Int((base * 26).rounded())))
         }
     }()
+
+    /// Resamples `heights` to `count` bars by averaging adjacent values.
+    /// Used as a loading placeholder when real waveform samples are not yet available.
+    static func resized(to count: Int) -> [CGFloat] {
+        guard count > 0 else { return [] }
+        let source = heights
+        guard count != source.count else { return source }
+        let ratio = Double(source.count) / Double(count)
+        return (0..<count).map { i in
+            let start = Int((Double(i) * ratio).rounded(.down))
+            let end   = min(Int((Double(i + 1) * ratio).rounded(.up)), source.count)
+            guard start < end else { return source[min(start, source.count - 1)] }
+            let slice = source[start..<end]
+            return slice.reduce(0, +) / CGFloat(slice.count)
+        }
+    }
 }

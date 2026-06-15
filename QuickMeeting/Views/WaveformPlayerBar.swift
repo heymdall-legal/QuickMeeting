@@ -77,3 +77,21 @@ struct WaveformPlayerBar: View {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
+
+/// Converts stored amplitude samples into `displayCount` bar heights
+/// in the 4...30 pt range used by `WaveformPlayerBar`.
+/// Returns the sine placeholder when `samples` is empty (not yet extracted).
+func waveformDisplayHeights(from samples: [Double], displayCount: Int) -> [CGFloat] {
+    guard !samples.isEmpty else {
+        return QMWaveform.resized(to: displayCount)
+    }
+    guard displayCount > 0 else { return [] }
+    let ratio = Double(samples.count) / Double(displayCount)
+    return (0..<displayCount).map { i in
+        let start = Int((Double(i) * ratio).rounded(.down))
+        let end   = min(Int((Double(i + 1) * ratio).rounded(.up)), samples.count)
+        let slice = samples[start..<end]
+        let avg   = slice.reduce(0, +) / Double(slice.count)
+        return CGFloat(4 + avg * 26)
+    }
+}

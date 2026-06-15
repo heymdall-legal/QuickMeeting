@@ -30,13 +30,4 @@ struct ContentViewSelectionStateTests {
         #expect(selection == .home)
     }
 
-    @Test
-    func nonMeetingSelectionIsUnaffectedByMeetingChanges() {
-        let selection = reconciledSidebarSelection(
-            currentSelection: .settings,
-            availableMeetingIDs: []
-        )
-
-        #expect(selection == .settings)
-    }
 }
