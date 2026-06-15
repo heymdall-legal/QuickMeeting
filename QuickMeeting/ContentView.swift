@@ -59,6 +59,19 @@ struct ContentView: View {
                                 await appViewModel.stopRecording()
                             }
                         },
+                        onGenerateSummary: {
+                            Task {
+                                await appViewModel.generateSummary(for: selectedMeeting)
+                            }
+                        },
+                        onConfirmSummaryReplacement: {
+                            Task {
+                                await appViewModel.confirmSummaryReplacement()
+                            }
+                        },
+                        onCancelSummaryReplacement: {
+                            appViewModel.cancelSummaryReplacement()
+                        },
                         onRenameMeeting: { title in
                             try await appViewModel.renameMeeting(selectedMeeting, title: title)
                         },
@@ -76,7 +89,10 @@ struct ContentView: View {
                                 meetingID: selectedMeeting.id,
                                 samples: samples
                             )
-                        }
+                        },
+                        isShowingSummaryReplacementConfirmation: appViewModel.summaryConfirmationMeetingID == selectedMeeting.id,
+                        isSummarizingMeeting: appViewModel.summarizingMeetingID == selectedMeeting.id,
+                        summaryErrorMessage: appViewModel.summaryErrorMessage
                     )
                 } else {
                     HomeView(

@@ -60,16 +60,21 @@ struct MeetingDetailView: View {
     let onTranscribe: () -> Void
     let onDelete: () -> Void
     let onStop: () -> Void
+    let onGenerateSummary: () -> Void
+    let onConfirmSummaryReplacement: () -> Void
+    let onCancelSummaryReplacement: () -> Void
     let onRenameMeeting: (String) async throws -> Void
     let onRenameSpeaker: (String, String) -> Void
     let onStoreWaveform: ([Double]) -> Void
+    let isShowingSummaryReplacementConfirmation: Bool
+    let isSummarizingMeeting: Bool
+    let summaryErrorMessage: String?
 
     @StateObject private var playback = MeetingAudioPlayback()
     @FocusState private var isMeetingTitleFocused: Bool
     @State private var transcriptContent: MeetingTranscriptContent = .notAvailable
     @State private var transcriptSpeakers = [TranscriptSpeaker]()
     @State private var activeTab: DetailTab = .transcript
-    @State private var summaryPaneState: SummaryPaneState = .idle
     /// The meeting whose transcript is currently reflected in `transcriptContent`.
     /// Until this matches the selected meeting, the detail shows a loading
     /// placeholder instead of the previously selected meeting's transcript.
@@ -124,7 +129,6 @@ struct MeetingDetailView: View {
             renameOpenSegmentID = nil
             isMeetingTitleFocused = false
             activeTab = .transcript
-            summaryPaneState = .idle
             #if canImport(AppKit)
             Task { @MainActor in
                 clearMeetingDetailFocus(in: hostWindow)
@@ -151,6 +155,12 @@ struct MeetingDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Starting transcription again will overwrite the existing transcript for this meeting.")
+        }
+        .alert("Replace Summary?", isPresented: summaryReplacementBinding) {
+            Button("Replace", role: .destructive, action: onConfirmSummaryReplacement)
+            Button("Cancel", role: .cancel, action: onCancelSummaryReplacement)
+        } message: {
+            Text("Generating a new summary will replace the summary currently stored for this meeting.")
         }
         #if canImport(AppKit)
         .background(WindowReader(window: $hostWindow).frame(width: 0, height: 0))
@@ -275,8 +285,9 @@ struct MeetingDetailView: View {
                     }
             } else {
                 MeetingSummaryPane(
-                    state: summaryPaneState,
-                    onGenerate: {}
+                    state: summaryViewState,
+                    actionTitle: summaryActionTitle,
+                    onGenerate: onGenerateSummary
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -337,6 +348,30 @@ struct MeetingDetailView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.never)
+    }
+
+    private var summaryActionTitle: String {
+        meeting.summaryText == nil ? "Generate Summary" : "Regenerate Summary"
+    }
+
+    private var summaryViewState: SummaryPaneState {
+        if isSummarizingMeeting {
+            return .generating
+        }
+        if let summaryErrorMessage {
+            return .failed(summaryErrorMessage)
+        }
+        if let summary = meeting.summaryText {
+            return .ready(summary)
+        }
+        return .idle
+    }
+
+    private var summaryReplacementBinding: Binding<Bool> {
+        Binding(
+            get: { isShowingSummaryReplacementConfirmation },
+            set: { if !$0 { onCancelSummaryReplacement() } }
+        )
     }
 
     private func segmentBubble(_ bubble: TranscriptBubble) -> some View {

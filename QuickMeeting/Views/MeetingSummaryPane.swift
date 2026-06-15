@@ -12,7 +12,12 @@ enum SummaryPaneState {
 
 struct MeetingSummaryPane: View {
     let state: SummaryPaneState
+    let actionTitle: String
     let onGenerate: () -> Void
+
+    private var readyToolbarButtonTitle: String {
+        actionTitle
+    }
 
     var body: some View {
         switch state {
@@ -54,7 +59,7 @@ struct MeetingSummaryPane: View {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles")
                         .font(.system(size: 13, weight: .bold))
-                    Text("Generate Summary")
+                    Text(actionTitle)
                         .font(.system(size: 14, weight: .semibold))
                 }
                 .foregroundStyle(.white)
@@ -104,6 +109,19 @@ struct MeetingSummaryPane: View {
         VStack(spacing: 0) {
             HStack {
                 Spacer(minLength: 0)
+                Button(action: onGenerate) {
+                    Text(readyToolbarButtonTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(QMTheme.sage)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(QMTheme.cardBorder, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
                 Button { copySummary(text) } label: {
                     Image(systemName: "doc.on.doc")
                         .font(.system(size: 14, weight: .medium))
@@ -159,7 +177,7 @@ struct MeetingSummaryPane: View {
                 .padding(.bottom, 20)
 
             Button(action: onGenerate) {
-                Text("Try Again")
+                Text(actionTitle)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(QMTheme.sage)
                     .padding(.horizontal, 20)

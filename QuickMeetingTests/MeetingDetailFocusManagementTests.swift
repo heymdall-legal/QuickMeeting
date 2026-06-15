@@ -6,6 +6,15 @@ import AppKit
 
 struct MeetingDetailFocusManagementTests {
     @Test @MainActor
+    func meetingSummaryPaneSupportsReadyStateWithActionTitle() {
+        _ = MeetingSummaryPane(
+            state: .ready("Stored summary"),
+            actionTitle: "Regenerate Summary",
+            onGenerate: {}
+        )
+    }
+
+    @Test @MainActor
     func clearingMeetingDetailFocusRemovesCurrentFieldEditorResponder() throws {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
