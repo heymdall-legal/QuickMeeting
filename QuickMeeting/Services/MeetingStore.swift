@@ -172,6 +172,12 @@ struct MeetingStore {
         try modelContext.save()
     }
 
+    func storeWaveform(meetingID: UUID, samples: [Double]) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.storeWaveform(samples, updatedAt: Date())
+        try modelContext.save()
+    }
+
     func resetStuckTranscribingMeetings(updatedAt: Date) throws {
         let allMeetings = try modelContext.fetch(FetchDescriptor<Meeting>())
         var didChange = false

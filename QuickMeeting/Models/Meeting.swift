@@ -28,6 +28,7 @@ final class Meeting {
     @Attribute(originalName: "attendeeNames") private var attendeeNamesStorage: [String]?
     private(set) var createdAt: Date
     private(set) var updatedAt: Date
+    private(set) var waveformSamples: [Double]?
 
     var status: MeetingStatus {
         get throws {
@@ -126,6 +127,11 @@ final class Meeting {
 
     func failTranscription(updatedAt: Date = Date()) {
         statusRawValue = MeetingStatus.failed.rawValue
+        touch(updatedAt: updatedAt)
+    }
+
+    func storeWaveform(_ samples: [Double], updatedAt: Date = Date()) {
+        waveformSamples = samples
         touch(updatedAt: updatedAt)
     }
 

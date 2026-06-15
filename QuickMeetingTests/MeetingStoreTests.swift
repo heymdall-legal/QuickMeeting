@@ -464,6 +464,38 @@ struct MeetingStoreTests {
         #expect(reloaded.title == "Design Review")
         #expect(reloaded.updatedAt == originalUpdatedAt)
     }
+
+    @Test
+    func newMeetingHasNilWaveformSamples() throws {
+        let harness = try MeetingStoreHarness()
+        let folderURL = URL(fileURLWithPath: "/tmp/meeting-wf-\(UUID().uuidString)")
+        let audioURL = folderURL.appendingPathComponent("audio.m4a")
+        let meeting = try harness.store.createMeeting(
+            title: "Waveform Test",
+            startedAt: Date(),
+            folderURL: folderURL,
+            audioFileURL: audioURL
+        )
+        #expect(meeting.waveformSamples == nil)
+    }
+
+    @Test
+    func storeWaveformPersistsSamplesAcrossContexts() throws {
+        let harness = try MeetingStoreHarness()
+        let folderURL = URL(fileURLWithPath: "/tmp/meeting-wf2-\(UUID().uuidString)")
+        let audioURL = folderURL.appendingPathComponent("audio.m4a")
+        let meeting = try harness.store.createMeeting(
+            title: "Waveform Persist",
+            startedAt: Date(),
+            folderURL: folderURL,
+            audioFileURL: audioURL
+        )
+        let samples = (0..<300).map { Double($0) / 299.0 }
+        try harness.store.storeWaveform(meetingID: meeting.id, samples: samples)
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.waveformSamples?.count == 300)
+        #expect(abs((reloaded.waveformSamples?.last ?? -1) - 1.0) < 0.001)
+    }
 }
 
 private struct MeetingStoreHarness {
