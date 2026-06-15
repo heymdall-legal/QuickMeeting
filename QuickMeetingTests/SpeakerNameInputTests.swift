@@ -43,6 +43,16 @@ struct SpeakerNameInputTests {
     }
 
     @Test
+    func renamePopoverSuggestionsFilterAttendeesCaseInsensitively() {
+        let suggestions = speakerRenameSuggestions(
+            attendeeNames: ["Masha", "Ilya", "Sasha"],
+            draft: "ASH"
+        )
+
+        #expect(suggestions == ["Masha", "Sasha"])
+    }
+
+    @Test
     func selectionStateReturnsFilteredSuggestionsInOriginalOrder() {
         let state = SpeakerNameInputState(
             attendeeNames: ["Masha", "Sasha", "Pasha"],

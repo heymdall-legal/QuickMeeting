@@ -12,6 +12,44 @@ import AppKit
 #endif
 import SwiftUI
 
+struct ResolvedTranscriptBubbleSpeakerIdentity: Equatable {
+    let id: String
+    let displayName: String
+}
+
+func resolvedTranscriptBubbleSpeakerIdentity(
+    segment: TranscriptSegment,
+    segmentIndex: Int,
+    transcriptSpeakers: [TranscriptSpeaker]
+) -> ResolvedTranscriptBubbleSpeakerIdentity {
+    if let speakerID = segment.speakerID {
+        if let speaker = transcriptSpeakers.first(where: { $0.id == speakerID }) {
+            return ResolvedTranscriptBubbleSpeakerIdentity(
+                id: speaker.id,
+                displayName: speaker.displayName
+            )
+        }
+
+        return ResolvedTranscriptBubbleSpeakerIdentity(
+            id: speakerID,
+            displayName: "Speaker \(segmentIndex + 1)"
+        )
+    }
+
+    if transcriptSpeakers.indices.contains(segmentIndex) {
+        let speaker = transcriptSpeakers[segmentIndex]
+        return ResolvedTranscriptBubbleSpeakerIdentity(
+            id: speaker.id,
+            displayName: speaker.displayName
+        )
+    }
+
+    return ResolvedTranscriptBubbleSpeakerIdentity(
+        id: "speaker-\(segmentIndex)",
+        displayName: "Speaker \(segmentIndex + 1)"
+    )
+}
+
 struct MeetingDetailView: View {
     let meeting: Meeting
     let transcriptionProgress: Double?
@@ -641,19 +679,23 @@ struct MeetingDetailView: View {
     }
 
     private var renameSuggestions: [Suggestion] {
-        meeting.attendeeNames
-            .filter { !QMSpeakerPalette.isUnnamed($0) }
+        speakerRenameSuggestions(
+            attendeeNames: meeting.attendeeNames,
+            draft: renameValue
+        )
             .map { Suggestion(name: $0, color: QMSpeakerPalette.style(for: $0).color) }
     }
 
     private var transcriptBubbles: [TranscriptBubble] {
         guard case .transcript(let display) = transcriptContent else { return [] }
-        let speakersByID = Dictionary(uniqueKeysWithValues: display.speakers.map { ($0.id, $0.displayName) })
         let now = playback.currentTime
 
         return display.segments.enumerated().map { index, segment in
-            let speakerID = segment.speakerID ?? "speaker-\(index)"
-            let name = segment.speakerID.flatMap { speakersByID[$0] } ?? "Speaker \(index + 1)"
+            let speakerIdentity = resolvedTranscriptBubbleSpeakerIdentity(
+                segment: segment,
+                segmentIndex: index,
+                transcriptSpeakers: display.speakers
+            )
             let nextStart = display.segments[safe: index + 1]?.startTime
             let isActive: Bool = {
                 guard now > 0, let start = segment.startTime else { return false }
@@ -663,13 +705,13 @@ struct MeetingDetailView: View {
 
             return TranscriptBubble(
                 id: segment.id,
-                speakerID: speakerID,
-                speakerName: name,
-                style: QMSpeakerPalette.style(for: name, key: speakerID),
+                speakerID: speakerIdentity.id,
+                speakerName: speakerIdentity.displayName,
+                style: QMSpeakerPalette.style(for: speakerIdentity.displayName, key: speakerIdentity.id),
                 timeLabel: segment.startTime.map(segmentTimestampText(for:)) ?? "",
                 startTime: segment.startTime,
                 text: segment.text,
-                isUnnamed: QMSpeakerPalette.isUnnamed(name),
+                isUnnamed: QMSpeakerPalette.isUnnamed(speakerIdentity.displayName),
                 isActive: isActive
             )
         }

@@ -21,6 +21,16 @@ func speakerAutocompleteSuggestions(
     }
 }
 
+func speakerRenameSuggestions(
+    attendeeNames: [String],
+    draft: String
+) -> [String] {
+    speakerAutocompleteSuggestions(
+        attendeeNames: attendeeNames.filter { !QMSpeakerPalette.isUnnamed($0) },
+        draft: draft
+    )
+}
+
 struct SpeakerNameInputState {
     var attendeeNames: [String]
     var draft: String
