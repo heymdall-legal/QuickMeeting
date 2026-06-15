@@ -284,9 +284,7 @@ struct AppSidebarView: View {
     }
 
     private var filteredMeetings: [Meeting] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return meetings }
-        return meetings.filter { $0.title.lowercased().contains(query) }
+        meetings.filter { meetingMatchesSearch($0, query: searchText) }
     }
 
     private var groupedMeetings: [MeetingGroup] {
