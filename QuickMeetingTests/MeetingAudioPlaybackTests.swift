@@ -307,4 +307,92 @@ struct MeetingAudioPlaybackTests {
         #expect(nativePlayer.currentTime == 84)
         #expect(playback.currentTime == 84)
     }
+
+    @Test
+    func existingSamplesAreUsedImmediatelyWithoutExtraction() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let audioURL = rootURL.appendingPathComponent("audio.wav")
+        fileManager.createFile(atPath: audioURL.path, contents: Data("stub".utf8))
+
+        var extractorCallCount = 0
+        let preloaded = [Double](repeating: 0.7, count: 300)
+        let playback = MeetingAudioPlayback(
+            fileManager: fileManager,
+            nativePlayerFactory: { _ in NativeAudioPlayerSpy() },
+            waveformExtractor: { _ in
+                extractorCallCount += 1
+                return nil
+            }
+        )
+
+        await playback.loadAudioFileDeferred(
+            at: audioURL,
+            existingSamples: preloaded,
+            onWaveformExtracted: { _ in }
+        )
+
+        #expect(playback.waveformSamples == preloaded)
+        #expect(extractorCallCount == 0)
+    }
+
+    @Test
+    func missingExistingSamplesTriggersExtractionAndCallsCallback() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let audioURL = rootURL.appendingPathComponent("audio.wav")
+        fileManager.createFile(atPath: audioURL.path, contents: Data("stub".utf8))
+
+        let extracted = [Double](repeating: 0.42, count: 300)
+        var callbackSamples: [Double]?
+
+        let playback = MeetingAudioPlayback(
+            fileManager: fileManager,
+            nativePlayerFactory: { _ in NativeAudioPlayerSpy() },
+            waveformExtractor: { _ in extracted }
+        )
+
+        await playback.loadAudioFileDeferred(
+            at: audioURL,
+            existingSamples: nil,
+            onWaveformExtracted: { samples in callbackSamples = samples }
+        )
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(playback.waveformSamples == extracted)
+        #expect(callbackSamples == extracted)
+    }
+
+    @Test
+    func failedExtractionLeavesWaveformSamplesEmpty() async throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let audioURL = rootURL.appendingPathComponent("audio.wav")
+        fileManager.createFile(atPath: audioURL.path, contents: Data("stub".utf8))
+
+        var callbackCalled = false
+        let playback = MeetingAudioPlayback(
+            fileManager: fileManager,
+            nativePlayerFactory: { _ in NativeAudioPlayerSpy() },
+            waveformExtractor: { _ in nil }
+        )
+
+        await playback.loadAudioFileDeferred(
+            at: audioURL,
+            existingSamples: nil,
+            onWaveformExtracted: { _ in callbackCalled = true }
+        )
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(playback.waveformSamples.isEmpty)
+        #expect(callbackCalled == false)
+    }
 }

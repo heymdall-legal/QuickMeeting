@@ -25,12 +25,15 @@ final class MeetingAudioPlayback: ObservableObject {
     @Published private(set) var state: MeetingAudioPlaybackState = .idle
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
+    @Published private(set) var waveformSamples: [Double] = []
 
     private let fileManager: FileManager
     private let nativePlayerFactory: @MainActor (URL) throws -> NativeAudioPlaying
     private let deferredLoadHook: @Sendable () async -> Void
+    private let waveformExtractor: @Sendable (URL) async -> [Double]?
     private var nativePlayer: NativeAudioPlaying?
     private var progressTimer: Timer?
+    private var currentAudioURL: URL?
 
     init(
         fileManager: FileManager = .default,
@@ -39,11 +42,15 @@ final class MeetingAudioPlayback: ObservableObject {
         },
         deferredLoadHook: @escaping @Sendable () async -> Void = {
             await Task.yield()
+        },
+        waveformExtractor: @escaping @Sendable (URL) async -> [Double]? = { url in
+            await WaveformExtractor().extract(from: url)
         }
     ) {
         self.fileManager = fileManager
         self.nativePlayerFactory = nativePlayerFactory
         self.deferredLoadHook = deferredLoadHook
+        self.waveformExtractor = waveformExtractor
     }
 
     var isPlaybackAvailable: Bool {
@@ -101,11 +108,15 @@ final class MeetingAudioPlayback: ObservableObject {
         state = .ready
     }
 
-    func loadAudioFileDeferred(at fileURL: URL) async {
+    func loadAudioFileDeferred(
+        at fileURL: URL,
+        existingSamples: [Double]? = nil,
+        onWaveformExtracted: @escaping @MainActor ([Double]) -> Void = { _ in }
+    ) async {
         await deferredLoadHook()
-        guard !Task.isCancelled else {
-            return
-        }
+        guard !Task.isCancelled else { return }
+
+        currentAudioURL = fileURL
 
         do {
             try loadAudioFile(at: fileURL)
@@ -114,6 +125,21 @@ final class MeetingAudioPlayback: ObservableObject {
             duration = 0
             currentTime = 0
             state = .failed(message: error.localizedDescription)
+        }
+
+        if let samples = existingSamples {
+            waveformSamples = samples
+            return
+        }
+
+        let capturedURL = fileURL
+        Task.detached { [weak self, waveformExtractor] in
+            guard let samples = await waveformExtractor(capturedURL) else { return }
+            await MainActor.run { [weak self] in
+                guard let self, self.currentAudioURL == capturedURL else { return }
+                self.waveformSamples = samples
+                onWaveformExtracted(samples)
+            }
         }
     }
 
