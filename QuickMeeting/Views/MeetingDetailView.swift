@@ -17,6 +17,111 @@ struct ResolvedTranscriptBubbleSpeakerIdentity: Equatable {
     let displayName: String
 }
 
+enum MeetingDetailTab: CaseIterable, Hashable {
+    case transcript, summary
+
+    var label: String {
+        switch self {
+        case .transcript: "Transcript"
+        case .summary: "Summary"
+        }
+    }
+}
+
+enum MeetingDetailHeaderActionID: Hashable {
+    case copyTranscript
+    case retranscribe
+    case copySummary
+    case regenerateSummary
+    case delete
+}
+
+struct MeetingDetailHeaderAction {
+    let id: MeetingDetailHeaderActionID
+    let systemName: String
+    let help: String
+    let tint: Color
+    let isEnabled: Bool
+}
+
+func meetingDetailHeaderActions(
+    activeTab: MeetingDetailTab,
+    summaryState: SummaryPaneState,
+    canDelete: Bool = true
+) -> [MeetingDetailHeaderAction] {
+    var actions = [MeetingDetailHeaderAction]()
+
+    switch activeTab {
+    case .transcript:
+        actions.append(
+            MeetingDetailHeaderAction(
+                id: .copyTranscript,
+                systemName: "doc.on.doc",
+                help: "Copy transcript",
+                tint: QMTheme.secondary,
+                isEnabled: true
+            )
+        )
+        actions.append(
+            MeetingDetailHeaderAction(
+                id: .retranscribe,
+                systemName: "arrow.clockwise",
+                help: "Re-transcribe",
+                tint: QMTheme.secondary,
+                isEnabled: true
+            )
+        )
+    case .summary:
+        if case .ready = summaryState {
+            actions.append(
+                MeetingDetailHeaderAction(
+                    id: .copySummary,
+                    systemName: "doc.on.doc",
+                    help: "Copy summary",
+                    tint: QMTheme.secondary,
+                    isEnabled: true
+                )
+            )
+        }
+
+        actions.append(
+            MeetingDetailHeaderAction(
+                id: .regenerateSummary,
+                systemName: "sparkles",
+                help: summaryActionHelpText(for: summaryState),
+                tint: QMTheme.secondary,
+                isEnabled: !matchesGeneratingSummaryState(summaryState)
+            )
+        )
+    }
+
+    actions.append(
+        MeetingDetailHeaderAction(
+            id: .delete,
+            systemName: "trash",
+            help: "Delete",
+            tint: QMTheme.danger,
+            isEnabled: canDelete
+        )
+    )
+
+    return actions
+}
+
+private func matchesGeneratingSummaryState(_ state: SummaryPaneState) -> Bool {
+    if case .generating = state {
+        return true
+    }
+    return false
+}
+
+private func summaryActionHelpText(for state: SummaryPaneState) -> String {
+    if case .ready = state {
+        return "Regenerate summary"
+    }
+    return "Generate summary"
+}
+
 func resolvedTranscriptBubbleSpeakerIdentity(
     segment: TranscriptSegment,
     segmentIndex: Int,
@@ -74,7 +179,7 @@ struct MeetingDetailView: View {
     @FocusState private var isMeetingTitleFocused: Bool
     @State private var transcriptContent: MeetingTranscriptContent = .notAvailable
     @State private var transcriptSpeakers = [TranscriptSpeaker]()
-    @State private var activeTab: DetailTab = .transcript
+    @State private var activeTab: MeetingDetailTab = .transcript
     /// The meeting whose transcript is currently reflected in `transcriptContent`.
     /// Until this matches the selected meeting, the detail shows a loading
     /// placeholder instead of the previously selected meeting's transcript.
@@ -169,19 +274,9 @@ struct MeetingDetailView: View {
 
     // MARK: Tab routing
 
-    private enum DetailTab: CaseIterable {
-        case transcript, summary
-        var label: String {
-            switch self {
-            case .transcript: "Transcript"
-            case .summary: "Summary"
-            }
-        }
-    }
-
     private var contentTabPicker: some View {
         HStack(spacing: 2) {
-            ForEach(DetailTab.allCases, id: \.self) { tab in
+            ForEach(MeetingDetailTab.allCases, id: \.self) { tab in
                 Button { activeTab = tab } label: {
                     Text(tab.label)
                         .font(.system(size: 13, weight: .semibold))
@@ -285,9 +380,7 @@ struct MeetingDetailView: View {
                     }
             } else {
                 MeetingSummaryPane(
-                    state: summaryViewState,
-                    actionTitle: summaryActionTitle,
-                    onGenerate: onGenerateSummary
+                    state: summaryViewState
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -307,14 +400,15 @@ struct MeetingDetailView: View {
                 Spacer(minLength: 0)
 
                 HStack(spacing: 6) {
-                    if activeTab == .transcript {
-                        iconButton(systemName: "doc.on.doc", tint: QMTheme.secondary, help: "Copy transcript", action: copyTranscriptExport)
-                        iconButton(systemName: "arrow.clockwise", tint: QMTheme.secondary, help: "Re-transcribe", action: handleTranscribeAction)
+                    ForEach(headerActions, id: \.id) { action in
+                        iconButton(
+                            systemName: action.systemName,
+                            tint: action.tint,
+                            help: action.help,
+                            isEnabled: action.isEnabled,
+                            action: { performHeaderAction(action.id) }
+                        )
                     }
-                    iconButton(systemName: "trash", tint: QMTheme.danger, help: "Delete") {
-                        isShowingDeleteConfirmation = true
-                    }
-                    .disabled(!canDelete)
                 }
             }
         }
@@ -350,10 +444,6 @@ struct MeetingDetailView: View {
         .scrollIndicators(.never)
     }
 
-    private var summaryActionTitle: String {
-        meeting.summaryText == nil ? "Generate Summary" : "Regenerate Summary"
-    }
-
     private var summaryViewState: SummaryPaneState {
         if isSummarizingMeeting {
             return .generating
@@ -365,6 +455,14 @@ struct MeetingDetailView: View {
             return .ready(summary)
         }
         return .idle
+    }
+
+    private var headerActions: [MeetingDetailHeaderAction] {
+        meetingDetailHeaderActions(
+            activeTab: activeTab,
+            summaryState: summaryViewState,
+            canDelete: canDelete
+        )
     }
 
     private var summaryReplacementBinding: Binding<Bool> {
@@ -719,7 +817,13 @@ struct MeetingDetailView: View {
             }
     }
 
-    private func iconButton(systemName: String, tint: Color, help: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(
+        systemName: String,
+        tint: Color,
+        help: String,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .medium))
@@ -729,6 +833,8 @@ struct MeetingDetailView: View {
                 .overlay(Circle().stroke(QMTheme.cardBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.45)
         .help(help)
     }
 
@@ -945,6 +1051,32 @@ struct MeetingDetailView: View {
         #endif
 
         showToast("Transcript copied to clipboard")
+    }
+
+    private func copySummary() {
+        guard let summary = meeting.summaryText else { return }
+
+        #if canImport(AppKit)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(summary, forType: .string)
+        #endif
+
+        showToast("Summary copied to clipboard")
+    }
+
+    private func performHeaderAction(_ actionID: MeetingDetailHeaderActionID) {
+        switch actionID {
+        case .copyTranscript:
+            copyTranscriptExport()
+        case .retranscribe:
+            handleTranscribeAction()
+        case .copySummary:
+            copySummary()
+        case .regenerateSummary:
+            onGenerateSummary()
+        case .delete:
+            isShowingDeleteConfirmation = true
+        }
     }
 
     private func showToast(_ message: String) {

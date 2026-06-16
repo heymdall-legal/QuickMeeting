@@ -5,12 +5,32 @@ import Testing
 import AppKit
 
 struct MeetingDetailFocusManagementTests {
+    @Test
+    func detailHeaderActionsShowTranscriptSpecificButtons() {
+        let actions = meetingDetailHeaderActions(
+            activeTab: .transcript,
+            summaryState: .idle
+        )
+
+        #expect(actions.map(\.help) == ["Copy transcript", "Re-transcribe", "Delete"])
+        #expect(actions.map(\.systemName) == ["doc.on.doc", "arrow.clockwise", "trash"])
+    }
+
+    @Test
+    func detailHeaderActionsShowSummarySpecificButtons() {
+        let actions = meetingDetailHeaderActions(
+            activeTab: .summary,
+            summaryState: .ready("Stored summary")
+        )
+
+        #expect(actions.map(\.help) == ["Copy summary", "Regenerate summary", "Delete"])
+        #expect(actions.map(\.systemName) == ["doc.on.doc", "sparkles", "trash"])
+    }
+
     @Test @MainActor
-    func meetingSummaryPaneSupportsReadyStateWithActionTitle() {
+    func meetingSummaryPaneSupportsReadyState() {
         _ = MeetingSummaryPane(
-            state: .ready("Stored summary"),
-            actionTitle: "Regenerate Summary",
-            onGenerate: {}
+            state: .ready("Stored summary")
         )
     }
 

@@ -12,12 +12,6 @@ enum SummaryPaneState {
 
 struct MeetingSummaryPane: View {
     let state: SummaryPaneState
-    let actionTitle: String
-    let onGenerate: () -> Void
-
-    private var readyToolbarButtonTitle: String {
-        actionTitle
-    }
 
     var body: some View {
         switch state {
@@ -55,19 +49,6 @@ struct MeetingSummaryPane: View {
                 .frame(maxWidth: 340)
                 .padding(.bottom, 20)
 
-            Button(action: onGenerate) {
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 13, weight: .bold))
-                    Text(actionTitle)
-                        .font(.system(size: 14, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .background(QMTheme.sage, in: RoundedRectangle(cornerRadius: 10))
-            }
-            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(30)
@@ -106,46 +87,14 @@ struct MeetingSummaryPane: View {
     // MARK: Ready
 
     private func readyView(text: String) -> some View {
-        let bubbleMetrics = MeetingBubbleShellMetrics.transcript
-
         return VStack(spacing: 0) {
-            HStack {
-                Spacer(minLength: 0)
-                Button(action: onGenerate) {
-                    Text(readyToolbarButtonTitle)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(QMTheme.sage)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(QMTheme.cardBorder, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                Button { copySummary(text) } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(QMTheme.secondary)
-                        .frame(width: 32, height: 32)
-                        .background(QMTheme.card, in: Circle())
-                        .overlay(Circle().stroke(QMTheme.cardBorder, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .help("Copy summary")
-            }
-            .padding(.horizontal, 30)
-            .padding(.top, 4)
-            .padding(.bottom, 8)
-
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     summaryContentView(text: text)
                     Color.clear.frame(height: 32)
                 }
                 .padding(.horizontal, 30)
-                .padding(.top, 4)
+                .padding(.top, 12)
             }
             .scrollIndicators(.never)
         }
@@ -174,29 +123,12 @@ struct MeetingSummaryPane: View {
                 .frame(maxWidth: 340)
                 .padding(.bottom, 20)
 
-            Button(action: onGenerate) {
-                Text(actionTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(QMTheme.sage)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(QMTheme.cardBorder, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(30)
     }
 
     // MARK: Helpers
-
-    private func copySummary(_ text: String) {
-        #if canImport(AppKit)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        #endif
-    }
 
     @ViewBuilder
     private func summaryContentView(text: String) -> some View {
