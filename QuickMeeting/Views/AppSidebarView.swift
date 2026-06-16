@@ -297,11 +297,6 @@ struct AppSidebarView: View {
 
     // MARK: Grouping
 
-    private struct MeetingGroup {
-        let title: String
-        let meetings: [Meeting]
-    }
-
     private struct SearchIndexVersion: Equatable {
         let id: UUID
         let updatedAt: Date
@@ -319,30 +314,8 @@ struct AppSidebarView: View {
         meetings.map { SearchIndexVersion(id: $0.id, updatedAt: $0.updatedAt) }
     }
 
-    private var groupedMeetings: [MeetingGroup] {
-        let calendar = Calendar.current
-        let now = Date()
-        let order = ["Today", "Yesterday", "Earlier This Week", "Earlier"]
-        var buckets: [String: [Meeting]] = [:]
-
-        for meeting in filteredMeetings {
-            buckets[groupTitle(for: meeting.startedAt, calendar: calendar, now: now), default: []].append(meeting)
-        }
-
-        return order.compactMap { title in
-            guard let items = buckets[title], !items.isEmpty else { return nil }
-            return MeetingGroup(title: title, meetings: items)
-        }
-    }
-
-    private func groupTitle(for date: Date, calendar: Calendar, now: Date) -> String {
-        if calendar.isDateInToday(date) { return "Today" }
-        if calendar.isDateInYesterday(date) { return "Yesterday" }
-        if let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day,
-           days < 7 {
-            return "Earlier This Week"
-        }
-        return "Earlier"
+    private var groupedMeetings: [SidebarMeetingGroup] {
+        groupSidebarMeetings(filteredMeetings)
     }
 
     private func timeLabel(for meeting: Meeting) -> String {
