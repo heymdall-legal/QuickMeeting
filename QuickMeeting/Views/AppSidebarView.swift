@@ -15,6 +15,7 @@ struct AppSidebarView: View {
     let onOpenSettings: () -> Void
 
     @State private var searchText = ""
+    @StateObject private var searchController = SidebarMeetingSearchController()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +26,16 @@ struct AppSidebarView: View {
         }
         .background(QMTheme.sidebar)
         .navigationTitle("QuickMeeting")
+        .onAppear {
+            refreshSearchMeetings()
+            refreshSearchQuery()
+        }
+        .onChange(of: searchIndexVersion) { _, _ in
+            refreshSearchMeetings()
+        }
+        .onChange(of: searchText) { _, _ in
+            refreshSearchQuery()
+        }
     }
 
     // MARK: Header
@@ -243,6 +254,14 @@ struct AppSidebarView: View {
         Task { await appViewModel.startRecording() }
     }
 
+    private func refreshSearchMeetings() {
+        searchController.replaceMeetings(meetings)
+    }
+
+    private func refreshSearchQuery() {
+        searchController.updateQuery(searchText)
+    }
+
     // MARK: Status
 
     private struct StatusDescriptor {
@@ -283,8 +302,21 @@ struct AppSidebarView: View {
         let meetings: [Meeting]
     }
 
+    private struct SearchIndexVersion: Equatable {
+        let id: UUID
+        let updatedAt: Date
+    }
+
     private var filteredMeetings: [Meeting] {
-        meetings.filter { meetingMatchesSearch($0, query: searchText) }
+        guard !normalizedMeetingSearchQuery(searchText).isEmpty else {
+            return meetings
+        }
+
+        return meetings.filter { searchController.matchingMeetingIDs.contains($0.id) }
+    }
+
+    private var searchIndexVersion: [SearchIndexVersion] {
+        meetings.map { SearchIndexVersion(id: $0.id, updatedAt: $0.updatedAt) }
     }
 
     private var groupedMeetings: [MeetingGroup] {
