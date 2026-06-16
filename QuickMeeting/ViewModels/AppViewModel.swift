@@ -18,12 +18,16 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var autoRecordingDetectedAt: Date?
     @Published private(set) var deletionErrorMessage: String?
     @Published private(set) var transcriptionErrorMessage: String?
-    @Published private(set) var summaryErrorMessage: String?
+    @Published private var summaryError: SummaryErrorState?
     @Published private(set) var summaryConfirmationMeetingID: UUID?
     @Published private(set) var summarizingMeetingID: UUID?
     @Published private(set) var renameSpeakerErrorMessage: String?
     @Published private(set) var renameMeetingErrorMessage: String?
     @Published private(set) var upcomingCalendarEvent: UpcomingCalendarEvent?
+
+    var summaryErrorMessage: String? {
+        summaryError?.message
+    }
 
     let transcriptionProgressCenter: TranscriptionProgressCenter
     private let meetingStore: MeetingStore
@@ -289,10 +293,13 @@ final class AppViewModel: ObservableObject {
     }
 
     func generateSummary(for meeting: Meeting) async {
-        summaryErrorMessage = nil
+        summaryError = nil
 
         guard meetingSummarySettingsStore.validatedSettings() != nil else {
-            summaryErrorMessage = MeetingSummaryServiceError.settingsIncomplete.localizedDescription
+            summaryError = SummaryErrorState(
+                meetingID: meeting.id,
+                message: MeetingSummaryServiceError.settingsIncomplete.localizedDescription
+            )
             return
         }
 
@@ -318,6 +325,14 @@ final class AppViewModel: ObservableObject {
     func cancelSummaryReplacement() {
         pendingSummaryReplacementMeetingID = nil
         summaryConfirmationMeetingID = nil
+    }
+
+    func summaryErrorMessage(forMeeting meetingID: UUID) -> String? {
+        guard summaryError?.meetingID == meetingID else {
+            return nil
+        }
+
+        return summaryError?.message
     }
 
     func renameMeeting(_ meeting: Meeting, title: String) async throws {
@@ -453,9 +468,14 @@ final class AppViewModel: ObservableObject {
                 updatedAt: dateProvider()
             )
         } catch {
-            summaryErrorMessage = error.localizedDescription
+            summaryError = SummaryErrorState(meetingID: meetingID, message: error.localizedDescription)
         }
     }
+}
+
+private struct SummaryErrorState {
+    let meetingID: UUID
+    let message: String
 }
 
 extension AppViewModel: AutoRecordingIntentSink {

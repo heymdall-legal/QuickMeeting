@@ -92,7 +92,7 @@ struct ContentView: View {
                         },
                         isShowingSummaryReplacementConfirmation: appViewModel.summaryConfirmationMeetingID == selectedMeeting.id,
                         isSummarizingMeeting: appViewModel.summarizingMeetingID == selectedMeeting.id,
-                        summaryErrorMessage: appViewModel.summaryErrorMessage
+                        summaryErrorMessage: appViewModel.summaryErrorMessage(forMeeting: selectedMeeting.id)
                     )
                 } else {
                     HomeView(

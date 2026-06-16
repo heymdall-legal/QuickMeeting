@@ -118,10 +118,12 @@ struct MeetingSummaryService: MeetingSummaryServicing {
             forHTTPHeaderField: settings.authHeaderName
         )
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("opencode/1.17.7 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14", forHTTPHeaderField: "User-Agent")
         request.httpBody = try JSONEncoder().encode(
             MeetingSummaryRequest(
                 model: settings.modelName,
-                messages: [.init(role: "user", content: prompt)]
+                messages: [.init(role: "user", content: prompt)],
+                stream: false
             )
         )
         return request
@@ -147,6 +149,7 @@ private struct MeetingSummaryRequest: Encodable {
 
     let model: String
     let messages: [Message]
+    let stream: Bool
 }
 
 private struct MeetingSummaryResponse: Decodable {

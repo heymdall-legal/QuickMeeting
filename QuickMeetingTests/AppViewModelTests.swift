@@ -72,6 +72,19 @@ struct AppViewModelTests {
     }
 
     @Test
+    func failedSummaryErrorIsOnlyExposedForFailedMeeting() async throws {
+        let harness = try AppViewModelHarness()
+        let failedMeeting = try harness.createCompletedMeeting(summaryText: nil)
+        let otherMeeting = try harness.createCompletedMeeting(summaryText: nil)
+        await harness.summaryService.setSummaryResult(.failure(MeetingSummaryServiceError.responseInvalid))
+
+        await harness.viewModel.generateSummary(for: failedMeeting)
+
+        #expect(harness.viewModel.summaryErrorMessage(forMeeting: failedMeeting.id) == MeetingSummaryServiceError.responseInvalid.localizedDescription)
+        #expect(harness.viewModel.summaryErrorMessage(forMeeting: otherMeeting.id) == nil)
+    }
+
+    @Test
     func renameSpeakerPersistsMeetingRenameEvenWhenEnrollmentFails() async throws {
         let harness = try AppViewModelHarness(enrollmentResult: .failure(TestError.failed))
         let meeting = try harness.createMeetingWithTranscript(
