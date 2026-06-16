@@ -113,7 +113,10 @@ struct MeetingSummaryService: MeetingSummaryServicing {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(settings.authToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(
+            authHeaderValue(for: settings),
+            forHTTPHeaderField: settings.authHeaderName
+        )
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(
             MeetingSummaryRequest(
@@ -122,6 +125,17 @@ struct MeetingSummaryService: MeetingSummaryServicing {
             )
         )
         return request
+    }
+
+    private func authHeaderValue(for settings: ValidatedMeetingSummarySettings) -> String {
+        guard settings.authHeaderName.caseInsensitiveCompare("Authorization") == .orderedSame else {
+            return settings.authToken
+        }
+
+        if settings.authToken.range(of: "Bearer ", options: [.anchored, .caseInsensitive]) != nil {
+            return settings.authToken
+        }
+        return "Bearer \(settings.authToken)"
     }
 }
 

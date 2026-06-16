@@ -3,6 +3,7 @@ import Foundation
 struct MeetingSummarySettings: Equatable {
     var baseURL: String?
     var authToken: String?
+    var authHeaderName: String?
     var modelName: String?
     var promptTemplate: String?
 }
@@ -10,6 +11,7 @@ struct MeetingSummarySettings: Equatable {
 struct ValidatedMeetingSummarySettings: Equatable, Sendable {
     let baseURL: String
     let authToken: String
+    let authHeaderName: String
     let modelName: String
     let promptTemplate: String
 }
@@ -22,8 +24,10 @@ protocol MeetingSummarySettingsStoring: Sendable {
 
 struct MeetingSummarySettingsStore: MeetingSummarySettingsStoring {
     private let userDefaults: UserDefaults
+    private static let defaultAuthHeaderName = "Authorization"
     private let baseURLKey = "meetingSummary.baseURL"
     private let authTokenKey = "meetingSummary.authToken"
+    private let authHeaderNameKey = "meetingSummary.authHeaderName"
     private let modelNameKey = "meetingSummary.modelName"
     private let promptTemplateKey = "meetingSummary.promptTemplate"
 
@@ -35,6 +39,7 @@ struct MeetingSummarySettingsStore: MeetingSummarySettingsStoring {
         MeetingSummarySettings(
             baseURL: userDefaults.string(forKey: baseURLKey),
             authToken: userDefaults.string(forKey: authTokenKey),
+            authHeaderName: userDefaults.string(forKey: authHeaderNameKey),
             modelName: userDefaults.string(forKey: modelNameKey),
             promptTemplate: userDefaults.string(forKey: promptTemplateKey)
         )
@@ -55,10 +60,18 @@ struct MeetingSummarySettingsStore: MeetingSummarySettingsStoring {
         else {
             return nil
         }
+        let trimmedAuthHeaderName = current.authHeaderName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let authHeaderName: String
+        if let trimmedAuthHeaderName, !trimmedAuthHeaderName.isEmpty {
+            authHeaderName = trimmedAuthHeaderName
+        } else {
+            authHeaderName = Self.defaultAuthHeaderName
+        }
 
         return ValidatedMeetingSummarySettings(
             baseURL: baseURL,
             authToken: authToken,
+            authHeaderName: authHeaderName,
             modelName: modelName,
             promptTemplate: promptTemplate
         )
@@ -67,6 +80,7 @@ struct MeetingSummarySettingsStore: MeetingSummarySettingsStoring {
     func saveSettings(_ settings: MeetingSummarySettings) {
         save(settings.baseURL, forKey: baseURLKey)
         save(settings.authToken, forKey: authTokenKey)
+        save(settings.authHeaderName, forKey: authHeaderNameKey)
         save(settings.modelName, forKey: modelNameKey)
         save(settings.promptTemplate, forKey: promptTemplateKey)
     }

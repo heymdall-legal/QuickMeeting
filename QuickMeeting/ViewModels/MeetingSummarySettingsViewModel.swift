@@ -17,6 +17,7 @@ final class MeetingSummarySettingsViewModel: ObservableObject {
 
     @Published var baseURL: String
     @Published var authToken: String
+    @Published var authHeaderName: String
     @Published var modelName: String
     @Published var promptTemplate: String
 
@@ -28,6 +29,7 @@ final class MeetingSummarySettingsViewModel: ObservableObject {
         let settings = settingsStore.settings()
         baseURL = settings.baseURL ?? ""
         authToken = settings.authToken ?? ""
+        authHeaderName = settings.authHeaderName ?? "Authorization"
         modelName = settings.modelName ?? ""
         promptTemplate = settings.promptTemplate ?? Self.defaultPromptTemplate
     }
@@ -37,6 +39,7 @@ final class MeetingSummarySettingsViewModel: ObservableObject {
             .init(
                 baseURL: baseURL,
                 authToken: authToken,
+                authHeaderName: authHeaderName,
                 modelName: modelName,
                 promptTemplate: promptTemplate
             )

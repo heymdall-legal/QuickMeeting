@@ -12,6 +12,7 @@ struct MeetingSummarySettingsStoreTests {
         #expect(store.settings() == MeetingSummarySettings(
             baseURL: nil,
             authToken: nil,
+            authHeaderName: nil,
             modelName: nil,
             promptTemplate: nil
         ))
@@ -27,6 +28,7 @@ struct MeetingSummarySettingsStoreTests {
         store.saveSettings(.init(
             baseURL: " https://example.com ",
             authToken: " token ",
+            authHeaderName: " x-auth-token ",
             modelName: " gpt-4o-mini ",
             promptTemplate: "Summarize {text} for {date}"
         ))
@@ -34,6 +36,7 @@ struct MeetingSummarySettingsStoreTests {
         #expect(store.settings() == MeetingSummarySettings(
             baseURL: " https://example.com ",
             authToken: " token ",
+            authHeaderName: " x-auth-token ",
             modelName: " gpt-4o-mini ",
             promptTemplate: "Summarize {text} for {date}"
         ))
@@ -47,6 +50,7 @@ struct MeetingSummarySettingsStoreTests {
         store.saveSettings(.init(
             baseURL: " https://example.com/v1 ",
             authToken: " secret-token ",
+            authHeaderName: " x-api-key ",
             modelName: " gpt-4o-mini ",
             promptTemplate: " Summarize {text} on {date} "
         ))
@@ -54,8 +58,25 @@ struct MeetingSummarySettingsStoreTests {
         #expect(store.validatedSettings() == ValidatedMeetingSummarySettings(
             baseURL: "https://example.com/v1",
             authToken: "secret-token",
+            authHeaderName: "x-api-key",
             modelName: "gpt-4o-mini",
             promptTemplate: "Summarize {text} on {date}"
         ))
+    }
+
+    @Test
+    func validatedSettingsDefaultAuthHeaderNameToAuthorization() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let store = MeetingSummarySettingsStore(userDefaults: defaults)
+        store.saveSettings(.init(
+            baseURL: "https://example.com/v1",
+            authToken: "secret-token",
+            authHeaderName: nil,
+            modelName: "gpt-4o-mini",
+            promptTemplate: "Summarize {text}"
+        ))
+
+        #expect(store.validatedSettings()?.authHeaderName == "Authorization")
     }
 }

@@ -505,6 +505,10 @@ struct QMSettingsSheet: View {
                 .onChange(of: meetingSummaryViewModel.authToken) { _, _ in meetingSummaryViewModel.save() }
                 .padding(.bottom, 18)
 
+            summaryTextField(label: "Auth header", placeholder: "Authorization", hint: "Authorization sends Bearer automatically. Custom headers send the token as entered.", text: $meetingSummaryViewModel.authHeaderName)
+                .onChange(of: meetingSummaryViewModel.authHeaderName) { _, _ in meetingSummaryViewModel.save() }
+                .padding(.bottom, 18)
+
             summaryTemplateField
                 .padding(.bottom, 8)
         }

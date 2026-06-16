@@ -16,6 +16,7 @@ struct MeetingSummaryServiceTests {
         harness.settingsStore.settingsValue = ValidatedMeetingSummarySettings(
             baseURL: "https://example.com",
             authToken: "secret-token",
+            authHeaderName: "Authorization",
             modelName: "gpt-4o-mini",
             promptTemplate: "Summarize this transcript from {date}:\n\n{text}"
         )
@@ -42,6 +43,36 @@ struct MeetingSummaryServiceTests {
         #expect(messages.first?["content"]?.contains("## Alice") == true)
         #expect(messages.first?["content"]?.contains("We shipped the feature.") == true)
         #expect(messages.first?["content"]?.contains("# Weekly Sync") == false)
+    }
+
+    @Test
+    func summarizeUsesCustomAuthHeaderNameWithExactTokenValue() async throws {
+        let harness = try MeetingSummaryServiceHarness()
+        let meeting = try harness.createMeetingWithTranscript(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Alice")],
+                segments: [TranscriptSegment(text: "We shipped the feature.", speakerID: "speaker-1")]
+            )
+        )
+        harness.settingsStore.settingsValue = ValidatedMeetingSummarySettings(
+            baseURL: "https://example.com",
+            authToken: "secret-token",
+            authHeaderName: "x-auth-header",
+            modelName: "gpt-4o-mini",
+            promptTemplate: "Summarize this transcript from {date}:\n\n{text}"
+        )
+        harness.transport.response = .success(
+            .init(
+                statusCode: 200,
+                body: #"{"choices":[{"message":{"content":"Short summary."}}]}"#.data(using: .utf8)!
+            )
+        )
+
+        _ = try await harness.service.summarize(meetingID: meeting.id)
+
+        let request = try #require(harness.transport.lastRequest)
+        #expect(request.value(forHTTPHeaderField: "x-auth-header") == "secret-token")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
     }
 
     @Test
@@ -82,6 +113,7 @@ struct MeetingSummaryServiceTests {
         harness.settingsStore.settingsValue = ValidatedMeetingSummarySettings(
             baseURL: "https://example.com/v1",
             authToken: "secret-token",
+            authHeaderName: "Authorization",
             modelName: "gpt-4o-mini",
             promptTemplate: "Summarize {text} on {date}"
         )
@@ -102,7 +134,7 @@ private final class StubMeetingSummarySettingsStore: MeetingSummarySettingsStori
     var settingsValue: ValidatedMeetingSummarySettings?
 
     func settings() -> MeetingSummarySettings {
-        .init(baseURL: nil, authToken: nil, modelName: nil, promptTemplate: nil)
+        .init(baseURL: nil, authToken: nil, authHeaderName: nil, modelName: nil, promptTemplate: nil)
     }
 
     func validatedSettings() -> ValidatedMeetingSummarySettings? {

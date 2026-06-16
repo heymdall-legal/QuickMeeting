@@ -118,6 +118,7 @@ private struct AppViewModelHarness {
         summarySettings: ValidatedMeetingSummarySettings? = .init(
             baseURL: "https://example.com",
             authToken: "secret-token",
+            authHeaderName: "Authorization",
             modelName: "gpt-4o-mini",
             promptTemplate: "Summarize {text} on {date}"
         )
@@ -235,6 +236,7 @@ private struct StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring {
             return MeetingSummarySettings(
                 baseURL: settingsValue.baseURL,
                 authToken: settingsValue.authToken,
+                authHeaderName: settingsValue.authHeaderName,
                 modelName: settingsValue.modelName,
                 promptTemplate: settingsValue.promptTemplate
             )
@@ -243,6 +245,7 @@ private struct StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring {
         return MeetingSummarySettings(
             baseURL: nil,
             authToken: nil,
+            authHeaderName: nil,
             modelName: nil,
             promptTemplate: nil
         )
