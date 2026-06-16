@@ -1,6 +1,6 @@
 import Foundation
 
-struct MeetingSummarySettings: Equatable {
+nonisolated struct MeetingSummarySettings: Equatable {
     var baseURL: String?
     var authToken: String?
     var authHeaderName: String?
@@ -8,7 +8,7 @@ struct MeetingSummarySettings: Equatable {
     var promptTemplate: String?
 }
 
-struct ValidatedMeetingSummarySettings: Equatable, Sendable {
+nonisolated struct ValidatedMeetingSummarySettings: Equatable, Sendable {
     let baseURL: String
     let authToken: String
     let authHeaderName: String

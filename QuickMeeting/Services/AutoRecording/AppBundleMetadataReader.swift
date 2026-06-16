@@ -28,7 +28,7 @@ protocol AppBundleMetadataReading: Sendable {
     func readMetadata(at url: URL) throws -> AppBundleMetadata
 }
 
-struct NativeAppBundleMetadataReader: AppBundleMetadataReading {
+nonisolated struct NativeAppBundleMetadataReader: AppBundleMetadataReading {
     func readMetadata(at url: URL) throws -> AppBundleMetadata {
         guard url.pathExtension == "app",
               let bundle = Bundle(url: url) else {

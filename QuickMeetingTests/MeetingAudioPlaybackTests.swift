@@ -29,6 +29,7 @@ struct MeetingAudioPlaybackTests {
         }
     }
 
+    @MainActor
     final class NativeAudioPlayerSpy: NativeAudioPlaying {
         private(set) var loadedURL: URL?
         private(set) var playCallCount = 0
@@ -37,7 +38,7 @@ struct MeetingAudioPlaybackTests {
         private(set) var prepareToPlayCallCount = 0
         var duration: TimeInterval = 0
         var currentTime: TimeInterval = 0
-        var onFinishPlayback: (() -> Void)?
+        var onFinishPlayback: (@MainActor @Sendable () -> Void)?
 
         func markLoaded(url: URL) {
             loadedURL = url
@@ -61,6 +62,15 @@ struct MeetingAudioPlaybackTests {
 
         func finishPlayback() {
             onFinishPlayback?()
+        }
+    }
+
+    actor WaveformExtractorSpy {
+        private(set) var callCount = 0
+
+        func extract(_ result: [Double]?) -> [Double]? {
+            callCount += 1
+            return result
         }
     }
 
@@ -327,14 +337,13 @@ struct MeetingAudioPlaybackTests {
         let audioURL = rootURL.appendingPathComponent("audio.wav")
         fileManager.createFile(atPath: audioURL.path, contents: Data("stub".utf8))
 
-        var extractorCallCount = 0
+        let extractor = WaveformExtractorSpy()
         let preloaded = [Double](repeating: 0.7, count: 300)
         let playback = MeetingAudioPlayback(
             fileManager: fileManager,
             nativePlayerFactory: { _ in NativeAudioPlayerSpy() },
             waveformExtractor: { _ in
-                extractorCallCount += 1
-                return nil
+                await extractor.extract(nil)
             }
         )
 
@@ -345,7 +354,7 @@ struct MeetingAudioPlaybackTests {
         )
 
         #expect(playback.waveformSamples == preloaded)
-        #expect(extractorCallCount == 0)
+        #expect(await extractor.callCount == 0)
     }
 
     @Test

@@ -13,7 +13,7 @@ enum MeetingAudioPlaybackState: Equatable {
 protocol NativeAudioPlaying: AnyObject {
     var duration: TimeInterval { get }
     var currentTime: TimeInterval { get set }
-    var onFinishPlayback: (@MainActor () -> Void)? { get set }
+    var onFinishPlayback: (@MainActor @Sendable () -> Void)? { get set }
     func play()
     func pause()
     func stop()
@@ -212,7 +212,7 @@ final class MeetingAudioPlayback: ObservableObject {
 
 final class AVAudioPlayerAdapter: NSObject, NativeAudioPlaying, AVAudioPlayerDelegate {
     private let player: AVAudioPlayer
-    var onFinishPlayback: (@MainActor () -> Void)?
+    var onFinishPlayback: (@MainActor @Sendable () -> Void)?
 
     init(contentsOf url: URL) throws {
         player = try AVAudioPlayer(contentsOf: url)

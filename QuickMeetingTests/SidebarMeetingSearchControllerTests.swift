@@ -23,7 +23,9 @@ struct SidebarMeetingSearchControllerTests {
             ]
         )
         let search = ControlledSearch()
-        let controller = SidebarMeetingSearchController(search: search.run)
+        let controller = SidebarMeetingSearchController { documents, query in
+            await search.run(documents: documents, query: query)
+        }
 
         controller.replaceMeetings([firstMeeting, secondMeeting])
         controller.updateQuery("design")

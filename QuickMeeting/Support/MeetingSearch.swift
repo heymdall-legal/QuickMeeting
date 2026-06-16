@@ -1,6 +1,6 @@
 import Foundation
 
-struct MeetingSearchDocument: Equatable, Sendable {
+nonisolated struct MeetingSearchDocument: Equatable, Sendable {
     let id: UUID
     let title: String
     let speakerNames: [String]

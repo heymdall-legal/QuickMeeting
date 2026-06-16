@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum AutoRecordingApp: String, CaseIterable, Codable, Equatable, Sendable {
+nonisolated enum AutoRecordingApp: String, CaseIterable, Codable, Equatable, Sendable {
     case tolk
 
     var displayName: String {
@@ -25,7 +25,7 @@ enum AutoRecordingApp: String, CaseIterable, Codable, Equatable, Sendable {
     }
 }
 
-struct AutoRecordingTarget: Codable, Equatable, Sendable {
+nonisolated struct AutoRecordingTarget: Codable, Equatable, Sendable {
     let bundleIdentifier: String
     let displayName: String
     let appPath: String
@@ -46,7 +46,7 @@ struct AutoRecordingTarget: Codable, Equatable, Sendable {
     }
 }
 
-struct AutoRecordingSettings: Equatable, Sendable {
+nonisolated struct AutoRecordingSettings: Equatable, Sendable {
     var isEnabled: Bool
     var selectedApps: [AutoRecordingTarget]
     var startDelay: TimeInterval

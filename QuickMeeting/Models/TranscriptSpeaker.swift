@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct TranscriptSpeaker: Codable, Equatable, Identifiable, Sendable {
+nonisolated struct TranscriptSpeaker: Codable, Equatable, Identifiable, Sendable {
     let id: String
     var displayName: String
     var labelSource: TranscriptSpeakerLabelSource

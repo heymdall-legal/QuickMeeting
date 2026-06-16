@@ -81,7 +81,7 @@ actor WaveformExtractor {
     }
 }
 
-private struct BucketAccumulator {
+nonisolated private struct BucketAccumulator {
     var sumOfSquares = 0.0
     var count        = 0
 

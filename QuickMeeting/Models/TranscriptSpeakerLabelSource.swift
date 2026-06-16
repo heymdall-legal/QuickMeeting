@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum TranscriptSpeakerLabelSource: String, Codable, Equatable, Sendable {
+nonisolated enum TranscriptSpeakerLabelSource: String, Codable, Equatable, Sendable {
     case generic
     case userAssigned
     case bankMatched
