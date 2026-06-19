@@ -380,7 +380,9 @@ struct MeetingDetailView: View {
                     }
             } else {
                 MeetingSummaryPane(
-                    state: summaryViewState
+                    state: summaryViewState,
+                    actionTitle: "Generate Summary",
+                    onGenerate: onGenerateSummary
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

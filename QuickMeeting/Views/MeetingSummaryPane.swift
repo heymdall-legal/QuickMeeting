@@ -12,6 +12,8 @@ enum SummaryPaneState {
 
 struct MeetingSummaryPane: View {
     let state: SummaryPaneState
+    let actionTitle: String
+    let onGenerate: () -> Void
 
     var body: some View {
         switch state {
@@ -49,6 +51,19 @@ struct MeetingSummaryPane: View {
                 .frame(maxWidth: 340)
                 .padding(.bottom, 20)
 
+            Button(action: onGenerate) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 13, weight: .bold))
+                    Text(actionTitle)
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(QMTheme.sage, in: RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(30)

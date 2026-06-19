@@ -30,7 +30,18 @@ struct MeetingDetailFocusManagementTests {
     @Test @MainActor
     func meetingSummaryPaneSupportsReadyState() {
         _ = MeetingSummaryPane(
-            state: .ready("Stored summary")
+            state: .ready("Stored summary"),
+            actionTitle: "Generate Summary",
+            onGenerate: {}
+        )
+    }
+
+    @Test @MainActor
+    func meetingSummaryPaneSupportsIdleStateAction() {
+        _ = MeetingSummaryPane(
+            state: .idle,
+            actionTitle: "Generate Summary",
+            onGenerate: {}
         )
     }
 
