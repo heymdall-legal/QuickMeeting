@@ -28,13 +28,21 @@ final class MarkdownExportSettingsViewModel: ObservableObject {
 
     func selectDirectory(_ url: URL) {
         let path = url.standardizedFileURL.path(percentEncoded: false)
-        settingsStore.saveDirectoryPath(path)
-        directoryPath = path
+        let didStartAccessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
 
         do {
+            try settingsStore.saveDirectoryURL(url)
+            directoryPath = path
             try meetingStore.exportMarkdownForExistingMeetings()
             errorMessage = nil
         } catch {
+            settingsStore.saveDirectoryPath(nil)
+            directoryPath = ""
             errorMessage = error.localizedDescription
         }
     }

@@ -39,32 +39,48 @@ struct ConfiguredMeetingMarkdownExporter: MeetingMarkdownExporting {
 
     @discardableResult
     func exportTranscript(for meeting: Meeting, transcript: StoredTranscript) throws -> URL {
-        try exporter().exportTranscript(for: meeting, transcript: transcript)
+        try withExporter { exporter in
+            try exporter.exportTranscript(for: meeting, transcript: transcript)
+        }
     }
 
     @discardableResult
     func exportSummary(for meeting: Meeting, summary: String) throws -> URL {
-        try exporter().exportSummary(for: meeting, summary: summary)
+        try withExporter { exporter in
+            try exporter.exportSummary(for: meeting, summary: summary)
+        }
     }
 
     func removeTranscript(for meetingID: UUID) throws {
-        try exporter().removeTranscript(for: meetingID)
+        try withExporter { exporter in
+            try exporter.removeTranscript(for: meetingID)
+        }
     }
 
     func removeSummary(for meetingID: UUID) throws {
-        try exporter().removeSummary(for: meetingID)
+        try withExporter { exporter in
+            try exporter.removeSummary(for: meetingID)
+        }
     }
 
-    private func exporter() throws -> MeetingMarkdownExporter {
-        guard let directoryPath = settingsStore.directoryPath() else {
+    private func withExporter<T>(_ body: (MeetingMarkdownExporter) throws -> T) throws -> T {
+        guard let directoryURL = try settingsStore.resolvedDirectoryURL() else {
             throw MeetingMarkdownExporterError.exportDirectoryMissing
         }
 
-        return MeetingMarkdownExporter(
+        let didStartAccessing = directoryURL.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing {
+                directoryURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let exporter = MeetingMarkdownExporter(
             fileManager: fileManager,
-            rootURL: URL(fileURLWithPath: directoryPath, isDirectory: true),
+            rootURL: directoryURL,
             dateProvider: dateProvider
         )
+        return try body(exporter)
     }
 }
 

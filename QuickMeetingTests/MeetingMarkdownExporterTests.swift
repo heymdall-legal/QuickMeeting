@@ -18,6 +18,25 @@ struct MeetingMarkdownExportSettingsStoreTests {
 
         #expect(store.directoryPath() == nil)
     }
+
+    @Test
+    func persistsSecurityScopedBookmarkForSelectedDirectory() throws {
+        let suiteName = "MeetingMarkdownExportSettingsStoreTests.\(#function).\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let store = MeetingMarkdownExportSettingsStore(userDefaults: defaults)
+        let directoryURL = try temporaryExportDirectory()
+
+        try store.saveDirectoryURL(directoryURL)
+
+        #expect(store.directoryPath() == directoryURL.standardizedFileURL.path(percentEncoded: false))
+        #expect(store.directoryBookmarkData() != nil)
+        #expect(try store.resolvedDirectoryURL()?.standardizedFileURL == directoryURL.standardizedFileURL)
+
+        store.saveDirectoryPath(nil)
+
+        #expect(store.directoryBookmarkData() == nil)
+    }
 }
 
 struct MeetingMarkdownExporterTests {
@@ -81,6 +100,24 @@ struct MeetingMarkdownExporterTests {
         #expect(markdown.contains("## Summary"))
         #expect(markdown.contains("New summary"))
         #expect(!markdown.contains("stale"))
+    }
+
+    @Test
+    func configuredExporterUsesPersistedDirectoryBookmark() throws {
+        let suiteName = "MeetingMarkdownExporterTests.\(#function).\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let settingsStore = MeetingMarkdownExportSettingsStore(userDefaults: defaults)
+        let rootURL = try temporaryExportDirectory()
+        try settingsStore.saveDirectoryURL(rootURL)
+        let exporter = ConfiguredMeetingMarkdownExporter(settingsStore: settingsStore)
+        let meetingID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let meeting = makeMeeting(id: meetingID, title: "Scoped Folder", summaryText: "Summary")
+
+        let fileURL = try exporter.exportSummary(for: meeting, summary: "Summary")
+
+        #expect(fileURL.deletingLastPathComponent().standardizedFileURL == rootURL.standardizedFileURL)
+        #expect(FileManager.default.fileExists(atPath: fileURL.path))
     }
 }
 

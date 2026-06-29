@@ -21,6 +21,7 @@ struct MarkdownExportSettingsViewModelTests {
         )
         let exportURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("QuickMeetingMarkdownExportSettings-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: exportURL, withIntermediateDirectories: true)
         let viewModel = MarkdownExportSettingsViewModel(
             settingsStore: settingsStore,
             meetingStore: harness.store
