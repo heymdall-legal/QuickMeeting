@@ -174,12 +174,18 @@ struct MeetingStore {
         meetingID: UUID,
         transcript: StoredTranscript,
         transcriptPreview: String,
+        rawTranscript: StoredTranscript? = nil,
+        correctedTranscript: StoredTranscript? = nil,
+        pipelineMetadata: TranscriptionPipelineMetadata? = nil,
         updatedAt: Date
     ) throws {
         let meeting = try fetchMeeting(id: meetingID)
         meeting.completeTranscription(
             transcript: transcript,
             transcriptPreview: transcriptPreview,
+            rawTranscript: rawTranscript,
+            correctedTranscript: correctedTranscript,
+            pipelineMetadata: pipelineMetadata,
             updatedAt: updatedAt
         )
         try modelContext.save()

@@ -41,6 +41,20 @@ enum FluidTranscriptionProgress: Sendable {
 struct FluidTranscriptionResult: Sendable, Equatable {
     let speakers: [TranscriptSpeaker]
     let segments: [TranscriptSegment]
+    let rawTranscript: StoredTranscript?
+    let metadata: TranscriptionPipelineMetadata
+
+    init(
+        speakers: [TranscriptSpeaker],
+        segments: [TranscriptSegment],
+        rawTranscript: StoredTranscript? = nil,
+        metadata: TranscriptionPipelineMetadata = TranscriptionPipelineMetadata(asrModel: "Parakeet TDT v3")
+    ) {
+        self.speakers = speakers
+        self.segments = segments
+        self.rawTranscript = rawTranscript
+        self.metadata = metadata
+    }
 }
 
 protocol FluidAudioTranscribing: Sendable {
@@ -48,7 +62,8 @@ protocol FluidAudioTranscribing: Sendable {
         audioFileURL: URL,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         similarityThreshold: Float,
-        languageCode: String?,
+        options: TranscriptionPipelineOptions,
+        glossaryTerms: [TranscriptionGlossaryTerm],
         progress: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult
 }
@@ -63,6 +78,8 @@ final class FluidTranscriptionService: TranscriptionServicing {
     private let knownSpeakerStore: KnownSpeakerStore?
     private let knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)?
     private let languageStore: (any TranscriptionLanguageStoring)?
+    private let glossaryStore: TranscriptionGlossaryStore?
+    private let correctionService: (any TranscriptLLMCorrecting)?
     private let similarityThreshold: Float
     private let fileManager: FileManager
     private let dateProvider: () -> Date
@@ -75,6 +92,8 @@ final class FluidTranscriptionService: TranscriptionServicing {
         knownSpeakerStore: KnownSpeakerStore? = nil,
         knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)? = nil,
         languageStore: (any TranscriptionLanguageStoring)? = nil,
+        glossaryStore: TranscriptionGlossaryStore? = nil,
+        correctionService: (any TranscriptLLMCorrecting)? = nil,
         similarityThreshold: Float = 0.8,
         fileManager: FileManager = .default,
         dateProvider: @escaping () -> Date = Date.init
@@ -85,6 +104,8 @@ final class FluidTranscriptionService: TranscriptionServicing {
         self.knownSpeakerStore = knownSpeakerStore
         self.knownSpeakerEnrollmentService = knownSpeakerEnrollmentService
         self.languageStore = languageStore
+        self.glossaryStore = glossaryStore
+        self.correctionService = correctionService
         self.similarityThreshold = similarityThreshold
         self.fileManager = fileManager
         self.dateProvider = dateProvider
@@ -118,26 +139,59 @@ final class FluidTranscriptionService: TranscriptionServicing {
         do {
             let knownSpeakers = try makeKnownSpeakerSnapshots()
             let progressCenter = progressCenter
-            let languageCode = languageStore?.languageCode()
+            let options = languageStore?.pipelineOptions() ?? TranscriptionPipelineOptions()
+            let glossaryTerms = glossaryStore?.enabledTerms() ?? []
             let result = try await pipeline.transcribe(
                 audioFileURL: audioFileURL,
                 knownSpeakers: knownSpeakers,
                 similarityThreshold: similarityThreshold,
-                languageCode: languageCode
+                options: options,
+                glossaryTerms: glossaryTerms
             ) { update in
                 Task { @MainActor in
                     Self.applyProgress(update, meetingID: meetingID, progressCenter: progressCenter)
                 }
             }
 
-            let transcript = StoredTranscript(speakers: result.speakers, segments: result.segments)
+            let pipelineTranscript = StoredTranscript(speakers: result.speakers, segments: result.segments)
+            var visibleTranscript = pipelineTranscript
+            var correctedTranscript: StoredTranscript?
+            var metadata = result.metadata
+            metadata.languageCode = options.languageCode
+            metadata.requestedCTCMode = options.ctcMode
+            metadata.glossaryTermCount = glossaryTerms.count
+            metadata.isLLMCorrectionEnabled = options.isLLMCorrectionEnabled
+            metadata.completedAt = dateProvider()
+
+            if options.isLLMCorrectionEnabled {
+                if let correctionService {
+                    do {
+                        let correction = try await correctionService.correct(
+                            transcript: pipelineTranscript,
+                            glossaryTerms: glossaryTerms
+                        )
+                        visibleTranscript = correction.transcript
+                        correctedTranscript = correction.transcript
+                        metadata.llmCorrectionModel = correction.modelName
+                    } catch {
+                        metadata.warnings.append("LLM correction skipped: \(error.localizedDescription)")
+                    }
+                } else {
+                    metadata.warnings.append("LLM correction skipped: correction service is unavailable.")
+                }
+            }
+
+            let rawTranscript = result.rawTranscript ?? pipelineTranscript
             try meetingStore.completeTranscription(
                 meetingID: meetingID,
-                transcript: transcript,
-                transcriptPreview: transcript.fullText.trimmingCharacters(in: .whitespacesAndNewlines),
+                transcript: visibleTranscript,
+                transcriptPreview: visibleTranscript.fullText.trimmingCharacters(in: .whitespacesAndNewlines),
+                rawTranscript: rawTranscript,
+                correctedTranscript: correctedTranscript,
+                pipelineMetadata: metadata,
                 updatedAt: dateProvider()
             )
-            for speaker in transcript.speakers where speaker.labelSource == .bankMatched {
+            for speaker in visibleTranscript.speakers where speaker.labelSource == .bankMatched {
                 do {
                     try await knownSpeakerEnrollmentService?.enroll(
                         displayName: speaker.displayName,
@@ -231,7 +285,8 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         audioFileURL: URL,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         similarityThreshold: Float,
-        languageCode: String?,
+        options: TranscriptionPipelineOptions,
+        glossaryTerms: [TranscriptionGlossaryTerm],
         progress: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult {
         let samples = try AudioConverter().resampleAudioFile(path: audioFileURL.path)
@@ -240,7 +295,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         }
 
         // A nil code (or an unrecognised one) means auto-detect — no hint passed.
-        let language = languageCode.flatMap(Language.init(rawValue:))
+        let language = options.languageCode.flatMap(Language.init(rawValue:))
 
         // 1) Transcription.
         let asrManager = try await loadASRManager()
@@ -262,6 +317,26 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         transcriptionProgressTask.cancel()
         progress(.transcribing(1))
 
+        var ctcAdjustedText: String?
+        var ctcReplacements: [VocabularyRescorer.RescoringResult] = []
+        var warnings: [String] = []
+        var resolvedCTCMode: TranscriptionCTCMode?
+        if options.ctcMode != .off, !glossaryTerms.isEmpty {
+            do {
+                let ctcResult = try await applyCTCRescoring(
+                    transcriptionResult: transcriptionResult,
+                    samples: samples,
+                    glossaryTerms: glossaryTerms,
+                    mode: options.ctcMode
+                )
+                ctcAdjustedText = ctcResult.text
+                ctcReplacements = ctcResult.replacements
+                resolvedCTCMode = ctcResult.resolvedMode
+            } catch {
+                warnings.append("CTC vocabulary stage skipped: \(error.localizedDescription)")
+            }
+        }
+
         // 2) Diarization (reuses the same samples).
         let diarizer = try await loadDiarizer()
         let diarizationResult = try await diarizer.process(audio: samples) { chunksProcessed, totalChunks in
@@ -275,15 +350,94 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         // mapping itself is light, pure CPU work over the pipeline output.
         let segments = diarizationResult.segments
         let speakerDatabase = diarizationResult.speakerDatabase
+        let finalCTCReplacements = ctcReplacements
+        let finalCTCAdjustedText = ctcAdjustedText
+        let finalResolvedCTCMode = resolvedCTCMode
+        let finalWarnings = warnings
+
         return await MainActor.run {
-            Self.makeResult(
+            let rawResult = Self.makeResult(
                 transcriptionResult: transcriptionResult,
                 segments: segments,
                 speakerDatabase: speakerDatabase,
                 knownSpeakers: knownSpeakers,
                 similarityThreshold: similarityThreshold
             )
+            let rawTranscript = StoredTranscript(speakers: rawResult.speakers, segments: rawResult.segments)
+            let adjustedSegments = Self.applyCTCReplacements(
+                finalCTCReplacements,
+                to: rawResult.segments
+            )
+            let finalSegments = finalCTCAdjustedText == nil ? rawResult.segments : adjustedSegments
+            return FluidTranscriptionResult(
+                speakers: rawResult.speakers,
+                segments: finalSegments,
+                rawTranscript: rawTranscript,
+                metadata: TranscriptionPipelineMetadata(
+                    asrModel: "Parakeet TDT v3",
+                    languageCode: options.languageCode,
+                    requestedCTCMode: options.ctcMode,
+                    resolvedCTCMode: finalResolvedCTCMode,
+                    glossaryTermCount: glossaryTerms.count,
+                    isLLMCorrectionEnabled: options.isLLMCorrectionEnabled,
+                    warnings: finalWarnings
+                )
+            )
         }
+    }
+
+    private func applyCTCRescoring(
+        transcriptionResult: ASRResult,
+        samples: [Float],
+        glossaryTerms: [TranscriptionGlossaryTerm],
+        mode: TranscriptionCTCMode
+    ) async throws -> (
+        text: String,
+        replacements: [VocabularyRescorer.RescoringResult],
+        resolvedMode: TranscriptionCTCMode
+    ) {
+        guard let tokenTimings = transcriptionResult.tokenTimings, !tokenTimings.isEmpty else {
+            return (transcriptionResult.text, [], .off)
+        }
+
+        let resolvedMode: TranscriptionCTCMode = mode == .auto ? .ctc110m : mode
+        let variant: CtcModelVariant = resolvedMode == .ctc06b ? .ctc06b : .ctc110m
+        let models = try await CtcModels.downloadAndLoad(variant: variant)
+        let tokenizer = try await CtcTokenizer.load(from: CtcModels.defaultCacheDirectory(for: variant))
+        let tokenizedTerms = glossaryTerms.compactMap { term -> CustomVocabularyTerm? in
+            let text = term.normalizedText
+            guard !text.isEmpty else { return nil }
+            let tokenIDs = tokenizer.encode(text)
+            guard !tokenIDs.isEmpty else { return nil }
+            return CustomVocabularyTerm(
+                text: text,
+                weight: term.weight,
+                aliases: term.normalizedAliases.isEmpty ? nil : term.normalizedAliases,
+                ctcTokenIds: tokenIDs
+            )
+        }
+        guard !tokenizedTerms.isEmpty else {
+            return (transcriptionResult.text, [], resolvedMode)
+        }
+
+        let vocabulary = CustomVocabularyContext(terms: tokenizedTerms)
+        let spotter = CtcKeywordSpotter(models: models)
+        let spotted = try await spotter.spotKeywordsWithLogProbs(
+            audioSamples: samples,
+            customVocabulary: vocabulary
+        )
+        let rescorer = try await VocabularyRescorer.create(
+            spotter: spotter,
+            vocabulary: vocabulary,
+            ctcModelDirectory: CtcModels.defaultCacheDirectory(for: variant)
+        )
+        let output = rescorer.ctcTokenRescore(
+            transcript: transcriptionResult.text,
+            tokenTimings: tokenTimings,
+            logProbs: spotted.logProbs,
+            frameDuration: spotted.frameDuration
+        )
+        return (output.text, output.replacements, resolvedMode)
     }
 
     private func loadASRManager() async throws -> AsrManager {
@@ -359,6 +513,54 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         )
 
         return FluidTranscriptionResult(speakers: transcriptSpeakers, segments: transcriptSegments)
+    }
+
+    @MainActor
+    private static func applyCTCReplacements(
+        _ replacements: [VocabularyRescorer.RescoringResult],
+        to segments: [TranscriptSegment]
+    ) -> [TranscriptSegment] {
+        guard !replacements.isEmpty else {
+            return segments
+        }
+
+        return segments.map { segment in
+            var text = segment.text
+            for replacement in replacements where replacement.shouldReplace {
+                guard let replacementWord = replacement.replacementWord else { continue }
+                text = replacePhrase(
+                    replacement.originalWord,
+                    with: replacementWord,
+                    in: text
+                )
+            }
+            return TranscriptSegment(
+                id: segment.id,
+                text: text,
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                speakerID: segment.speakerID
+            )
+        }
+    }
+
+    private nonisolated static func replacePhrase(
+        _ phrase: String,
+        with replacement: String,
+        in text: String
+    ) -> String {
+        let escaped = NSRegularExpression.escapedPattern(for: phrase)
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(?i)(?<![\p{L}\p{N}])"# + escaped + #"(?![\p{L}\p{N}])"#
+        ) else {
+            return text
+        }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.stringByReplacingMatches(
+            in: text,
+            range: range,
+            withTemplate: NSRegularExpression.escapedTemplate(for: replacement)
+        )
     }
 
     /// Prefer the pipeline-averaged `speakerDatabase` (only populated in debug

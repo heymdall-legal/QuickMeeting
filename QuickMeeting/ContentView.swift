@@ -92,6 +92,9 @@ struct ContentView: View {
                                 text: text
                             )
                         },
+                        onAddGlossaryTerm: { term in
+                            transcriptionSettingsViewModel.addGlossaryTerm(text: term)
+                        },
                         onSplitTranscriptSegment: { segmentID, cursorOffset in
                             try await appViewModel.splitTranscriptSegment(
                                 meetingID: selectedMeeting.id,

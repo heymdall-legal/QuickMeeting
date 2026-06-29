@@ -23,6 +23,9 @@ final class Meeting {
     private(set) var transcriptPreview: String?
     @Relationship(deleteRule: .cascade) private(set) var transcriptSpeakers: [PersistedTranscriptSpeaker]
     @Relationship(deleteRule: .cascade) private(set) var transcriptSegments: [PersistedTranscriptSegment]
+    private var rawTranscriptData: Data?
+    private var correctedTranscriptData: Data?
+    private var transcriptionPipelineMetadataData: Data?
     private(set) var summaryText: String?
     private(set) var duration: TimeInterval?
     private(set) var calendarEventID: String?
@@ -56,6 +59,18 @@ final class Meeting {
 
     var attendeeNames: [String] {
         attendeeNamesStorage ?? []
+    }
+
+    var rawStoredTranscript: StoredTranscript? {
+        Self.decode(StoredTranscript.self, from: rawTranscriptData)
+    }
+
+    var correctedStoredTranscript: StoredTranscript? {
+        Self.decode(StoredTranscript.self, from: correctedTranscriptData)
+    }
+
+    var transcriptionPipelineMetadata: TranscriptionPipelineMetadata? {
+        Self.decode(TranscriptionPipelineMetadata.self, from: transcriptionPipelineMetadataData)
     }
 
     init(
@@ -125,6 +140,9 @@ final class Meeting {
         transcriptPreview = nil
         transcriptSpeakers.removeAll()
         transcriptSegments.removeAll()
+        rawTranscriptData = nil
+        correctedTranscriptData = nil
+        transcriptionPipelineMetadataData = nil
         summaryText = nil
         touch(updatedAt: updatedAt)
     }
@@ -132,6 +150,9 @@ final class Meeting {
     func completeTranscription(
         transcript: StoredTranscript,
         transcriptPreview: String,
+        rawTranscript: StoredTranscript? = nil,
+        correctedTranscript: StoredTranscript? = nil,
+        pipelineMetadata: TranscriptionPipelineMetadata? = nil,
         updatedAt: Date = Date()
     ) {
         self.transcriptPreview = transcriptPreview
@@ -141,6 +162,9 @@ final class Meeting {
         transcriptSegments = orderedSegments.enumerated().map { index, segment in
             PersistedTranscriptSegment(segment, sortIndex: index)
         }
+        rawTranscriptData = Self.encode(rawTranscript)
+        correctedTranscriptData = Self.encode(correctedTranscript)
+        transcriptionPipelineMetadataData = Self.encode(pipelineMetadata)
         summaryText = nil
         statusRawValue = MeetingStatus.completed.rawValue
         touch(updatedAt: updatedAt)
@@ -156,6 +180,7 @@ final class Meeting {
             PersistedTranscriptSegment(segment, sortIndex: index)
         }
         transcriptPreview = StoredTranscript(speakers: speakers, segments: segments).fullText
+        correctedTranscriptData = Self.encode(StoredTranscript(speakers: speakers, segments: segments))
         touch(updatedAt: updatedAt)
     }
 
@@ -176,6 +201,16 @@ final class Meeting {
 
     private func touch(updatedAt: Date) {
         self.updatedAt = updatedAt
+    }
+
+    private static func encode<T: Encodable>(_ value: T?) -> Data? {
+        guard let value else { return nil }
+        return try? JSONEncoder().encode(value)
+    }
+
+    private static func decode<T: Decodable>(_ type: T.Type, from data: Data?) -> T? {
+        guard let data else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
     }
 
     private static func arePersistedTranscriptSegmentsInDisplayOrder(

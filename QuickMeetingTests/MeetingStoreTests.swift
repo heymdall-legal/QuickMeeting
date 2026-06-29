@@ -145,6 +145,46 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func completeTranscriptionPersistsRawCorrectedTranscriptAndPipelineMetadata() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let raw = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "raw kubernettes", speakerID: "speaker-1")]
+        )
+        let corrected = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "raw Kubernetes", speakerID: "speaker-1")]
+        )
+        let metadata = TranscriptionPipelineMetadata(
+            asrModel: "Parakeet TDT v3",
+            languageCode: "en",
+            requestedCTCMode: .ctc110m,
+            resolvedCTCMode: .ctc110m,
+            glossaryTermCount: 3,
+            isLLMCorrectionEnabled: true,
+            llmCorrectionModel: "gpt-4.1-mini",
+            warnings: ["ctc fallback"]
+        )
+
+        try harness.store.completeTranscription(
+            meetingID: meeting.id,
+            transcript: corrected,
+            transcriptPreview: corrected.fullText,
+            rawTranscript: raw,
+            correctedTranscript: corrected,
+            pipelineMetadata: metadata,
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_000)
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.storedTranscript == corrected)
+        #expect(reloaded.rawStoredTranscript == raw)
+        #expect(reloaded.correctedStoredTranscript == corrected)
+        #expect(reloaded.transcriptionPipelineMetadata == metadata)
+    }
+
+    @Test
     func createMeetingPersistsUnescapedFilesystemAudioPath() throws {
         let schema = Schema([
             Meeting.self,

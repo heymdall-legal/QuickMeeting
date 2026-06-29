@@ -17,6 +17,34 @@ nonisolated struct ResolvedTranscriptBubbleSpeakerIdentity: Equatable {
     let displayName: String
 }
 
+nonisolated struct TranscriptGlossarySuggestion: Equatable {
+    let segmentID: UUID
+    let term: String
+}
+
+nonisolated func glossarySuggestionTerm(oldText: String, newText: String) -> String? {
+    let oldWords = Set(glossaryCandidateWords(in: oldText).map { $0.lowercased() })
+    let candidates = glossaryCandidateWords(in: newText)
+        .filter { !oldWords.contains($0.lowercased()) }
+        .sorted { lhs, rhs in
+            if lhs.count != rhs.count {
+                return lhs.count > rhs.count
+            }
+            return lhs < rhs
+        }
+    return candidates.first
+}
+
+private nonisolated func glossaryCandidateWords(in text: String) -> [String] {
+    text
+        .split { !$0.isLetter && !$0.isNumber && $0 != "-" }
+        .map(String.init)
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { word in
+            word.count >= 3 && word.rangeOfCharacter(from: .letters) != nil
+        }
+}
+
 nonisolated struct TranscriptTextSplit: Equatable {
     let left: String
     let right: String
@@ -211,6 +239,7 @@ struct MeetingDetailView: View {
     let onRenameMeeting: (String) async throws -> Void
     let onRenameSpeaker: (String, String) -> Void
     let onUpdateTranscriptSegmentText: (UUID, String) async throws -> Void
+    let onAddGlossaryTerm: (String) -> Void
     let onSplitTranscriptSegment: (UUID, Int) async throws -> TranscriptSegment
     let onMergeTranscriptSegmentWithPrevious: (UUID) async throws -> TranscriptSegment
     let onAssignTranscriptSegment: (UUID, String) async throws -> Void
@@ -240,6 +269,7 @@ struct MeetingDetailView: View {
     @State private var renameValue = ""
     @State private var focusedTranscriptSegmentID: UUID?
     @State private var transcriptDrafts = [UUID: String]()
+    @State private var glossarySuggestion: TranscriptGlossarySuggestion?
     @State private var segmentAssignmentOpenID: UUID?
     @State private var toastText: String?
     @State private var toastTask: Task<Void, Never>?
@@ -285,6 +315,7 @@ struct MeetingDetailView: View {
             renameOpenSegmentID = nil
             focusedTranscriptSegmentID = nil
             transcriptDrafts.removeAll()
+            glossarySuggestion = nil
             segmentAssignmentOpenID = nil
             isMeetingTitleFocused = false
             activeTab = .transcript
@@ -586,6 +617,10 @@ struct MeetingDetailView: View {
                 }
             )
             .frame(minHeight: 22)
+
+            if glossarySuggestion?.segmentID == bubble.id, let suggestion = glossarySuggestion {
+                glossarySuggestionChip(suggestion)
+            }
         }
         .modifier(
             MeetingBubbleShell(
@@ -1217,6 +1252,7 @@ struct MeetingDetailView: View {
     }
 
     private func commitTranscriptText(segmentID: UUID, text: String) {
+        let oldText = transcriptBubbles.first(where: { $0.id == segmentID })?.text ?? ""
         transcriptDrafts[segmentID] = text
 
         Task {
@@ -1224,9 +1260,60 @@ struct MeetingDetailView: View {
                 try await onUpdateTranscriptSegmentText(segmentID, text)
                 await MainActor.run {
                     reloadTranscriptStateFromMeeting()
+                    updateGlossarySuggestion(
+                        segmentID: segmentID,
+                        oldText: oldText,
+                        newText: text
+                    )
                 }
             } catch {}
         }
+    }
+
+    private func updateGlossarySuggestion(segmentID: UUID, oldText: String, newText: String) {
+        let candidate = glossarySuggestionTerm(oldText: oldText, newText: newText)
+        if let candidate {
+            glossarySuggestion = TranscriptGlossarySuggestion(segmentID: segmentID, term: candidate)
+        } else if glossarySuggestion?.segmentID == segmentID {
+            glossarySuggestion = nil
+        }
+    }
+
+    private func glossarySuggestionChip(_ suggestion: TranscriptGlossarySuggestion) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "text.badge.plus")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(QMTheme.sage)
+            Text("Add “\(suggestion.term)” to glossary")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(QMTheme.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Button {
+                onAddGlossaryTerm(suggestion.term)
+                glossarySuggestion = nil
+                showToast("Glossary term added")
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(QMTheme.secondary)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            Button {
+                glossarySuggestion = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(QMTheme.muted)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.cardBorder, lineWidth: 1))
     }
 
     private func splitTranscriptSegment(_ bubble: TranscriptBubble, cursorOffset: Int) {

@@ -64,7 +64,7 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        #expect(harness.pipeline.receivedLanguageCode == "de")
+        #expect(harness.pipeline.receivedOptions.languageCode == "de")
     }
 
     @Test
@@ -74,7 +74,7 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        #expect(harness.pipeline.receivedLanguageCode == nil)
+        #expect(harness.pipeline.receivedOptions.languageCode == nil)
     }
 
     @Test
@@ -87,6 +87,42 @@ struct FluidTranscriptionServiceTests {
         try await harness.service.transcribe(meetingID: meeting.id)
 
         #expect(harness.pipeline.receivedKnownSpeakers.isEmpty)
+    }
+
+    @Test
+    func transcribePersistsRawTranscriptAndPipelineMetadata() async throws {
+        let rawTranscript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "S1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "raw kubernettes", speakerID: "S1")]
+        )
+        let harness = try FluidTranscriptionHarness(
+            outcome: .success(
+                FluidTranscriptionResult(
+                    speakers: [TranscriptSpeaker(id: "S1", displayName: "Speaker 1")],
+                    segments: [TranscriptSegment(text: "raw Kubernetes", speakerID: "S1")],
+                    rawTranscript: rawTranscript,
+                    metadata: TranscriptionPipelineMetadata(
+                        asrModel: "Parakeet TDT v3",
+                        languageCode: "en",
+                        requestedCTCMode: .ctc110m,
+                        resolvedCTCMode: .ctc110m,
+                        glossaryTermCount: 1,
+                        warnings: ["test warning"]
+                    )
+                )
+            ),
+            languageCode: "en",
+            ctcMode: .ctc110m
+        )
+        let meeting = try harness.createRecordedMeeting()
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.rawStoredTranscript == rawTranscript)
+        #expect(reloaded.storedTranscript?.fullText == "raw Kubernetes")
+        #expect(reloaded.transcriptionPipelineMetadata?.requestedCTCMode == .ctc110m)
+        #expect(reloaded.transcriptionPipelineMetadata?.warnings == ["test warning"])
     }
 
     @Test
@@ -425,7 +461,8 @@ private struct FluidTranscriptionHarness {
         outcome: StubFluidAudioPipeline.Outcome,
         similarityThreshold: Float = 0.8,
         enrollmentResult: Result<Void, Error> = .success(()),
-        languageCode: String? = nil
+        languageCode: String? = nil,
+        ctcMode: TranscriptionCTCMode = .off
     ) throws {
         let schema = Schema([
             Meeting.self,
@@ -452,7 +489,7 @@ private struct FluidTranscriptionHarness {
             pipeline: pipeline,
             knownSpeakerStore: knownSpeakerStore,
             knownSpeakerEnrollmentService: enrollmentService,
-            languageStore: StubTranscriptionLanguageStore(code: languageCode),
+            languageStore: StubTranscriptionLanguageStore(code: languageCode, ctcMode: ctcMode),
             similarityThreshold: similarityThreshold,
             fileManager: fileManager
         )
@@ -490,8 +527,13 @@ private struct FluidTranscriptionHarness {
 
 private struct StubTranscriptionLanguageStore: TranscriptionLanguageStoring {
     let code: String?
+    let ctcMode: TranscriptionCTCMode
     func languageCode() -> String? { code }
     func saveLanguageCode(_: String?) {}
+    func pipelineOptions() -> TranscriptionPipelineOptions {
+        TranscriptionPipelineOptions(languageCode: code, ctcMode: ctcMode)
+    }
+    func savePipelineOptions(_: TranscriptionPipelineOptions) {}
 }
 
 @MainActor
@@ -504,7 +546,8 @@ private final class StubFluidAudioPipeline: FluidAudioTranscribing, @unchecked S
     private var outcome: Outcome
     private(set) var receivedKnownSpeakers: [FluidKnownSpeakerSnapshot] = []
     private(set) var receivedThreshold: Float?
-    private(set) var receivedLanguageCode: String?
+    private(set) var receivedOptions = TranscriptionPipelineOptions()
+    private(set) var receivedGlossaryTerms: [TranscriptionGlossaryTerm] = []
     private var shouldSuspendNextRun = false
     private var pendingRunCount = 0
     private var pendingContinuation: CheckedContinuation<Void, Never>?
@@ -533,12 +576,14 @@ private final class StubFluidAudioPipeline: FluidAudioTranscribing, @unchecked S
         audioFileURL _: URL,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         similarityThreshold: Float,
-        languageCode: String?,
+        options: TranscriptionPipelineOptions,
+        glossaryTerms: [TranscriptionGlossaryTerm],
         progress _: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult {
         receivedKnownSpeakers = knownSpeakers
         receivedThreshold = similarityThreshold
-        receivedLanguageCode = languageCode
+        receivedOptions = options
+        receivedGlossaryTerms = glossaryTerms
 
         if shouldSuspendNextRun {
             shouldSuspendNextRun = false

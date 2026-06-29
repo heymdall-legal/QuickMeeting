@@ -14,9 +14,12 @@ struct MeetingSummarySettingsStoreTests {
             authToken: nil,
             authHeaderName: nil,
             modelName: nil,
-            promptTemplate: nil
+            promptTemplate: nil,
+            correctionModelName: nil,
+            correctionPromptTemplate: nil
         ))
         #expect(store.validatedSettings() == nil)
+        #expect(store.validatedCorrectionSettings() == nil)
     }
 
     @Test
@@ -30,7 +33,9 @@ struct MeetingSummarySettingsStoreTests {
             authToken: " token ",
             authHeaderName: " x-auth-token ",
             modelName: " gpt-4o-mini ",
-            promptTemplate: "Summarize {text} for {date}"
+            promptTemplate: "Summarize {text} for {date}",
+            correctionModelName: " gpt-4.1-mini ",
+            correctionPromptTemplate: "Correct {text} using {glossary}"
         ))
 
         #expect(store.settings() == MeetingSummarySettings(
@@ -38,7 +43,9 @@ struct MeetingSummarySettingsStoreTests {
             authToken: " token ",
             authHeaderName: " x-auth-token ",
             modelName: " gpt-4o-mini ",
-            promptTemplate: "Summarize {text} for {date}"
+            promptTemplate: "Summarize {text} for {date}",
+            correctionModelName: " gpt-4.1-mini ",
+            correctionPromptTemplate: "Correct {text} using {glossary}"
         ))
     }
 
@@ -52,7 +59,9 @@ struct MeetingSummarySettingsStoreTests {
             authToken: " secret-token ",
             authHeaderName: " x-api-key ",
             modelName: " gpt-4o-mini ",
-            promptTemplate: " Summarize {text} on {date} "
+            promptTemplate: " Summarize {text} on {date} ",
+            correctionModelName: " gpt-4.1-mini ",
+            correctionPromptTemplate: " Correct {text} "
         ))
 
         #expect(store.validatedSettings() == ValidatedMeetingSummarySettings(
@@ -61,6 +70,13 @@ struct MeetingSummarySettingsStoreTests {
             authHeaderName: "x-api-key",
             modelName: "gpt-4o-mini",
             promptTemplate: "Summarize {text} on {date}"
+        ))
+        #expect(store.validatedCorrectionSettings() == ValidatedLLMCorrectionSettings(
+            baseURL: "https://example.com/v1",
+            authToken: "secret-token",
+            authHeaderName: "x-api-key",
+            modelName: "gpt-4.1-mini",
+            promptTemplate: "Correct {text}"
         ))
     }
 
@@ -74,9 +90,12 @@ struct MeetingSummarySettingsStoreTests {
             authToken: "secret-token",
             authHeaderName: nil,
             modelName: "gpt-4o-mini",
-            promptTemplate: "Summarize {text}"
+            promptTemplate: "Summarize {text}",
+            correctionModelName: "gpt-4.1-mini",
+            correctionPromptTemplate: "Correct {text}"
         ))
 
         #expect(store.validatedSettings()?.authHeaderName == "Authorization")
+        #expect(store.validatedCorrectionSettings()?.authHeaderName == "Authorization")
     }
 }

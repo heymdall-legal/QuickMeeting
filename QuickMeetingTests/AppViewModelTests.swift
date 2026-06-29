@@ -466,7 +466,9 @@ private struct StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring {
                 authToken: settingsValue.authToken,
                 authHeaderName: settingsValue.authHeaderName,
                 modelName: settingsValue.modelName,
-                promptTemplate: settingsValue.promptTemplate
+                promptTemplate: settingsValue.promptTemplate,
+                correctionModelName: nil,
+                correctionPromptTemplate: nil
             )
         }
 
@@ -475,12 +477,18 @@ private struct StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring {
             authToken: nil,
             authHeaderName: nil,
             modelName: nil,
-            promptTemplate: nil
+            promptTemplate: nil,
+            correctionModelName: nil,
+            correctionPromptTemplate: nil
         )
     }
 
     func validatedSettings() -> ValidatedMeetingSummarySettings? {
         settingsValue
+    }
+
+    func validatedCorrectionSettings() -> ValidatedLLMCorrectionSettings? {
+        nil
     }
 
     func saveSettings(_: MeetingSummarySettings) {}

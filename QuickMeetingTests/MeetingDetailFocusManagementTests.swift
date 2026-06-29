@@ -86,6 +86,14 @@ struct MeetingDetailFocusManagementTests {
         #expect(MeetingBubbleShellMetrics.transcript.verticalPadding == 13)
     }
 
+    @Test
+    func glossarySuggestionTermPrefersNewTechnicalWord() {
+        #expect(glossarySuggestionTerm(
+            oldText: "We should deploy to cuber net ease.",
+            newText: "We should deploy to Kubernetes."
+        ) == "Kubernetes")
+    }
+
     @Test @MainActor
     func clearingMeetingDetailFocusRemovesCurrentFieldEditorResponder() throws {
         let window = NSWindow(

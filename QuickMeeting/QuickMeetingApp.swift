@@ -54,18 +54,21 @@ struct QuickMeetingApp: App {
             )
             let transcriptionProgressCenter = TranscriptionProgressCenter()
             let transcriptionSettingsStore = TranscriptionSettingsStore()
+            let transcriptionGlossaryStore = TranscriptionGlossaryStore()
+            let meetingSummarySettingsStore = MeetingSummarySettingsStore()
             let transcriptionService = FluidTranscriptionService(
                 meetingStore: meetingStore,
                 progressCenter: transcriptionProgressCenter,
                 knownSpeakerStore: knownSpeakerStore,
                 knownSpeakerEnrollmentService: knownSpeakerEnrollmentService,
-                languageStore: transcriptionSettingsStore
+                languageStore: transcriptionSettingsStore,
+                glossaryStore: transcriptionGlossaryStore,
+                correctionService: LLMTranscriptCorrectionService(settingsStore: meetingSummarySettingsStore)
             )
             let meetingTranscriptStore = MeetingTranscriptStore(meetingStore: meetingStore)
             let calendarSettingsStore = CalendarSettingsStore()
             let calendarIntegration = NativeCalendarIntegration(settingsStore: calendarSettingsStore)
             let autoRecordingSettingsStore = AutoRecordingSettingsStore()
-            let meetingSummarySettingsStore = MeetingSummarySettingsStore()
             let meetingSummaryService = MeetingSummaryService(
                 meetingStore: meetingStore,
                 settingsStore: meetingSummarySettingsStore
@@ -104,7 +107,10 @@ struct QuickMeetingApp: App {
                 wrappedValue: autoRecordingSettingsViewModel
             )
             _transcriptionSettingsViewModel = StateObject(
-                wrappedValue: TranscriptionSettingsViewModel(settingsStore: transcriptionSettingsStore)
+                wrappedValue: TranscriptionSettingsViewModel(
+                    settingsStore: transcriptionSettingsStore,
+                    glossaryStore: transcriptionGlossaryStore
+                )
             )
             _meetingSummarySettingsViewModel = StateObject(
                 wrappedValue: MeetingSummarySettingsViewModel(
