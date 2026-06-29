@@ -18,10 +18,12 @@ struct QMSettingsSheet: View {
     @ObservedObject var autoRecordingViewModel: AutoRecordingSettingsViewModel
     @ObservedObject var transcriptionViewModel: TranscriptionSettingsViewModel
     @ObservedObject var meetingSummaryViewModel: MeetingSummarySettingsViewModel
+    @ObservedObject var markdownExportViewModel: MarkdownExportSettingsViewModel
     let onClose: () -> Void
 
     @State private var isCalendarDropdownOpen = false
     @State private var isAppImporterPresented = false
+    @State private var isMarkdownDirectoryImporterPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +33,8 @@ struct QMSettingsSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     transcriptionSection
+                    Divider().overlay(QMTheme.hairline).padding(.vertical, 22)
+                    markdownExportSection
                     Divider().overlay(QMTheme.hairline).padding(.vertical, 22)
                     calendarsSection
                     Divider().overlay(QMTheme.hairline).padding(.vertical, 22)
@@ -60,10 +64,23 @@ struct QMSettingsSheet: View {
             guard case .success(let urls) = result, let url = urls.first else { return }
             Task { try? await autoRecordingViewModel.addSelectedApp(at: url) }
         }
+        .fileImporter(
+            isPresented: $isMarkdownDirectoryImporterPresented,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            markdownExportViewModel.selectDirectory(url)
+        }
         .alert("Auto Recording App Error", isPresented: autoRecordingErrorIsPresented) {
             Button("OK") { autoRecordingViewModel.clearError() }
         } message: {
             Text(autoRecordingViewModel.errorMessage ?? "Unknown error.")
+        }
+        .alert("Markdown Export Error", isPresented: markdownExportErrorIsPresented) {
+            Button("OK") { markdownExportViewModel.clearError() }
+        } message: {
+            Text(markdownExportViewModel.errorMessage ?? "Unknown error.")
         }
     }
 
@@ -165,6 +182,69 @@ struct QMSettingsSheet: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    // MARK: Markdown Export
+
+    private var markdownExportSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Markdown Export")
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Obsidian folder")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("QuickMeeting writes transcript and summary Markdown files for every completed meeting.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 8) {
+                    if markdownExportViewModel.hasDirectory {
+                        Button {
+                            markdownExportViewModel.clearDirectory()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(QMTheme.muted)
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear folder")
+                    }
+
+                    Button {
+                        isMarkdownDirectoryImporterPresented = true
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text(markdownExportViewModel.hasDirectory ? "Change" : "Choose")
+                                .font(.system(size: 12.5, weight: .semibold))
+                        }
+                        .foregroundStyle(QMTheme.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.recordedDot, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text(markdownExportViewModel.displayPath)
+                .font(.system(size: 12.5, design: .monospaced))
+                .foregroundStyle(markdownExportViewModel.hasDirectory ? QMTheme.secondary : QMTheme.faint)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
+        }
     }
 
     // MARK: Calendars
@@ -618,6 +698,13 @@ struct QMSettingsSheet: View {
         Binding(
             get: { autoRecordingViewModel.errorMessage != nil },
             set: { if !$0 { autoRecordingViewModel.clearError() } }
+        )
+    }
+
+    private var markdownExportErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { markdownExportViewModel.errorMessage != nil },
+            set: { if !$0 { markdownExportViewModel.clearError() } }
         )
     }
 }

@@ -49,12 +49,12 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        let received = await harness.pipeline.receivedKnownSpeakers
+        let received = harness.pipeline.receivedKnownSpeakers
         #expect(received.count == 1)
         let snapshot = try #require(received.first)
         #expect(snapshot.displayName == "Alice")
         #expect(snapshot.centroids == [[0.5, 0.25]])
-        #expect(await harness.pipeline.receivedThreshold == 0.73)
+        #expect(harness.pipeline.receivedThreshold == 0.73)
     }
 
     @Test
@@ -64,7 +64,7 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        #expect(await harness.pipeline.receivedLanguageCode == "de")
+        #expect(harness.pipeline.receivedLanguageCode == "de")
     }
 
     @Test
@@ -74,7 +74,7 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        #expect(await harness.pipeline.receivedLanguageCode == nil)
+        #expect(harness.pipeline.receivedLanguageCode == nil)
     }
 
     @Test
@@ -86,7 +86,7 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        #expect(await harness.pipeline.receivedKnownSpeakers.isEmpty)
+        #expect(harness.pipeline.receivedKnownSpeakers.isEmpty)
     }
 
     @Test
@@ -112,7 +112,7 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        let calls = await harness.enrollmentService.calls
+        let calls = harness.enrollmentService.calls
         #expect(calls.count == 1)
         let call = try #require(calls.first)
         #expect(call.displayName == "Alice")
@@ -145,7 +145,7 @@ struct FluidTranscriptionServiceTests {
 
         let reloaded = try harness.reloadMeeting(id: meeting.id)
         #expect(try reloaded.status == .completed)
-        #expect(await harness.enrollmentService.calls.count == 1)
+        #expect(harness.enrollmentService.calls.count == 1)
     }
 
     @Test
@@ -197,7 +197,7 @@ struct FluidTranscriptionServiceTests {
         let harness = try FluidTranscriptionHarness(outcome: .success(.empty))
         let firstMeeting = try harness.createRecordedMeeting()
         let secondMeeting = try harness.createRecordedMeeting()
-        await harness.pipeline.suspendNextRun()
+        harness.pipeline.suspendNextRun()
 
         let task = Task {
             try await harness.service.transcribe(meetingID: firstMeeting.id)
@@ -208,7 +208,7 @@ struct FluidTranscriptionServiceTests {
             try await harness.service.transcribe(meetingID: secondMeeting.id)
         }
 
-        await harness.pipeline.resume()
+        harness.pipeline.resume()
         try await task.value
     }
 }
@@ -494,7 +494,8 @@ private struct StubTranscriptionLanguageStore: TranscriptionLanguageStoring {
     func saveLanguageCode(_: String?) {}
 }
 
-private actor StubFluidAudioPipeline: FluidAudioTranscribing {
+@MainActor
+private final class StubFluidAudioPipeline: FluidAudioTranscribing, @unchecked Sendable {
     enum Outcome {
         case success(FluidTranscriptionResult)
         case failure(Error)
@@ -556,7 +557,8 @@ private actor StubFluidAudioPipeline: FluidAudioTranscribing {
     }
 }
 
-private actor RecordingKnownSpeakerEnrollmentService: KnownSpeakerEnrolling {
+@MainActor
+private final class RecordingKnownSpeakerEnrollmentService: KnownSpeakerEnrolling, @unchecked Sendable {
     struct Call: Sendable {
         let displayName: String
         let speaker: TranscriptSpeaker

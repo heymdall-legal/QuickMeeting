@@ -17,6 +17,7 @@ struct QuickMeetingApp: App {
     @StateObject private var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
     @StateObject private var transcriptionSettingsViewModel: TranscriptionSettingsViewModel
     @StateObject private var meetingSummarySettingsViewModel: MeetingSummarySettingsViewModel
+    @StateObject private var markdownExportSettingsViewModel: MarkdownExportSettingsViewModel
     @State private var menuBarController: MenuBarController?
 
     init() {
@@ -35,7 +36,14 @@ struct QuickMeetingApp: App {
                 configurations: [modelConfiguration]
             )
             sharedModelContainer = modelContainer
-            let meetingStore = MeetingStore(modelContext: modelContainer.mainContext)
+            let markdownExportSettingsStore = MeetingMarkdownExportSettingsStore()
+            let markdownExporter = ConfiguredMeetingMarkdownExporter(
+                settingsStore: markdownExportSettingsStore
+            )
+            let meetingStore = MeetingStore(
+                modelContext: modelContainer.mainContext,
+                markdownExporter: markdownExporter
+            )
             let knownSpeakerStore = KnownSpeakerStore(modelContext: modelContainer.mainContext)
             let knownSpeakerEnrollmentService = KnownSpeakerEnrollmentService(store: knownSpeakerStore)
             try? meetingStore.resetStuckRecordingMeetings(updatedAt: Date())
@@ -103,6 +111,12 @@ struct QuickMeetingApp: App {
                     settingsStore: meetingSummarySettingsStore
                 )
             )
+            _markdownExportSettingsViewModel = StateObject(
+                wrappedValue: MarkdownExportSettingsViewModel(
+                    settingsStore: markdownExportSettingsStore,
+                    meetingStore: meetingStore
+                )
+            )
             autoRecordingMonitor = MeetingAppMonitor(
                 settingsStore: autoRecordingSettingsStore,
                 activitySource: NativeMeetingAppActivitySource(),
@@ -122,7 +136,8 @@ struct QuickMeetingApp: App {
                 calendarSettingsViewModel: calendarSettingsViewModel,
                 autoRecordingSettingsViewModel: autoRecordingSettingsViewModel,
                 transcriptionSettingsViewModel: transcriptionSettingsViewModel,
-                meetingSummarySettingsViewModel: meetingSummarySettingsViewModel
+                meetingSummarySettingsViewModel: meetingSummarySettingsViewModel,
+                markdownExportSettingsViewModel: markdownExportSettingsViewModel
             )
                 .task {
                     if menuBarController == nil {

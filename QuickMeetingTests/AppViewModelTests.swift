@@ -9,7 +9,7 @@ struct AppViewModelTests {
     func generateSummaryWithoutExistingSummarySavesResult() async throws {
         let harness = try AppViewModelHarness()
         let meeting = try harness.createCompletedMeeting(summaryText: nil)
-        await harness.summaryService.setSummaryResult(.success("Fresh summary"))
+        harness.summaryService.setSummaryResult(.success("Fresh summary"))
 
         await harness.viewModel.generateSummary(for: meeting)
 
@@ -29,7 +29,7 @@ struct AppViewModelTests {
         let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
         #expect(reloaded.summaryText == nil)
         #expect(harness.viewModel.summaryErrorMessage == MeetingSummaryServiceError.settingsIncomplete.localizedDescription)
-        #expect(await harness.summaryService.invocationCount == 0)
+        #expect(harness.summaryService.invocationCount == 0)
     }
 
     @Test
@@ -40,14 +40,14 @@ struct AppViewModelTests {
         await harness.viewModel.generateSummary(for: meeting)
 
         #expect(harness.viewModel.summaryConfirmationMeetingID == meeting.id)
-        #expect(await harness.summaryService.invocationCount == 0)
+        #expect(harness.summaryService.invocationCount == 0)
     }
 
     @Test
     func confirmSummaryReplacementOverwritesStoredSummary() async throws {
         let harness = try AppViewModelHarness()
         let meeting = try harness.createCompletedMeeting(summaryText: "Old summary")
-        await harness.summaryService.setSummaryResult(.success("New summary"))
+        harness.summaryService.setSummaryResult(.success("New summary"))
 
         await harness.viewModel.generateSummary(for: meeting)
         await harness.viewModel.confirmSummaryReplacement()
@@ -61,7 +61,7 @@ struct AppViewModelTests {
     func failedReplacementPreservesExistingSummary() async throws {
         let harness = try AppViewModelHarness()
         let meeting = try harness.createCompletedMeeting(summaryText: "Old summary")
-        await harness.summaryService.setSummaryResult(.failure(MeetingSummaryServiceError.responseInvalid))
+        harness.summaryService.setSummaryResult(.failure(MeetingSummaryServiceError.responseInvalid))
 
         await harness.viewModel.generateSummary(for: meeting)
         await harness.viewModel.confirmSummaryReplacement()
@@ -76,7 +76,7 @@ struct AppViewModelTests {
         let harness = try AppViewModelHarness()
         let failedMeeting = try harness.createCompletedMeeting(summaryText: nil)
         let otherMeeting = try harness.createCompletedMeeting(summaryText: nil)
-        await harness.summaryService.setSummaryResult(.failure(MeetingSummaryServiceError.responseInvalid))
+        harness.summaryService.setSummaryResult(.failure(MeetingSummaryServiceError.responseInvalid))
 
         await harness.viewModel.generateSummary(for: failedMeeting)
 
@@ -111,7 +111,7 @@ struct AppViewModelTests {
         let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
         #expect(reloaded.storedTranscript?.speakers.first?.displayName == "Masha")
         #expect(harness.viewModel.renameSpeakerErrorMessage == nil)
-        #expect(await harness.enrollmentService.calls.count == 1)
+        #expect(harness.enrollmentService.calls.count == 1)
     }
 }
 
@@ -207,7 +207,8 @@ private struct AppViewModelHarness {
     }
 }
 
-private actor StubKnownSpeakerEnrollmentService: KnownSpeakerEnrolling {
+@MainActor
+private final class StubKnownSpeakerEnrollmentService: KnownSpeakerEnrolling {
     struct Call: Sendable {
         let displayName: String
         let speaker: TranscriptSpeaker
@@ -227,7 +228,8 @@ private actor StubKnownSpeakerEnrollmentService: KnownSpeakerEnrolling {
     }
 }
 
-private actor StubMeetingSummaryService: MeetingSummaryServicing {
+@MainActor
+private final class StubMeetingSummaryService: MeetingSummaryServicing {
     private(set) var invocationCount = 0
     private var summaryResult: Result<String, Error> = .failure(MeetingSummaryServiceError.responseInvalid)
 

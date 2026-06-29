@@ -27,6 +27,15 @@ enum MeetingStoreError: LocalizedError, Equatable {
 
 struct MeetingStore {
     let modelContext: ModelContext
+    let markdownExporter: (any MeetingMarkdownExporting)?
+
+    init(
+        modelContext: ModelContext,
+        markdownExporter: (any MeetingMarkdownExporting)? = nil
+    ) {
+        self.modelContext = modelContext
+        self.markdownExporter = markdownExporter
+    }
 
     @discardableResult
     func createMeeting(
@@ -74,8 +83,17 @@ struct MeetingStore {
     }
 
     func deleteMeeting(_ meeting: Meeting) throws {
+        try? markdownExporter?.removeTranscript(for: meeting.id)
+        try? markdownExporter?.removeSummary(for: meeting.id)
         modelContext.delete(meeting)
         try modelContext.save()
+    }
+
+    func fetchMeetings() throws -> [Meeting] {
+        let descriptor = FetchDescriptor<Meeting>(
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+        )
+        return try modelContext.fetch(descriptor)
     }
 
     func fetchMeeting(id: UUID) throws -> Meeting {
@@ -112,12 +130,14 @@ struct MeetingStore {
 
         meeting.renameTitle(to: normalizedTitle, updatedAt: updatedAt)
         try modelContext.save()
+        syncMarkdownExportBestEffort(for: meeting)
     }
 
     func startTranscription(meetingID: UUID, updatedAt: Date) throws {
         let meeting = try fetchMeeting(id: meetingID)
         meeting.beginTranscription(updatedAt: updatedAt)
         try modelContext.save()
+        syncMarkdownExportBestEffort(for: meeting)
     }
 
     func completeTranscription(
@@ -133,12 +153,14 @@ struct MeetingStore {
             updatedAt: updatedAt
         )
         try modelContext.save()
+        syncMarkdownExportBestEffort(for: meeting)
     }
 
     func saveSummary(meetingID: UUID, summary: String, updatedAt: Date) throws {
         let meeting = try fetchMeeting(id: meetingID)
         meeting.storeSummary(summary, updatedAt: updatedAt)
         try modelContext.save()
+        syncMarkdownExportBestEffort(for: meeting)
     }
 
     @discardableResult
@@ -169,7 +191,18 @@ struct MeetingStore {
             throw MeetingTranscriptStoreError.transcriptMissing
         }
 
+        syncMarkdownExportBestEffort(for: meeting)
         return transcript
+    }
+
+    func exportMarkdownForExistingMeetings() throws {
+        guard let markdownExporter else {
+            return
+        }
+
+        for meeting in try fetchMeetings() {
+            try syncMarkdownExport(for: meeting, using: markdownExporter)
+        }
     }
 
     func failTranscription(meetingID: UUID, updatedAt: Date) throws {
@@ -209,6 +242,31 @@ struct MeetingStore {
         }
         if didChange {
             try modelContext.save()
+        }
+    }
+
+    private func syncMarkdownExportBestEffort(for meeting: Meeting) {
+        guard let markdownExporter else {
+            return
+        }
+
+        try? syncMarkdownExport(for: meeting, using: markdownExporter)
+    }
+
+    private func syncMarkdownExport(
+        for meeting: Meeting,
+        using markdownExporter: any MeetingMarkdownExporting
+    ) throws {
+        if let transcript = meeting.storedTranscript {
+            try markdownExporter.exportTranscript(for: meeting, transcript: transcript)
+        } else {
+            try markdownExporter.removeTranscript(for: meeting.id)
+        }
+
+        if let summary = meeting.summaryText {
+            try markdownExporter.exportSummary(for: meeting, summary: summary)
+        } else {
+            try markdownExporter.removeSummary(for: meeting.id)
         }
     }
 }

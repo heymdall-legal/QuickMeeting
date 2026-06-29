@@ -14,6 +14,7 @@ struct ContentView: View {
     @ObservedObject var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
     @ObservedObject var transcriptionSettingsViewModel: TranscriptionSettingsViewModel
     @ObservedObject var meetingSummarySettingsViewModel: MeetingSummarySettingsViewModel
+    @ObservedObject var markdownExportSettingsViewModel: MarkdownExportSettingsViewModel
     @Query(sort: \Meeting.startedAt, order: .reverse) private var meetings: [Meeting]
     @State private var selection = defaultSidebarSelection()
     @State private var isSettingsPresented = false
@@ -120,6 +121,7 @@ struct ContentView: View {
                 autoRecordingViewModel: autoRecordingSettingsViewModel,
                 transcriptionViewModel: transcriptionSettingsViewModel,
                 meetingSummaryViewModel: meetingSummarySettingsViewModel,
+                markdownExportViewModel: markdownExportSettingsViewModel,
                 onClose: { isSettingsPresented = false }
             )
         }
@@ -239,6 +241,10 @@ extension Notification.Name {
         transcriptionSettingsViewModel: TranscriptionSettingsViewModel(settingsStore: TranscriptionSettingsStore()),
         meetingSummarySettingsViewModel: MeetingSummarySettingsViewModel(
             settingsStore: MeetingSummarySettingsStore()
+        ),
+        markdownExportSettingsViewModel: MarkdownExportSettingsViewModel(
+            settingsStore: MeetingMarkdownExportSettingsStore(),
+            meetingStore: MeetingStore(modelContext: container.mainContext)
         )
     )
         .modelContainer(container)
