@@ -77,7 +77,7 @@ struct MeetingTranscriptContentTests {
     }
 
     @Test
-    func meetingStoredTranscriptSortsPersistedSegmentsChronologically() throws {
+    func meetingStoredTranscriptUsesPersistedSortIndexWhenAvailable() throws {
         let meeting = Meeting(
             title: "Sync",
             startedAt: Date(timeIntervalSince1970: 1_714_561_200),
@@ -90,21 +90,23 @@ struct MeetingTranscriptContentTests {
                     text: "Second sentence",
                     startTime: 12,
                     endTime: 18,
-                    speakerID: "speaker-1"
+                    speakerID: "speaker-1",
+                    sortIndex: 0
                 ),
                 PersistedTranscriptSegment(
                     id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
                     text: "First sentence",
                     startTime: 3,
                     endTime: 9,
-                    speakerID: "speaker-1"
+                    speakerID: "speaker-1",
+                    sortIndex: 1
                 ),
             ]
         )
 
         let transcript = try #require(meeting.storedTranscript)
 
-        #expect(transcript.segments.map(\.text) == ["First sentence", "Second sentence"])
+        #expect(transcript.segments.map(\.text) == ["Second sentence", "First sentence"])
         let content = loadMeetingTranscriptContent(from: transcript)
         guard case .transcript(let display) = content else {
             Issue.record("Expected transcript display content")
@@ -112,9 +114,9 @@ struct MeetingTranscriptContentTests {
         }
 
         #expect(display.speakers == [TranscriptSpeaker(id: "speaker-1", displayName: "Masha")])
-        #expect(display.segments.map(\.text) == ["First sentence", "Second sentence"])
-        #expect(display.segments.map(\.startTime) == [3, 12])
-        #expect(display.segments.map(\.endTime) == [9, 18])
+        #expect(display.segments.map(\.text) == ["Second sentence", "First sentence"])
+        #expect(display.segments.map(\.startTime) == [12, 3])
+        #expect(display.segments.map(\.endTime) == [18, 9])
         #expect(display.segments.map(\.speakerID) == ["speaker-1", "speaker-1"])
     }
 

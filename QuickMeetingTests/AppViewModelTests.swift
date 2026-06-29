@@ -183,6 +183,101 @@ struct AppViewModelTests {
         #expect(harness.viewModel.renameSpeakerErrorMessage == nil)
         #expect(harness.enrollmentService.calls.count == 1)
     }
+
+    @Test
+    func updateTranscriptSegmentTextPersistsThroughTranscriptStore() async throws {
+        let harness = try AppViewModelHarness()
+        let segmentID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let meeting = try harness.createMeetingWithTranscript(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(id: segmentID, text: "Original", speakerID: "speaker-1")]
+            )
+        )
+
+        try await harness.viewModel.updateTranscriptSegmentText(
+            meetingID: meeting.id,
+            segmentID: segmentID,
+            text: "Edited"
+        )
+
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.storedTranscript?.segments.map(\.text) == ["Edited"])
+        #expect(harness.viewModel.renameSpeakerErrorMessage == nil)
+    }
+
+    @Test
+    func splitTranscriptSegmentReturnsNewSegment() async throws {
+        let harness = try AppViewModelHarness()
+        let segmentID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let meeting = try harness.createMeetingWithTranscript(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(id: segmentID, text: "Hello Masha", speakerID: "speaker-1")]
+            )
+        )
+
+        let newSegment = try await harness.viewModel.splitTranscriptSegment(
+            meetingID: meeting.id,
+            segmentID: segmentID,
+            cursorOffset: 5
+        )
+
+        #expect(newSegment.text == "Masha")
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.storedTranscript?.segments.map(\.text) == ["Hello", "Masha"])
+    }
+
+    @Test
+    func mergeTranscriptSegmentWithPreviousReturnsMergedSegment() async throws {
+        let harness = try AppViewModelHarness()
+        let firstID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let secondID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let meeting = try harness.createMeetingWithTranscript(
+            StoredTranscript(
+                speakers: [
+                    TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1"),
+                    TranscriptSpeaker(id: "speaker-2", displayName: "Speaker 2"),
+                ],
+                segments: [
+                    TranscriptSegment(id: firstID, text: "First", speakerID: "speaker-1"),
+                    TranscriptSegment(id: secondID, text: "Second", speakerID: "speaker-2"),
+                ]
+            )
+        )
+
+        let merged = try await harness.viewModel.mergeTranscriptSegmentWithPrevious(
+            meetingID: meeting.id,
+            segmentID: secondID
+        )
+
+        #expect(merged.id == firstID)
+        #expect(merged.text == "First\nSecond")
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.storedTranscript?.segments.map(\.text) == ["First\nSecond"])
+    }
+
+    @Test
+    func assignTranscriptSegmentTrimsSpeakerName() async throws {
+        let harness = try AppViewModelHarness()
+        let segmentID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let meeting = try harness.createMeetingWithTranscript(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(id: segmentID, text: "Hello", speakerID: "speaker-1")]
+            )
+        )
+
+        try await harness.viewModel.assignTranscriptSegment(
+            meetingID: meeting.id,
+            segmentID: segmentID,
+            speakerName: " Masha "
+        )
+
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        let speaker = try #require(reloaded.storedTranscript?.speakers.first(where: { $0.displayName == "Masha" }))
+        #expect(reloaded.storedTranscript?.segments.map(\.speakerID) == [speaker.id])
+    }
 }
 
 @MainActor

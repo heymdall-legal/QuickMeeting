@@ -422,6 +422,80 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func updateTranscriptSegmentText(
+        meetingID: UUID,
+        segmentID: UUID,
+        text: String
+    ) async throws {
+        do {
+            _ = try meetingTranscriptStore.updateSegmentText(
+                segmentID: segmentID,
+                text: text,
+                in: meetingID
+            )
+            renameSpeakerErrorMessage = nil
+        } catch {
+            renameSpeakerErrorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    func splitTranscriptSegment(
+        meetingID: UUID,
+        segmentID: UUID,
+        cursorOffset: Int
+    ) async throws -> TranscriptSegment {
+        do {
+            let segment = try meetingTranscriptStore.splitSegment(
+                segmentID: segmentID,
+                at: cursorOffset,
+                in: meetingID
+            )
+            renameSpeakerErrorMessage = nil
+            return segment
+        } catch {
+            renameSpeakerErrorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    func mergeTranscriptSegmentWithPrevious(
+        meetingID: UUID,
+        segmentID: UUID
+    ) async throws -> TranscriptSegment {
+        do {
+            let segment = try meetingTranscriptStore.mergeSegmentWithPrevious(
+                segmentID: segmentID,
+                in: meetingID
+            )
+            renameSpeakerErrorMessage = nil
+            return segment
+        } catch {
+            renameSpeakerErrorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    func assignTranscriptSegment(
+        meetingID: UUID,
+        segmentID: UUID,
+        speakerName: String
+    ) async throws {
+        let trimmedName = speakerName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        do {
+            _ = try meetingTranscriptStore.assignSegment(
+                segmentID: segmentID,
+                toSpeakerNamed: trimmedName,
+                in: meetingID
+            )
+            renameSpeakerErrorMessage = nil
+        } catch {
+            renameSpeakerErrorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
     func clearRenameSpeakerError() {
         renameSpeakerErrorMessage = nil
     }

@@ -225,6 +225,169 @@ struct MeetingStore {
         return transcript
     }
 
+    @discardableResult
+    func updateTranscriptSegmentText(
+        meetingID: UUID,
+        segmentID: UUID,
+        text: String,
+        updatedAt: Date
+    ) throws -> StoredTranscript {
+        let meeting = try fetchMeeting(id: meetingID)
+        let transcript = try requireStoredTranscript(from: meeting)
+        let normalizedText = try normalizedTranscriptSegmentText(text)
+        guard let segmentIndex = transcript.segments.firstIndex(where: { $0.id == segmentID }) else {
+            throw MeetingTranscriptStoreError.segmentNotFound
+        }
+
+        var segments = transcript.segments
+        let segment = segments[segmentIndex]
+        segments[segmentIndex] = TranscriptSegment(
+            id: segment.id,
+            text: normalizedText,
+            startTime: segment.startTime,
+            endTime: segment.endTime,
+            speakerID: segment.speakerID
+        )
+
+        return try replaceTranscript(
+            meeting,
+            speakers: transcript.speakers,
+            segments: segments,
+            updatedAt: updatedAt
+        )
+    }
+
+    @discardableResult
+    func splitTranscriptSegment(
+        meetingID: UUID,
+        segmentID: UUID,
+        cursorOffset: Int,
+        updatedAt: Date
+    ) throws -> TranscriptSegment {
+        let meeting = try fetchMeeting(id: meetingID)
+        let transcript = try requireStoredTranscript(from: meeting)
+        guard let segmentIndex = transcript.segments.firstIndex(where: { $0.id == segmentID }) else {
+            throw MeetingTranscriptStoreError.segmentNotFound
+        }
+
+        let segment = transcript.segments[segmentIndex]
+        let split = try splitTranscriptSegmentText(segment.text, cursorOffset: cursorOffset)
+        let updatedOriginal = TranscriptSegment(
+            id: segment.id,
+            text: split.left,
+            startTime: segment.startTime,
+            endTime: nil,
+            speakerID: segment.speakerID
+        )
+        let newSegment = TranscriptSegment(
+            text: split.right,
+            startTime: nil,
+            endTime: segment.endTime,
+            speakerID: segment.speakerID
+        )
+
+        var segments = transcript.segments
+        segments[segmentIndex] = updatedOriginal
+        segments.insert(newSegment, at: segmentIndex + 1)
+        _ = try replaceTranscript(
+            meeting,
+            speakers: transcript.speakers,
+            segments: segments,
+            updatedAt: updatedAt
+        )
+
+        return newSegment
+    }
+
+    @discardableResult
+    func mergeTranscriptSegmentWithPrevious(
+        meetingID: UUID,
+        segmentID: UUID,
+        updatedAt: Date
+    ) throws -> TranscriptSegment {
+        let meeting = try fetchMeeting(id: meetingID)
+        let transcript = try requireStoredTranscript(from: meeting)
+        guard let segmentIndex = transcript.segments.firstIndex(where: { $0.id == segmentID }) else {
+            throw MeetingTranscriptStoreError.segmentNotFound
+        }
+        guard segmentIndex > transcript.segments.startIndex else {
+            throw MeetingTranscriptStoreError.previousSegmentNotFound
+        }
+
+        let previousIndex = transcript.segments.index(before: segmentIndex)
+        let previous = transcript.segments[previousIndex]
+        let current = transcript.segments[segmentIndex]
+        let merged = TranscriptSegment(
+            id: previous.id,
+            text: mergedTranscriptSegmentText(previous: previous.text, current: current.text),
+            startTime: previous.startTime,
+            endTime: current.endTime ?? previous.endTime,
+            speakerID: previous.speakerID
+        )
+
+        var segments = transcript.segments
+        segments[previousIndex] = merged
+        segments.remove(at: segmentIndex)
+        _ = try replaceTranscript(
+            meeting,
+            speakers: transcript.speakers,
+            segments: segments,
+            updatedAt: updatedAt
+        )
+
+        return merged
+    }
+
+    @discardableResult
+    func assignTranscriptSegment(
+        meetingID: UUID,
+        segmentID: UUID,
+        displayName: String,
+        updatedAt: Date
+    ) throws -> StoredTranscript {
+        let meeting = try fetchMeeting(id: meetingID)
+        let transcript = try requireStoredTranscript(from: meeting)
+        let normalizedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedName.isEmpty else {
+            throw MeetingTranscriptStoreError.invalidSpeakerName
+        }
+        guard let segmentIndex = transcript.segments.firstIndex(where: { $0.id == segmentID }) else {
+            throw MeetingTranscriptStoreError.segmentNotFound
+        }
+
+        var speakers = transcript.speakers
+        let speakerID: String
+        if let existingSpeaker = speakers.first(where: { $0.displayName.compare(normalizedName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
+            speakerID = existingSpeaker.id
+        } else {
+            speakerID = nextTranscriptSpeakerID(existing: speakers)
+            speakers.append(
+                TranscriptSpeaker(
+                    id: speakerID,
+                    displayName: normalizedName,
+                    labelSource: .userAssigned
+                )
+            )
+        }
+
+        var segments = transcript.segments
+        let segment = segments[segmentIndex]
+        segments[segmentIndex] = TranscriptSegment(
+            id: segment.id,
+            text: segment.text,
+            startTime: segment.startTime,
+            endTime: segment.endTime,
+            speakerID: speakerID
+        )
+
+        return try replaceTranscript(
+            meeting,
+            speakers: speakers,
+            segments: segments,
+            updatedAt: updatedAt
+        )
+    }
+
     func exportMarkdownForExistingMeetings() throws {
         guard let markdownExporter else {
             return
@@ -273,6 +436,80 @@ struct MeetingStore {
         if didChange {
             try modelContext.save()
         }
+    }
+
+    private func requireStoredTranscript(from meeting: Meeting) throws -> StoredTranscript {
+        guard let transcript = meeting.storedTranscript else {
+            throw MeetingTranscriptStoreError.transcriptMissing
+        }
+
+        return transcript
+    }
+
+    private func replaceTranscript(
+        _ meeting: Meeting,
+        speakers: [TranscriptSpeaker],
+        segments: [TranscriptSegment],
+        updatedAt: Date
+    ) throws -> StoredTranscript {
+        meeting.replaceTranscript(speakers: speakers, segments: segments, updatedAt: updatedAt)
+        try modelContext.save()
+        syncMarkdownExportBestEffort(for: meeting)
+
+        guard let transcript = meeting.storedTranscript else {
+            throw MeetingTranscriptStoreError.transcriptMissing
+        }
+
+        return transcript
+    }
+
+    private func normalizedTranscriptSegmentText(_ text: String) throws -> String {
+        let normalizedText = text.trimmingCharacters(in: .newlines)
+        guard !normalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw MeetingTranscriptStoreError.invalidSegmentText
+        }
+
+        return normalizedText
+    }
+
+    private func splitTranscriptSegmentText(
+        _ text: String,
+        cursorOffset: Int
+    ) throws -> (left: String, right: String) {
+        guard cursorOffset > 0, cursorOffset < text.utf16.count else {
+            throw MeetingTranscriptStoreError.invalidSplitLocation
+        }
+
+        let splitIndex = String.Index(utf16Offset: cursorOffset, in: text)
+        let left = String(text[..<splitIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let right = String(text[splitIndex...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !left.isEmpty, !right.isEmpty else {
+            throw MeetingTranscriptStoreError.invalidSplitLocation
+        }
+
+        return (left, right)
+    }
+
+    private func mergedTranscriptSegmentText(previous: String, current: String) -> String {
+        [
+            previous.trimmingCharacters(in: .newlines),
+            current.trimmingCharacters(in: .newlines),
+        ]
+        .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        .joined(separator: "\n")
+    }
+
+    private func nextTranscriptSpeakerID(existing speakers: [TranscriptSpeaker]) -> String {
+        var index = speakers.count + 1
+        var candidate = "speaker-\(index)"
+        let existingIDs = Set(speakers.map(\.id))
+
+        while existingIDs.contains(candidate) {
+            index += 1
+            candidate = "speaker-\(index)"
+        }
+
+        return candidate
     }
 
     private func syncMarkdownExportBestEffort(for meeting: Meeting) {

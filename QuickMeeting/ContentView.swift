@@ -85,6 +85,33 @@ struct ContentView: View {
                                 )
                             }
                         },
+                        onUpdateTranscriptSegmentText: { segmentID, text in
+                            try await appViewModel.updateTranscriptSegmentText(
+                                meetingID: selectedMeeting.id,
+                                segmentID: segmentID,
+                                text: text
+                            )
+                        },
+                        onSplitTranscriptSegment: { segmentID, cursorOffset in
+                            try await appViewModel.splitTranscriptSegment(
+                                meetingID: selectedMeeting.id,
+                                segmentID: segmentID,
+                                cursorOffset: cursorOffset
+                            )
+                        },
+                        onMergeTranscriptSegmentWithPrevious: { segmentID in
+                            try await appViewModel.mergeTranscriptSegmentWithPrevious(
+                                meetingID: selectedMeeting.id,
+                                segmentID: segmentID
+                            )
+                        },
+                        onAssignTranscriptSegment: { segmentID, speakerName in
+                            try await appViewModel.assignTranscriptSegment(
+                                meetingID: selectedMeeting.id,
+                                segmentID: segmentID,
+                                speakerName: speakerName
+                            )
+                        },
                         onStoreWaveform: { samples in
                             appViewModel.storeWaveform(
                                 meetingID: selectedMeeting.id,

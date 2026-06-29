@@ -49,8 +49,8 @@ final class Meeting {
         return StoredTranscript(
             speakers: transcriptSpeakers.map(\.value),
             segments: transcriptSegments
+                .sorted(by: Self.arePersistedTranscriptSegmentsInDisplayOrder)
                 .map(\.value)
-                .sorted(by: Self.areTranscriptSegmentsInDisplayOrder)
         )
     }
 
@@ -135,10 +135,27 @@ final class Meeting {
         updatedAt: Date = Date()
     ) {
         self.transcriptPreview = transcriptPreview
+        let orderedSegments = transcript.segments
+            .sorted(by: Self.areTranscriptSegmentsInDisplayOrder)
         transcriptSpeakers = transcript.speakers.map(PersistedTranscriptSpeaker.init)
-        transcriptSegments = transcript.segments.map(PersistedTranscriptSegment.init)
+        transcriptSegments = orderedSegments.enumerated().map { index, segment in
+            PersistedTranscriptSegment(segment, sortIndex: index)
+        }
         summaryText = nil
         statusRawValue = MeetingStatus.completed.rawValue
+        touch(updatedAt: updatedAt)
+    }
+
+    func replaceTranscript(
+        speakers: [TranscriptSpeaker],
+        segments: [TranscriptSegment],
+        updatedAt: Date = Date()
+    ) {
+        transcriptSpeakers = speakers.map(PersistedTranscriptSpeaker.init)
+        transcriptSegments = segments.enumerated().map { index, segment in
+            PersistedTranscriptSegment(segment, sortIndex: index)
+        }
+        transcriptPreview = StoredTranscript(speakers: speakers, segments: segments).fullText
         touch(updatedAt: updatedAt)
     }
 
@@ -159,6 +176,22 @@ final class Meeting {
 
     private func touch(updatedAt: Date) {
         self.updatedAt = updatedAt
+    }
+
+    private static func arePersistedTranscriptSegmentsInDisplayOrder(
+        _ lhs: PersistedTranscriptSegment,
+        _ rhs: PersistedTranscriptSegment
+    ) -> Bool {
+        switch (lhs.sortIndex, rhs.sortIndex) {
+        case let (lhsIndex?, rhsIndex?) where lhsIndex != rhsIndex:
+            return lhsIndex < rhsIndex
+        case (.some, nil):
+            return true
+        case (nil, .some):
+            return false
+        default:
+            return areTranscriptSegmentsInDisplayOrder(lhs.value, rhs.value)
+        }
     }
 
     private static func areTranscriptSegmentsInDisplayOrder(
