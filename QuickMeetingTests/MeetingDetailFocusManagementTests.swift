@@ -12,8 +12,8 @@ struct MeetingDetailFocusManagementTests {
             summaryState: .idle
         )
 
-        #expect(actions.map(\.help) == ["Copy transcript", "Re-transcribe", "Delete"])
-        #expect(actions.map(\.systemName) == ["doc.on.doc", "arrow.clockwise", "trash"])
+        #expect(actions.map(\.help) == ["Change calendar meeting", "Copy transcript", "Re-transcribe", "Delete"])
+        #expect(actions.map(\.systemName) == ["calendar", "doc.on.doc", "arrow.clockwise", "trash"])
     }
 
     @Test
@@ -23,8 +23,8 @@ struct MeetingDetailFocusManagementTests {
             summaryState: .ready("Stored summary")
         )
 
-        #expect(actions.map(\.help) == ["Copy summary", "Regenerate summary", "Delete"])
-        #expect(actions.map(\.systemName) == ["doc.on.doc", "sparkles", "trash"])
+        #expect(actions.map(\.help) == ["Change calendar meeting", "Copy summary", "Regenerate summary", "Delete"])
+        #expect(actions.map(\.systemName) == ["calendar", "doc.on.doc", "sparkles", "trash"])
     }
 
     @Test @MainActor

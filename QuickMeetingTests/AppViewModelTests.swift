@@ -6,6 +6,76 @@ import Testing
 @MainActor
 struct AppViewModelTests {
     @Test
+    func startRecordingPersistsMatchedCalendarEventID() async throws {
+        let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
+        let matchingEvent = UpcomingCalendarEvent(
+            id: "event-123",
+            title: "Calendar Design Review",
+            startDate: startedAt,
+            endDate: startedAt.addingTimeInterval(1_800),
+            attendees: [
+                UpcomingCalendarAttendee(displayName: "Masha", emailAddress: "masha@example.com")
+            ]
+        )
+        let harness = try AppViewModelHarness(
+            calendarIntegration: StubCalendarIntegration(matchingEvent: matchingEvent),
+            dateProvider: { startedAt }
+        )
+
+        await harness.viewModel.startRecording()
+
+        let meeting = try #require(try harness.meetingStore.fetchMeetings().first)
+        #expect(meeting.title == "Calendar Design Review")
+        #expect(meeting.attendeeNames == ["Masha"])
+        #expect(meeting.calendarEventID == "event-123")
+    }
+
+    @Test
+    func selectCalendarEventPersistsTitleAttendeesAndCalendarEventID() async throws {
+        let harness = try AppViewModelHarness()
+        let meeting = try harness.createCompletedMeeting(summaryText: nil)
+        let selectedEvent = UpcomingCalendarEvent(
+            id: "event-correct",
+            title: "Correct Calendar Meeting",
+            startDate: meeting.startedAt,
+            endDate: meeting.startedAt.addingTimeInterval(1_800),
+            attendees: [
+                UpcomingCalendarAttendee(displayName: "Masha", emailAddress: "masha@example.com"),
+                UpcomingCalendarAttendee(displayName: "Ilya", emailAddress: "ilya@example.com")
+            ]
+        )
+
+        harness.viewModel.selectCalendarEvent(selectedEvent, for: meeting)
+
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.title == "Correct Calendar Meeting")
+        #expect(reloaded.attendeeNames == ["Masha", "Ilya"])
+        #expect(reloaded.calendarEventID == "event-correct")
+        #expect(reloaded.storedTranscript?.fullText == "Wrapped up launch prep.")
+        #expect(harness.viewModel.calendarEventSelectionErrorMessage == nil)
+    }
+
+    @Test
+    func reloadCalendarEventsStoresCandidatesForMeeting() throws {
+        let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
+        let candidate = UpcomingCalendarEvent(
+            id: "event-candidate",
+            title: "Candidate Meeting",
+            startDate: startedAt,
+            endDate: startedAt.addingTimeInterval(1_800),
+            attendees: []
+        )
+        let harness = try AppViewModelHarness(
+            calendarIntegration: StubCalendarIntegration(candidates: [candidate])
+        )
+        let meeting = try harness.createCompletedMeeting(summaryText: nil)
+
+        harness.viewModel.reloadCalendarEvents(for: meeting)
+
+        #expect(harness.viewModel.calendarEvents(for: meeting).map(\.id) == ["event-candidate"])
+    }
+
+    @Test
     func generateSummaryWithoutExistingSummarySavesResult() async throws {
         let harness = try AppViewModelHarness()
         let meeting = try harness.createCompletedMeeting(summaryText: nil)
@@ -134,7 +204,10 @@ private struct AppViewModelHarness {
             authHeaderName: "Authorization",
             modelName: "gpt-4o-mini",
             promptTemplate: "Summarize {text} on {date}"
-        )
+        ),
+        calendarIntegration: any CalendarIntegration = NoopCalendarIntegration(),
+        recordingPermissions: any RecordingPermissions = GrantedRecordingPermissions(),
+        dateProvider: @escaping () -> Date = Date.init
     ) throws {
         let schema = Schema([
             Meeting.self,
@@ -161,9 +234,11 @@ private struct AppViewModelHarness {
             recordingService: StubRecordingService(),
             meetingSummaryService: summaryService,
             meetingSummarySettingsStore: summarySettingsStore,
+            recordingPermissions: recordingPermissions,
             meetingTranscriptStore: meetingTranscriptStore,
             knownSpeakerEnrollmentService: enrollmentService,
-            calendarIntegration: NoopCalendarIntegration()
+            calendarIntegration: calendarIntegration,
+            dateProvider: dateProvider
         )
     }
 
@@ -240,6 +315,49 @@ private final class StubMeetingSummaryService: MeetingSummaryServicing {
     func summarize(meetingID _: UUID) async throws -> String {
         invocationCount += 1
         return try summaryResult.get()
+    }
+}
+
+private struct StubCalendarIntegration: CalendarIntegration {
+    let matchingEvent: UpcomingCalendarEvent?
+    let candidates: [UpcomingCalendarEvent]
+
+    init(
+        matchingEvent: UpcomingCalendarEvent? = nil,
+        candidates: [UpcomingCalendarEvent] = []
+    ) {
+        self.matchingEvent = matchingEvent
+        self.candidates = candidates
+    }
+
+    func authorizationState() -> CalendarAuthorizationState {
+        .authorized
+    }
+
+    func requestAccess() async -> CalendarAuthorizationState {
+        .authorized
+    }
+
+    func availableCalendars() -> [CalendarDescriptor] {
+        []
+    }
+
+    func upcomingEventForToday() -> UpcomingCalendarEvent? {
+        nil
+    }
+
+    func eventMatchingRecordingStart(at _: Date) -> UpcomingCalendarEvent? {
+        matchingEvent
+    }
+
+    func calendarEventsForRecording(startedAt _: Date, endedAt _: Date?) -> [UpcomingCalendarEvent] {
+        candidates
+    }
+}
+
+private struct GrantedRecordingPermissions: RecordingPermissions {
+    func ensurePermissions() async -> RecordingPermissionResult {
+        .granted
     }
 }
 

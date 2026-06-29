@@ -29,6 +29,7 @@ enum MeetingDetailTab: CaseIterable, Hashable {
 }
 
 enum MeetingDetailHeaderActionID: Hashable {
+    case changeCalendarMeeting
     case copyTranscript
     case retranscribe
     case copySummary
@@ -50,6 +51,16 @@ func meetingDetailHeaderActions(
     canDelete: Bool = true
 ) -> [MeetingDetailHeaderAction] {
     var actions = [MeetingDetailHeaderAction]()
+
+    actions.append(
+        MeetingDetailHeaderAction(
+            id: .changeCalendarMeeting,
+            systemName: "calendar",
+            help: "Change calendar meeting",
+            tint: QMTheme.secondary,
+            isEnabled: true
+        )
+    )
 
     switch activeTab {
     case .transcript:
@@ -171,6 +182,9 @@ struct MeetingDetailView: View {
     let onRenameMeeting: (String) async throws -> Void
     let onRenameSpeaker: (String, String) -> Void
     let onStoreWaveform: ([Double]) -> Void
+    let calendarEvents: [UpcomingCalendarEvent]
+    let onReloadCalendarEvents: () -> Void
+    let onSelectCalendarEvent: (UpcomingCalendarEvent) -> Void
     let isShowingSummaryReplacementConfirmation: Bool
     let isSummarizingMeeting: Bool
     let summaryErrorMessage: String?
@@ -193,6 +207,7 @@ struct MeetingDetailView: View {
     @State private var renameValue = ""
     @State private var toastText: String?
     @State private var toastTask: Task<Void, Never>?
+    @State private var isShowingCalendarPicker = false
     #if canImport(AppKit)
     @State private var hostWindow: NSWindow?
     #endif
@@ -403,13 +418,7 @@ struct MeetingDetailView: View {
 
                 HStack(spacing: 6) {
                     ForEach(headerActions, id: \.id) { action in
-                        iconButton(
-                            systemName: action.systemName,
-                            tint: action.tint,
-                            help: action.help,
-                            isEnabled: action.isEnabled,
-                            action: { performHeaderAction(action.id) }
-                        )
+                        headerActionButton(action)
                     }
                 }
             }
@@ -794,6 +803,7 @@ struct MeetingDetailView: View {
                     .foregroundStyle(QMTheme.tertiary)
             }
             Spacer(minLength: 0)
+            calendarHeaderButton
             if showDelete {
                 iconButton(systemName: "trash", tint: QMTheme.danger, help: "Delete") {
                     isShowingDeleteConfirmation = true
@@ -817,6 +827,34 @@ struct MeetingDetailView: View {
             .onChange(of: isMeetingTitleFocused) { _, isFocused in
                 if !isFocused { commitMeetingRename(dismissFocus: false) }
             }
+    }
+
+    @ViewBuilder
+    private func headerActionButton(_ action: MeetingDetailHeaderAction) -> some View {
+        let button = iconButton(
+            systemName: action.systemName,
+            tint: action.tint,
+            help: action.help,
+            isEnabled: action.isEnabled,
+            action: { performHeaderAction(action.id) }
+        )
+
+        if action.id == .changeCalendarMeeting {
+            button.popover(isPresented: $isShowingCalendarPicker, arrowEdge: .bottom) {
+                calendarPickerPopover
+            }
+        } else {
+            button
+        }
+    }
+
+    private var calendarHeaderButton: some View {
+        iconButton(systemName: "calendar", tint: QMTheme.secondary, help: "Change calendar meeting") {
+            openCalendarPicker()
+        }
+        .popover(isPresented: $isShowingCalendarPicker, arrowEdge: .bottom) {
+            calendarPickerPopover
+        }
     }
 
     private func iconButton(
@@ -852,6 +890,68 @@ struct MeetingDetailView: View {
                 .padding(.bottom, 28)
         }
         .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private var calendarPickerPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("CALENDAR MEETING")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(QMTheme.muted)
+
+            if calendarEvents.isEmpty {
+                Text("No nearby calendar events found.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(QMTheme.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(calendarEvents.enumerated()), id: \.offset) { _, event in
+                            calendarEventRow(event)
+                        }
+                    }
+                }
+                .frame(maxHeight: 280)
+            }
+        }
+        .padding(13)
+        .frame(width: 320)
+        .background(QMTheme.card)
+    }
+
+    private func calendarEventRow(_ event: UpcomingCalendarEvent) -> some View {
+        let isSelected = event.id != nil && event.id == meeting.calendarEventID
+
+        return Button {
+            selectCalendarEvent(event)
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "calendar")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(isSelected ? QMTheme.sage : QMTheme.secondary)
+                    .frame(width: 18, height: 18)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(event.title)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                        .lineLimit(1)
+
+                    Text(calendarEventDetailText(for: event))
+                        .font(.system(size: 12))
+                        .foregroundStyle(QMTheme.tertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Derived data
@@ -986,6 +1086,35 @@ struct MeetingDetailView: View {
         (try? meeting.status) == .completed
     }
 
+    private func calendarEventDetailText(for event: UpcomingCalendarEvent) -> String {
+        var parts = [
+            event.startDate.formatted(.dateTime.hour().minute()),
+            event.endDate.formatted(.dateTime.hour().minute())
+        ]
+
+        let attendeeCount = event.attendees.count
+        if attendeeCount == 1 {
+            parts.append("1 attendee")
+        } else if attendeeCount > 1 {
+            parts.append("\(attendeeCount) attendees")
+        }
+
+        return parts.joined(separator: " · ")
+    }
+
+    private func openCalendarPicker() {
+        onReloadCalendarEvents()
+        isShowingCalendarPicker = true
+    }
+
+    private func selectCalendarEvent(_ event: UpcomingCalendarEvent) {
+        onSelectCalendarEvent(event)
+        meetingTitleDraft = event.title
+        originalMeetingTitle = event.title
+        isShowingCalendarPicker = false
+        showToast("Calendar meeting updated")
+    }
+
     private func resetMeetingTitleDraft() {
         meetingTitleDraft = meeting.title
         originalMeetingTitle = meeting.title
@@ -1068,6 +1197,8 @@ struct MeetingDetailView: View {
 
     private func performHeaderAction(_ actionID: MeetingDetailHeaderActionID) {
         switch actionID {
+        case .changeCalendarMeeting:
+            openCalendarPicker()
         case .copyTranscript:
             copyTranscriptExport()
         case .retranscribe:

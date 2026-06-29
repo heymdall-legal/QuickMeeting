@@ -91,6 +91,13 @@ struct ContentView: View {
                                 samples: samples
                             )
                         },
+                        calendarEvents: appViewModel.calendarEvents(for: selectedMeeting),
+                        onReloadCalendarEvents: {
+                            appViewModel.reloadCalendarEvents(for: selectedMeeting)
+                        },
+                        onSelectCalendarEvent: { event in
+                            appViewModel.selectCalendarEvent(event, for: selectedMeeting)
+                        },
                         isShowingSummaryReplacementConfirmation: appViewModel.summaryConfirmationMeetingID == selectedMeeting.id,
                         isSummarizingMeeting: appViewModel.summarizingMeetingID == selectedMeeting.id,
                         summaryErrorMessage: appViewModel.summaryErrorMessage(forMeeting: selectedMeeting.id)
@@ -173,6 +180,18 @@ struct ContentView: View {
                 Text(appViewModel.renameMeetingErrorMessage ?? "Unknown error.")
             }
         )
+        .alert(
+            "Unable to Change Calendar Meeting",
+            isPresented: calendarEventSelectionErrorIsPresented,
+            actions: {
+                Button("OK", role: .cancel) {
+                    appViewModel.clearCalendarEventSelectionError()
+                }
+            },
+            message: {
+                Text(appViewModel.calendarEventSelectionErrorMessage ?? "Unknown error.")
+            }
+        )
     }
 
     private func syncSelection() {
@@ -221,6 +240,17 @@ struct ContentView: View {
             set: { isPresented in
                 if !isPresented {
                     appViewModel.clearRenameMeetingError()
+                }
+            }
+        )
+    }
+
+    private var calendarEventSelectionErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { appViewModel.calendarEventSelectionErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appViewModel.clearCalendarEventSelectionError()
                 }
             }
         )

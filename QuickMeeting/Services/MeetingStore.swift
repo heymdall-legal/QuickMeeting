@@ -43,6 +43,7 @@ struct MeetingStore {
         title: String,
         startedAt: Date,
         attendeeNames: [String] = [],
+        calendarEventID: String? = nil,
         folderURL: URL,
         audioFileURL: URL
     ) throws -> Meeting {
@@ -60,6 +61,7 @@ struct MeetingStore {
             startedAt: startedAt,
             status: .recording,
             audioFilePath: normalizedAudioFileURL.path(percentEncoded: false),
+            calendarEventID: calendarEventID,
             attendeeNames: attendeeNames,
             createdAt: now,
             updatedAt: now
@@ -129,6 +131,34 @@ struct MeetingStore {
         }
 
         meeting.renameTitle(to: normalizedTitle, updatedAt: updatedAt)
+        try modelContext.save()
+        syncMarkdownExportBestEffort(for: meeting)
+    }
+
+    func updateCalendarEvent(
+        meetingID: UUID,
+        eventTitle: String,
+        attendeeNames: [String],
+        calendarEventID: String?,
+        updatedAt: Date
+    ) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        let normalizedTitle = eventTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedTitle.isEmpty else {
+            throw MeetingStoreError.invalidMeetingTitle
+        }
+
+        let normalizedAttendeeNames = attendeeNames
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        meeting.updateCalendarEvent(
+            title: normalizedTitle,
+            attendeeNames: normalizedAttendeeNames,
+            calendarEventID: calendarEventID,
+            updatedAt: updatedAt
+        )
         try modelContext.save()
         syncMarkdownExportBestEffort(for: meeting)
     }

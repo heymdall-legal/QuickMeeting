@@ -205,6 +205,54 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func createMeetingPersistsCalendarEventIDAcrossFreshContext() throws {
+        let harness = try MeetingStoreHarness()
+        let folderURL = URL(fileURLWithPath: "/tmp/meeting-\(UUID().uuidString)")
+        let audioFileURL = folderURL.appendingPathComponent("audio.m4a")
+
+        let meeting = try harness.store.createMeeting(
+            title: "Design Review",
+            startedAt: Date(timeIntervalSince1970: 1_234_567_890),
+            calendarEventID: "event-123",
+            folderURL: folderURL,
+            audioFileURL: audioFileURL
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.calendarEventID == "event-123")
+    }
+
+    @Test
+    func updateCalendarEventPersistsTitleAttendeesIDAndPreservesTranscript() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createCompletedMeeting(
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "Existing transcript", speakerID: "speaker-1")]
+            ),
+            transcriptPreview: "Existing transcript"
+        )
+        let updatedAt = Date(timeIntervalSince1970: 1_234_568_500)
+
+        try harness.store.updateCalendarEvent(
+            meetingID: meeting.id,
+            eventTitle: "Correct Calendar Meeting",
+            attendeeNames: ["Masha", "Ilya"],
+            calendarEventID: "event-correct",
+            updatedAt: updatedAt
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.title == "Correct Calendar Meeting")
+        #expect(reloaded.attendeeNames == ["Masha", "Ilya"])
+        #expect(reloaded.calendarEventID == "event-correct")
+        #expect(reloaded.transcriptPreview == "Existing transcript")
+        #expect(reloaded.transcriptSegments.map(\.text) == ["Existing transcript"])
+        #expect(try reloaded.status == .completed)
+        #expect(reloaded.updatedAt == updatedAt)
+    }
+
+    @Test
     func startTranscriptionPreservesExistingStatus() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()

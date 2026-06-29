@@ -102,6 +102,18 @@ final class Meeting {
         touch(updatedAt: updatedAt)
     }
 
+    func updateCalendarEvent(
+        title newTitle: String,
+        attendeeNames: [String],
+        calendarEventID: String?,
+        updatedAt: Date = Date()
+    ) {
+        title = newTitle
+        attendeeNamesStorage = attendeeNames
+        self.calendarEventID = calendarEventID
+        touch(updatedAt: updatedAt)
+    }
+
     func finishRecording(endedAt: Date, duration: TimeInterval, updatedAt: Date = Date()) {
         self.endedAt = endedAt
         self.duration = duration
