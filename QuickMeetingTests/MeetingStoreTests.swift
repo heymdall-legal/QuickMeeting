@@ -675,13 +675,15 @@ struct MeetingStoreTests {
     }
 
     @Test
-    func resetStuckRecordingMeetingsMarksMeetingsAsRecorded() throws {
+    func resetStuckRecordingMeetingsMarksNonEmptyAudioAsRecorded() throws {
         let harness = try MeetingStoreHarness()
         let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
         let updatedAt = Date(timeIntervalSince1970: 1_234_568_000)
         let resetAt = Date(timeIntervalSince1970: 1_234_568_999)
-        let folderURL = URL(fileURLWithPath: "/tmp/meeting-\(UUID().uuidString)")
-        let audioFileURL = folderURL.appendingPathComponent("audio.wav")
+        let folderURL = harness.temporaryFolderURL()
+        let audioFileURL = folderURL.appendingPathComponent("audio.m4a")
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: audioFileURL.path, contents: Data("audio".utf8))
 
         let meeting = try harness.store.createMeeting(
             title: "Interrupted Recording",
@@ -698,6 +700,58 @@ struct MeetingStoreTests {
         #expect(try reloaded.status == .recorded)
         #expect(reloaded.endedAt == resetAt)
         #expect(reloaded.duration == resetAt.timeIntervalSince(startedAt))
+        #expect(reloaded.updatedAt == resetAt)
+    }
+
+    @Test
+    func resetStuckRecordingMeetingsMarksMissingAudioAsFailed() throws {
+        let harness = try MeetingStoreHarness()
+        let resetAt = Date(timeIntervalSince1970: 1_234_568_999)
+        let folderURL = harness.temporaryFolderURL()
+        let audioFileURL = folderURL.appendingPathComponent("audio.m4a")
+
+        let meeting = try harness.store.createMeeting(
+            title: "Interrupted Recording",
+            startedAt: Date(timeIntervalSince1970: 1_234_567_890),
+            folderURL: folderURL,
+            audioFileURL: audioFileURL
+        )
+        meeting.setStatus(.recording, updatedAt: Date(timeIntervalSince1970: 1_234_568_000))
+        try harness.store.modelContext.save()
+
+        try harness.store.resetStuckRecordingMeetings(updatedAt: resetAt)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .failed)
+        #expect(reloaded.endedAt == nil)
+        #expect(reloaded.duration == nil)
+        #expect(reloaded.updatedAt == resetAt)
+    }
+
+    @Test
+    func resetStuckRecordingMeetingsMarksEmptyAudioAsFailed() throws {
+        let harness = try MeetingStoreHarness()
+        let resetAt = Date(timeIntervalSince1970: 1_234_568_999)
+        let folderURL = harness.temporaryFolderURL()
+        let audioFileURL = folderURL.appendingPathComponent("audio.m4a")
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: audioFileURL.path, contents: Data())
+
+        let meeting = try harness.store.createMeeting(
+            title: "Interrupted Recording",
+            startedAt: Date(timeIntervalSince1970: 1_234_567_890),
+            folderURL: folderURL,
+            audioFileURL: audioFileURL
+        )
+        meeting.setStatus(.recording, updatedAt: Date(timeIntervalSince1970: 1_234_568_000))
+        try harness.store.modelContext.save()
+
+        try harness.store.resetStuckRecordingMeetings(updatedAt: resetAt)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .failed)
+        #expect(reloaded.endedAt == nil)
+        #expect(reloaded.duration == nil)
         #expect(reloaded.updatedAt == resetAt)
     }
 
@@ -792,8 +846,8 @@ private struct MeetingStoreHarness {
     func createRecordedMeeting() throws -> Meeting {
         let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
         let endedAt = startedAt.addingTimeInterval(60)
-        let folderURL = URL(fileURLWithPath: "/tmp/meeting-\(UUID().uuidString)")
-        let audioFileURL = folderURL.appendingPathComponent("audio.wav")
+        let folderURL = temporaryFolderURL()
+        let audioFileURL = folderURL.appendingPathComponent("audio.m4a")
         let meeting = try store.createMeeting(
             title: "Design Review",
             startedAt: startedAt,
@@ -802,6 +856,11 @@ private struct MeetingStoreHarness {
         )
         try store.finishRecording(meetingID: meeting.id, endedAt: endedAt)
         return try reloadMeeting(id: meeting.id)
+    }
+
+    func temporaryFolderURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeting-\(UUID().uuidString)", isDirectory: true)
     }
 
     func createCompletedMeeting(

@@ -432,16 +432,34 @@ struct MeetingStore {
         let allMeetings = try modelContext.fetch(FetchDescriptor<Meeting>())
         var didChange = false
         for meeting in allMeetings where (try? meeting.status) == .recording {
-            meeting.finishRecording(
-                endedAt: updatedAt,
-                duration: updatedAt.timeIntervalSince(meeting.startedAt),
-                updatedAt: updatedAt
-            )
+            if hasRecoverableAudioFile(for: meeting) {
+                meeting.finishRecording(
+                    endedAt: updatedAt,
+                    duration: updatedAt.timeIntervalSince(meeting.startedAt),
+                    updatedAt: updatedAt
+                )
+            } else {
+                meeting.setStatus(.failed, updatedAt: updatedAt)
+            }
             didChange = true
         }
         if didChange {
             try modelContext.save()
         }
+    }
+
+    private func hasRecoverableAudioFile(for meeting: Meeting) -> Bool {
+        let fileURL = URL(fileURLWithPath: meeting.audioFilePath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return false
+        }
+
+        let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+        guard let fileSize = attributes?[.size] as? NSNumber else {
+            return false
+        }
+
+        return fileSize.uint64Value > 0
     }
 
     private func requireStoredTranscript(from meeting: Meeting) throws -> StoredTranscript {
