@@ -74,6 +74,26 @@ nonisolated func mergedTranscriptText(previous: String, current: String) -> Stri
     .joined(separator: "\n")
 }
 
+nonisolated func toggledRawASRExpandedSegmentIDs(_ expandedIDs: Set<UUID>, segmentID: UUID) -> Set<UUID> {
+    var next = expandedIDs
+    if next.contains(segmentID) {
+        next.remove(segmentID)
+    } else {
+        next.insert(segmentID)
+    }
+    return next
+}
+
+nonisolated func transcriptionPipelineWarningText(_ warnings: [String]?) -> String? {
+    let warnings = (warnings ?? [])
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+    guard !warnings.isEmpty else {
+        return nil
+    }
+    return warnings.joined(separator: "\n")
+}
+
 enum MeetingDetailTab: CaseIterable, Hashable {
     case transcript, summary
 
@@ -271,6 +291,7 @@ struct MeetingDetailView: View {
     @State private var transcriptDrafts = [UUID: String]()
     @State private var glossarySuggestion: TranscriptGlossarySuggestion?
     @State private var segmentAssignmentOpenID: UUID?
+    @State private var expandedRawASRSegmentIDs = Set<UUID>()
     @State private var toastText: String?
     @State private var toastTask: Task<Void, Never>?
     @State private var isShowingCalendarPicker = false
@@ -291,7 +312,10 @@ struct MeetingDetailView: View {
         }
         .task(id: meetingTranscriptReloadKey(for: meeting)) {
             let transcript = meeting.storedTranscript
-            transcriptContent = loadMeetingTranscriptContent(from: transcript)
+            transcriptContent = loadMeetingTranscriptContent(
+                from: transcript,
+                rawTranscript: meeting.rawStoredTranscript
+            )
             switch loadMeetingTranscriptSpeakers(from: transcript) {
             case .available(let speakers):
                 transcriptSpeakers = speakers
@@ -317,6 +341,7 @@ struct MeetingDetailView: View {
             transcriptDrafts.removeAll()
             glossarySuggestion = nil
             segmentAssignmentOpenID = nil
+            expandedRawASRSegmentIDs.removeAll()
             isMeetingTitleFocused = false
             activeTab = .transcript
             #if canImport(AppKit)
@@ -449,20 +474,28 @@ struct MeetingDetailView: View {
             transcribedHeader
             contentTabPicker
             if activeTab == .transcript {
-                transcriptScroll
-                    .overlay(alignment: .bottom) {
-                        WaveformPlayerBar(
-                            currentTime: playback.currentTime,
-                            duration: playback.duration,
-                            isPlaying: playback.state == .playing,
-                            isAvailable: playback.isPlaybackAvailable,
-                            waveformSamples: playback.waveformSamples,
-                            onToggle: playback.togglePlayback,
-                            onSeek: seek(toFraction:)
-                        )
-                        .padding(.horizontal, 30)
-                        .padding(.bottom, 18)
+                VStack(spacing: 0) {
+                    if let warningText = transcriptionPipelineWarningText(
+                        meeting.transcriptionPipelineMetadata?.warnings
+                    ) {
+                        transcriptionWarningBanner(warningText)
                     }
+
+                    transcriptScroll
+                }
+                .overlay(alignment: .bottom) {
+                    WaveformPlayerBar(
+                        currentTime: playback.currentTime,
+                        duration: playback.duration,
+                        isPlaying: playback.state == .playing,
+                        isAvailable: playback.isPlaybackAvailable,
+                        waveformSamples: playback.waveformSamples,
+                        onToggle: playback.togglePlayback,
+                        onSeek: seek(toFraction:)
+                    )
+                    .padding(.horizontal, 30)
+                    .padding(.bottom, 18)
+                }
             } else {
                 MeetingSummaryPane(
                     state: summaryViewState,
@@ -523,6 +556,28 @@ struct MeetingDetailView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.never)
+    }
+
+    private func transcriptionWarningBanner(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(QMTheme.secondary)
+                .padding(.top, 1)
+            Text(text)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(QMTheme.secondary)
+                .lineLimit(nil)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.cardBorder, lineWidth: 1))
+        .padding(.horizontal, 30)
+        .padding(.bottom, 8)
     }
 
     private var summaryViewState: SummaryPaneState {
@@ -617,6 +672,15 @@ struct MeetingDetailView: View {
                 }
             )
             .frame(minHeight: 22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let originalText = bubble.originalText {
+                rawASRComparisonView(
+                    text: originalText,
+                    segmentID: bubble.id,
+                    isExpanded: expandedRawASRSegmentIDs.contains(bubble.id)
+                )
+            }
 
             if glossarySuggestion?.segmentID == bubble.id, let suggestion = glossarySuggestion {
                 glossarySuggestionChip(suggestion)
@@ -1111,6 +1175,7 @@ struct MeetingDetailView: View {
         let timeLabel: String
         let startTime: TimeInterval?
         let text: String
+        let originalText: String?
         let isUnnamed: Bool
         let isActive: Bool
     }
@@ -1157,6 +1222,7 @@ struct MeetingDetailView: View {
                 timeLabel: segment.startTime.map(segmentTimestampText(for:)) ?? "",
                 startTime: segment.startTime,
                 text: segment.text,
+                originalText: display.originalText(for: segment.id),
                 isUnnamed: QMSpeakerPalette.isUnnamed(speakerIdentity.displayName),
                 isActive: isActive
             )
@@ -1316,6 +1382,47 @@ struct MeetingDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.cardBorder, lineWidth: 1))
     }
 
+    private func rawASRComparisonView(text: String, segmentID: UUID, isExpanded: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                expandedRawASRSegmentIDs = toggledRawASRExpandedSegmentIDs(
+                    expandedRawASRSegmentIDs,
+                    segmentID: segmentID
+                )
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(width: 12, height: 12)
+                    Image(systemName: "text.magnifyingglass")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Raw ASR")
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(QMTheme.tertiary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                Text(text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(QMTheme.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(nil)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 19)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.cardBorder, lineWidth: 1))
+    }
+
     private func splitTranscriptSegment(_ bubble: TranscriptBubble, cursorOffset: Int) {
         let draftText = transcriptDraftText(for: bubble)
         guard splitTranscriptText(draftText, cursorOffset: cursorOffset) != nil else {
@@ -1354,7 +1461,10 @@ struct MeetingDetailView: View {
     }
 
     private func reloadTranscriptStateFromMeeting() {
-        transcriptContent = loadMeetingTranscriptContent(from: meeting.storedTranscript)
+        transcriptContent = loadMeetingTranscriptContent(
+            from: meeting.storedTranscript,
+            rawTranscript: meeting.rawStoredTranscript
+        )
         switch loadMeetingTranscriptSpeakers(from: meeting.storedTranscript) {
         case .available(let speakers):
             transcriptSpeakers = speakers

@@ -173,6 +173,11 @@ final class FluidTranscriptionService: TranscriptionServicing {
                         visibleTranscript = correction.transcript
                         correctedTranscript = correction.transcript
                         metadata.llmCorrectionModel = correction.modelName
+                        if correction.matchedSegmentCount == 0 {
+                            metadata.warnings.append("LLM correction returned no matching segment ids.")
+                        } else if correction.changedSegmentCount == 0 {
+                            metadata.warnings.append("LLM correction returned no text changes.")
+                        }
                     } catch {
                         metadata.warnings.append("LLM correction skipped: \(error.localizedDescription)")
                     }

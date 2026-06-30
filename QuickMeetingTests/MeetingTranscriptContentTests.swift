@@ -77,6 +77,36 @@ struct MeetingTranscriptContentTests {
     }
 
     @Test
+    func storedTranscriptLoadsDifferingRawTextForLLMComparison() throws {
+        let segmentID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let unchangedSegmentID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let content = loadMeetingTranscriptContent(
+            from: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Masha")],
+                segments: [
+                    TranscriptSegment(id: segmentID, text: "We ship Kubernetes today.", speakerID: "speaker-1"),
+                    TranscriptSegment(id: unchangedSegmentID, text: "Same text", speakerID: "speaker-1")
+                ]
+            ),
+            rawTranscript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Masha")],
+                segments: [
+                    TranscriptSegment(id: segmentID, text: "We ship cuber net ease today.", speakerID: "speaker-1"),
+                    TranscriptSegment(id: unchangedSegmentID, text: " Same text ", speakerID: "speaker-1")
+                ]
+            )
+        )
+
+        guard case .transcript(let display) = content else {
+            Issue.record("Expected transcript display content")
+            return
+        }
+
+        #expect(display.originalText(for: segmentID) == "We ship cuber net ease today.")
+        #expect(display.originalText(for: unchangedSegmentID) == nil)
+    }
+
+    @Test
     func meetingStoredTranscriptUsesPersistedSortIndexWhenAvailable() throws {
         let meeting = Meeting(
             title: "Sync",

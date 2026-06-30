@@ -94,6 +94,26 @@ struct MeetingDetailFocusManagementTests {
         ) == "Kubernetes")
     }
 
+    @Test
+    func rawASRDisclosureToggleAddsAndRemovesSegmentID() {
+        let segmentID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+
+        #expect(toggledRawASRExpandedSegmentIDs([], segmentID: segmentID) == [segmentID])
+        #expect(toggledRawASRExpandedSegmentIDs([segmentID], segmentID: segmentID) == [])
+    }
+
+    @Test
+    func transcriptionPipelineWarningTextJoinsWarnings() {
+        #expect(transcriptionPipelineWarningText(nil) == nil)
+        #expect(transcriptionPipelineWarningText([]) == nil)
+        #expect(
+            transcriptionPipelineWarningText([
+                "LLM correction returned no text changes.",
+                "CTC vocabulary stage skipped."
+            ]) == "LLM correction returned no text changes.\nCTC vocabulary stage skipped."
+        )
+    }
+
     @Test @MainActor
     func clearingMeetingDetailFocusRemovesCurrentFieldEditorResponder() throws {
         let window = NSWindow(

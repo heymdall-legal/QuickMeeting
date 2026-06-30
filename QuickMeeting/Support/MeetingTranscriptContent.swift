@@ -12,6 +12,21 @@ enum MeetingTranscriptContent: Equatable {
 struct MeetingTranscriptDisplay: Equatable {
     let speakers: [TranscriptSpeaker]
     let segments: [TranscriptSegment]
+    let originalTextBySegmentID: [UUID: String]
+
+    init(
+        speakers: [TranscriptSpeaker],
+        segments: [TranscriptSegment],
+        originalTextBySegmentID: [UUID: String] = [:]
+    ) {
+        self.speakers = speakers
+        self.segments = segments
+        self.originalTextBySegmentID = originalTextBySegmentID
+    }
+
+    func originalText(for segmentID: UUID) -> String? {
+        originalTextBySegmentID[segmentID]
+    }
 }
 
 struct TranscriptDisplayRun: Equatable {
@@ -40,15 +55,28 @@ func meetingAudioReloadKey(for meeting: Meeting) -> String {
     ].joined(separator: "|")
 }
 
-func loadMeetingTranscriptContent(from transcript: StoredTranscript?) -> MeetingTranscriptContent {
+func loadMeetingTranscriptContent(
+    from transcript: StoredTranscript?,
+    rawTranscript: StoredTranscript? = nil
+) -> MeetingTranscriptContent {
     guard let transcript else {
         return .notAvailable
     }
 
+    let rawTextBySegmentID = Dictionary(
+        uniqueKeysWithValues: (rawTranscript?.segments ?? []).map { segment in
+            (segment.id, segment.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+    )
+    var originalTextBySegmentID = [UUID: String]()
     let trimmedSegments = transcript.segments.compactMap { segment -> TranscriptSegment? in
         let trimmedText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedText.isEmpty else {
             return nil
+        }
+
+        if let rawText = rawTextBySegmentID[segment.id], !rawText.isEmpty, rawText != trimmedText {
+            originalTextBySegmentID[segment.id] = rawText
         }
 
         return TranscriptSegment(
@@ -67,7 +95,8 @@ func loadMeetingTranscriptContent(from transcript: StoredTranscript?) -> Meeting
     return .transcript(
         MeetingTranscriptDisplay(
             speakers: transcript.speakers,
-            segments: trimmedSegments
+            segments: trimmedSegments,
+            originalTextBySegmentID: originalTextBySegmentID
         )
     )
 }

@@ -7,6 +7,8 @@ protocol MeetingSummaryServicing {
 nonisolated struct LLMTranscriptCorrectionResult: Sendable, Equatable {
     let transcript: StoredTranscript
     let modelName: String
+    let matchedSegmentCount: Int
+    let changedSegmentCount: Int
 }
 
 nonisolated protocol TranscriptLLMCorrecting {
@@ -49,6 +51,7 @@ enum LLMTranscriptCorrectionError: LocalizedError, Equatable {
     case settingsIncomplete
     case requestFailed(statusCode: Int, message: String?)
     case responseInvalid
+    case requestTimedOut(timeoutInterval: TimeInterval, segmentCount: Int, transcriptCharacterCount: Int)
 
     var errorDescription: String? {
         switch self {
@@ -61,6 +64,8 @@ enum LLMTranscriptCorrectionError: LocalizedError, Equatable {
             return "Correction request failed with status \(statusCode)."
         case .responseInvalid:
             return "Correction response did not contain usable segment JSON."
+        case .requestTimedOut(let timeoutInterval, let segmentCount, let transcriptCharacterCount):
+            return "Correction request timed out after \(Int(timeoutInterval)) seconds while processing \(segmentCount) transcript segments (\(transcriptCharacterCount) characters)."
         }
     }
 }
@@ -82,6 +87,8 @@ nonisolated struct URLSessionMeetingSummaryTransport: MeetingSummaryTransporting
 }
 
 struct MeetingSummaryService: MeetingSummaryServicing {
+    nonisolated private static let correctionRequestTimeout: TimeInterval = 600
+
     private let meetingStore: MeetingStore
     private let settingsStore: any MeetingSummarySettingsStoring
     private let transport: any MeetingSummaryTransporting
@@ -173,6 +180,7 @@ struct MeetingSummaryService: MeetingSummaryServicing {
         }
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = Self.correctionRequestTimeout
         request.httpMethod = "POST"
         request.setValue(
             authHeaderValue(
@@ -230,7 +238,19 @@ nonisolated struct LLMTranscriptCorrectionService: TranscriptLLMCorrecting {
             .replacingOccurrences(of: "{glossary}", with: correctionGlossaryText(glossaryTerms))
 
         let request = try MeetingSummaryService.makeCorrectionRequest(settings: settings, prompt: prompt)
-        let (data, response) = try await transport.send(request)
+        let segmentCount = transcript.segments.count
+        let transcriptCharacterCount = transcript.segments.reduce(0) { $0 + $1.text.count }
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            (data, response) = try await transport.send(request)
+        } catch let error as URLError where error.code == .timedOut {
+            throw LLMTranscriptCorrectionError.requestTimedOut(
+                timeoutInterval: request.timeoutInterval,
+                segmentCount: segmentCount,
+                transcriptCharacterCount: transcriptCharacterCount
+            )
+        }
 
         guard (200 ..< 300).contains(response.statusCode) else {
             let message = String(data: data.prefix(200), encoding: .utf8)?
@@ -248,6 +268,8 @@ nonisolated struct LLMTranscriptCorrectionService: TranscriptLLMCorrecting {
         }
 
         let replacementTextByID = Dictionary(uniqueKeysWithValues: correction.segments.map { ($0.id.lowercased(), $0.text) })
+        var matchedSegmentCount = 0
+        var changedSegmentCount = 0
         let correctedSegments = transcript.segments.map { segment in
             guard
                 let replacement = replacementTextByID[segment.id.uuidString.lowercased()],
@@ -255,9 +277,14 @@ nonisolated struct LLMTranscriptCorrectionService: TranscriptLLMCorrecting {
             else {
                 return segment
             }
+            matchedSegmentCount += 1
+            let correctedText = replacement.trimmingCharacters(in: .newlines)
+            if correctedText != segment.text {
+                changedSegmentCount += 1
+            }
             return TranscriptSegment(
                 id: segment.id,
-                text: replacement.trimmingCharacters(in: .newlines),
+                text: correctedText,
                 startTime: segment.startTime,
                 endTime: segment.endTime,
                 speakerID: segment.speakerID
@@ -266,7 +293,9 @@ nonisolated struct LLMTranscriptCorrectionService: TranscriptLLMCorrecting {
 
         return LLMTranscriptCorrectionResult(
             transcript: StoredTranscript(speakers: transcript.speakers, segments: correctedSegments),
-            modelName: settings.modelName
+            modelName: settings.modelName,
+            matchedSegmentCount: matchedSegmentCount,
+            changedSegmentCount: changedSegmentCount
         )
     }
 }

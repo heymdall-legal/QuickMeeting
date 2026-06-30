@@ -126,6 +126,75 @@ struct FluidTranscriptionServiceTests {
     }
 
     @Test
+    func transcribeRecordsWarningWhenLLMCorrectionReturnsNoTextChanges() async throws {
+        let segmentID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "S1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(id: segmentID, text: "raw Kubernetes", speakerID: "S1")]
+        )
+        let harness = try FluidTranscriptionHarness(
+            outcome: .success(
+                FluidTranscriptionResult(
+                    speakers: transcript.speakers,
+                    segments: transcript.segments
+                )
+            ),
+            isLLMCorrectionEnabled: true,
+            correctionService: StubTranscriptCorrectionService(
+                result: .success(
+                    LLMTranscriptCorrectionResult(
+                        transcript: transcript,
+                        modelName: "gpt-4.1-mini",
+                        matchedSegmentCount: 1,
+                        changedSegmentCount: 0
+                    )
+                )
+            )
+        )
+        let meeting = try harness.createRecordedMeeting()
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.transcriptionPipelineMetadata?.llmCorrectionModel == "gpt-4.1-mini")
+        #expect(reloaded.transcriptionPipelineMetadata?.warnings == ["LLM correction returned no text changes."])
+    }
+
+    @Test
+    func transcribeRecordsWarningWhenLLMCorrectionIDsDoNotMatchTranscript() async throws {
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "S1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "raw Kubernetes", speakerID: "S1")]
+        )
+        let harness = try FluidTranscriptionHarness(
+            outcome: .success(
+                FluidTranscriptionResult(
+                    speakers: transcript.speakers,
+                    segments: transcript.segments
+                )
+            ),
+            isLLMCorrectionEnabled: true,
+            correctionService: StubTranscriptCorrectionService(
+                result: .success(
+                    LLMTranscriptCorrectionResult(
+                        transcript: transcript,
+                        modelName: "gpt-4.1-mini",
+                        matchedSegmentCount: 0,
+                        changedSegmentCount: 0
+                    )
+                )
+            )
+        )
+        let meeting = try harness.createRecordedMeeting()
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.transcriptionPipelineMetadata?.llmCorrectionModel == "gpt-4.1-mini")
+        #expect(reloaded.transcriptionPipelineMetadata?.warnings == ["LLM correction returned no matching segment ids."])
+    }
+
+    @Test
     func transcribeEnrollsBankMatchedSpeakers() async throws {
         let harness = try FluidTranscriptionHarness(
             outcome: .success(
@@ -462,7 +531,9 @@ private struct FluidTranscriptionHarness {
         similarityThreshold: Float = 0.8,
         enrollmentResult: Result<Void, Error> = .success(()),
         languageCode: String? = nil,
-        ctcMode: TranscriptionCTCMode = .off
+        ctcMode: TranscriptionCTCMode = .off,
+        isLLMCorrectionEnabled: Bool = false,
+        correctionService: (any TranscriptLLMCorrecting)? = nil
     ) throws {
         let schema = Schema([
             Meeting.self,
@@ -489,7 +560,12 @@ private struct FluidTranscriptionHarness {
             pipeline: pipeline,
             knownSpeakerStore: knownSpeakerStore,
             knownSpeakerEnrollmentService: enrollmentService,
-            languageStore: StubTranscriptionLanguageStore(code: languageCode, ctcMode: ctcMode),
+            languageStore: StubTranscriptionLanguageStore(
+                code: languageCode,
+                ctcMode: ctcMode,
+                isLLMCorrectionEnabled: isLLMCorrectionEnabled
+            ),
+            correctionService: correctionService,
             similarityThreshold: similarityThreshold,
             fileManager: fileManager
         )
@@ -528,12 +604,28 @@ private struct FluidTranscriptionHarness {
 private struct StubTranscriptionLanguageStore: TranscriptionLanguageStoring {
     let code: String?
     let ctcMode: TranscriptionCTCMode
+    let isLLMCorrectionEnabled: Bool
     func languageCode() -> String? { code }
     func saveLanguageCode(_: String?) {}
     func pipelineOptions() -> TranscriptionPipelineOptions {
-        TranscriptionPipelineOptions(languageCode: code, ctcMode: ctcMode)
+        TranscriptionPipelineOptions(
+            languageCode: code,
+            ctcMode: ctcMode,
+            isLLMCorrectionEnabled: isLLMCorrectionEnabled
+        )
     }
     func savePipelineOptions(_: TranscriptionPipelineOptions) {}
+}
+
+private struct StubTranscriptCorrectionService: TranscriptLLMCorrecting {
+    let result: Result<LLMTranscriptCorrectionResult, Error>
+
+    func correct(
+        transcript _: StoredTranscript,
+        glossaryTerms _: [TranscriptionGlossaryTerm]
+    ) async throws -> LLMTranscriptCorrectionResult {
+        try result.get()
+    }
 }
 
 @MainActor
