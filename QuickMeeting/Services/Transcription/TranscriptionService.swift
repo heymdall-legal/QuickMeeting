@@ -31,3 +31,17 @@ protocol TranscriptionServicing: AnyObject {
 final class NoopTranscriptionService: TranscriptionServicing {
     func transcribe(meetingID _: UUID) async throws {}
 }
+
+@MainActor
+protocol RealtimeTranscriptionCoordinating: AnyObject {
+    func start(meeting: Meeting, options: TranscriptionPipelineOptions) async
+    func stop(meetingID: UUID) async
+    func cancel(meetingID: UUID)
+}
+
+@MainActor
+final class NoopRealtimeTranscriptionCoordinator: RealtimeTranscriptionCoordinating {
+    func start(meeting _: Meeting, options _: TranscriptionPipelineOptions) async {}
+    func stop(meetingID _: UUID) async {}
+    func cancel(meetingID _: UUID) {}
+}

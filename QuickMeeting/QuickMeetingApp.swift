@@ -49,8 +49,17 @@ struct QuickMeetingApp: App {
             try? meetingStore.resetStuckRecordingMeetings(updatedAt: Date())
             try? meetingStore.resetStuckTranscribingMeetings(updatedAt: Date())
             let meetingFileStore = MeetingFileStore()
+            let realtimeTranscriptionCoordinator = RealtimeTranscriptionCoordinator(
+                meetingStore: meetingStore
+            )
             let recordingService = DefaultRecordingService(
-                audioCapturePipeline: NativeAudioCapturePipeline()
+                audioCapturePipeline: NativeAudioCapturePipeline(
+                    realtimeAudioBufferHandler: { buffer in
+                        Task { @MainActor in
+                            realtimeTranscriptionCoordinator.append(buffer)
+                        }
+                    }
+                )
             )
             let transcriptionProgressCenter = TranscriptionProgressCenter()
             let transcriptionSettingsStore = TranscriptionSettingsStore()
@@ -83,6 +92,8 @@ struct QuickMeetingApp: App {
                 transcriptionService: transcriptionService,
                 meetingSummaryService: meetingSummaryService,
                 meetingSummarySettingsStore: meetingSummarySettingsStore,
+                transcriptionSettingsStore: transcriptionSettingsStore,
+                realtimeTranscriptionCoordinator: realtimeTranscriptionCoordinator,
                 transcriptionProgressCenter: transcriptionProgressCenter,
                 meetingTranscriptStore: meetingTranscriptStore,
                 knownSpeakerEnrollmentService: knownSpeakerEnrollmentService,

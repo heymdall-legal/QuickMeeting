@@ -40,15 +40,18 @@ nonisolated struct TranscriptionPipelineOptions: Codable, Equatable, Sendable {
     var languageCode: String?
     var ctcMode: TranscriptionCTCMode
     var isLLMCorrectionEnabled: Bool
+    var isRealtimeTranscriptionEnabled: Bool
 
     init(
         languageCode: String? = nil,
         ctcMode: TranscriptionCTCMode = .off,
-        isLLMCorrectionEnabled: Bool = false
+        isLLMCorrectionEnabled: Bool = false,
+        isRealtimeTranscriptionEnabled: Bool = false
     ) {
         self.languageCode = languageCode
         self.ctcMode = ctcMode
         self.isLLMCorrectionEnabled = isLLMCorrectionEnabled
+        self.isRealtimeTranscriptionEnabled = isRealtimeTranscriptionEnabled
     }
 }
 

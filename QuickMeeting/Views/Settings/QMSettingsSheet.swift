@@ -209,6 +209,22 @@ struct QMSettingsSheet: View {
                     set: { transcriptionViewModel.setLLMCorrectionEnabled($0) }
                 ))
             }
+
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Realtime transcription")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Shows a live draft while recording.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                QMToggle(isOn: Binding(
+                    get: { transcriptionViewModel.isRealtimeTranscriptionEnabled },
+                    set: { transcriptionViewModel.setRealtimeTranscriptionEnabled($0) }
+                ))
+            }
         }
     }
 

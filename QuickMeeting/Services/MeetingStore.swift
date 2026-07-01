@@ -199,6 +199,12 @@ struct MeetingStore {
         syncMarkdownExportBestEffort(for: meeting)
     }
 
+    func storeRealtimeTranscript(meetingID: UUID, text: String, updatedAt: Date) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.storeRealtimeTranscript(text, updatedAt: updatedAt)
+        try modelContext.save()
+    }
+
     @discardableResult
     func renameSpeaker(
         meetingID: UUID,

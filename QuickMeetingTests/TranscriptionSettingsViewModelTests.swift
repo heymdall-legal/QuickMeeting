@@ -17,11 +17,13 @@ struct TranscriptionSettingsViewModelTests {
         viewModel.selectLanguage(code: "de")
         viewModel.selectCTCMode(.ctc110m)
         viewModel.setLLMCorrectionEnabled(true)
+        viewModel.setRealtimeTranscriptionEnabled(true)
 
         #expect(settingsStore.pipelineOptions() == TranscriptionPipelineOptions(
             languageCode: "de",
             ctcMode: .ctc110m,
-            isLLMCorrectionEnabled: true
+            isLLMCorrectionEnabled: true,
+            isRealtimeTranscriptionEnabled: true
         ))
     }
 

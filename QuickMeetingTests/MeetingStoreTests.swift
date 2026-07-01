@@ -411,6 +411,34 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func storeRealtimeTranscriptPersistsDraftWithoutReplacingFinalTranscript() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createCompletedMeeting(
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Alice")],
+                segments: [TranscriptSegment(text: "Final transcript", speakerID: "speaker-1")]
+            ),
+            transcriptPreview: "Final transcript"
+        )
+        try harness.store.saveSummary(
+            meetingID: meeting.id,
+            summary: "Short recap",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_200)
+        )
+
+        try harness.store.storeRealtimeTranscript(
+            meetingID: meeting.id,
+            text: "Live draft",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_300)
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.realtimeTranscriptText == "Live draft")
+        #expect(reloaded.storedTranscript?.fullText == "Final transcript")
+        #expect(reloaded.summaryText == "Short recap")
+    }
+
+    @Test
     func saveSummarySyncsMarkdownSummary() throws {
         let markdownExporter = SpyMarkdownExporter()
         let harness = try MeetingStoreHarness(markdownExporter: markdownExporter)

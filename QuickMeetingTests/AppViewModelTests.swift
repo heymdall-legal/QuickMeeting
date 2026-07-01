@@ -31,6 +31,37 @@ struct AppViewModelTests {
     }
 
     @Test
+    func startRecordingStartsRealtimeTranscriptionWhenEnabled() async throws {
+        let realtimeCoordinator = StubRealtimeTranscriptionCoordinator()
+        let harness = try AppViewModelHarness(
+            transcriptionSettingsStore: StubTranscriptionSettingsStore(
+                options: TranscriptionPipelineOptions(isRealtimeTranscriptionEnabled: true)
+            ),
+            realtimeTranscriptionCoordinator: realtimeCoordinator
+        )
+
+        await harness.viewModel.startRecording()
+
+        let meeting = try #require(try harness.meetingStore.fetchMeetings().first)
+        #expect(realtimeCoordinator.startedMeetingIDs == [meeting.id])
+    }
+
+    @Test
+    func startRecordingDoesNotStartRealtimeTranscriptionWhenDisabled() async throws {
+        let realtimeCoordinator = StubRealtimeTranscriptionCoordinator()
+        let harness = try AppViewModelHarness(
+            transcriptionSettingsStore: StubTranscriptionSettingsStore(
+                options: TranscriptionPipelineOptions(isRealtimeTranscriptionEnabled: false)
+            ),
+            realtimeTranscriptionCoordinator: realtimeCoordinator
+        )
+
+        await harness.viewModel.startRecording()
+
+        #expect(realtimeCoordinator.startedMeetingIDs.isEmpty)
+    }
+
+    @Test
     func selectCalendarEventPersistsTitleAttendeesAndCalendarEventID() async throws {
         let harness = try AppViewModelHarness()
         let meeting = try harness.createCompletedMeeting(summaryText: nil)
@@ -288,6 +319,8 @@ private struct AppViewModelHarness {
     let enrollmentService: StubKnownSpeakerEnrollmentService
     let summaryService: StubMeetingSummaryService
     let summarySettingsStore: StubMeetingSummarySettingsStore
+    let transcriptionSettingsStore: StubTranscriptionSettingsStore
+    let realtimeTranscriptionCoordinator: StubRealtimeTranscriptionCoordinator
     let viewModel: AppViewModel
     let meetingFileStore: MeetingFileStore
 
@@ -302,6 +335,8 @@ private struct AppViewModelHarness {
         ),
         calendarIntegration: any CalendarIntegration = NoopCalendarIntegration(),
         recordingPermissions: any RecordingPermissions = GrantedRecordingPermissions(),
+        transcriptionSettingsStore: StubTranscriptionSettingsStore = StubTranscriptionSettingsStore(),
+        realtimeTranscriptionCoordinator: StubRealtimeTranscriptionCoordinator? = nil,
         dateProvider: @escaping () -> Date = Date.init
     ) throws {
         let schema = Schema([
@@ -319,6 +354,8 @@ private struct AppViewModelHarness {
         enrollmentService = StubKnownSpeakerEnrollmentService(result: enrollmentResult)
         summaryService = StubMeetingSummaryService()
         summarySettingsStore = StubMeetingSummarySettingsStore(settingsValue: summarySettings)
+        self.transcriptionSettingsStore = transcriptionSettingsStore
+        self.realtimeTranscriptionCoordinator = realtimeTranscriptionCoordinator ?? StubRealtimeTranscriptionCoordinator()
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
@@ -329,6 +366,8 @@ private struct AppViewModelHarness {
             recordingService: StubRecordingService(),
             meetingSummaryService: summaryService,
             meetingSummarySettingsStore: summarySettingsStore,
+            transcriptionSettingsStore: transcriptionSettingsStore,
+            realtimeTranscriptionCoordinator: self.realtimeTranscriptionCoordinator,
             recordingPermissions: recordingPermissions,
             meetingTranscriptStore: meetingTranscriptStore,
             knownSpeakerEnrollmentService: enrollmentService,
@@ -454,6 +493,38 @@ private struct GrantedRecordingPermissions: RecordingPermissions {
     func ensurePermissions() async -> RecordingPermissionResult {
         .granted
     }
+}
+
+private struct StubTranscriptionSettingsStore: TranscriptionLanguageStoring {
+    var options: TranscriptionPipelineOptions = TranscriptionPipelineOptions()
+
+    func languageCode() -> String? {
+        options.languageCode
+    }
+
+    func saveLanguageCode(_: String?) {}
+
+    func pipelineOptions() -> TranscriptionPipelineOptions {
+        options
+    }
+
+    func savePipelineOptions(_: TranscriptionPipelineOptions) {}
+}
+
+@MainActor
+private final class StubRealtimeTranscriptionCoordinator: RealtimeTranscriptionCoordinating {
+    private(set) var startedMeetingIDs = [UUID]()
+    private(set) var stoppedMeetingIDs = [UUID]()
+
+    func start(meeting: Meeting, options _: TranscriptionPipelineOptions) async {
+        startedMeetingIDs.append(meeting.id)
+    }
+
+    func stop(meetingID: UUID) async {
+        stoppedMeetingIDs.append(meetingID)
+    }
+
+    func cancel(meetingID _: UUID) {}
 }
 
 private struct StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring {

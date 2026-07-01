@@ -26,6 +26,7 @@ final class Meeting {
     private var rawTranscriptData: Data?
     private var correctedTranscriptData: Data?
     private var transcriptionPipelineMetadataData: Data?
+    private(set) var realtimeTranscriptText: String?
     private(set) var summaryText: String?
     private(set) var duration: TimeInterval?
     private(set) var calendarEventID: String?
@@ -84,6 +85,7 @@ final class Meeting {
         transcriptSpeakers: [PersistedTranscriptSpeaker] = [],
         transcriptSegments: [PersistedTranscriptSegment] = [],
         summaryText: String? = nil,
+        realtimeTranscriptText: String? = nil,
         duration: TimeInterval? = nil,
         calendarEventID: String? = nil,
         attendeeNames: [String] = [],
@@ -99,6 +101,7 @@ final class Meeting {
         self.transcriptPreview = transcriptPreview
         self.transcriptSpeakers = transcriptSpeakers
         self.transcriptSegments = transcriptSegments
+        self.realtimeTranscriptText = realtimeTranscriptText
         self.summaryText = summaryText
         self.duration = duration
         self.calendarEventID = calendarEventID
@@ -196,6 +199,12 @@ final class Meeting {
 
     func storeSummary(_ summary: String, updatedAt: Date = Date()) {
         summaryText = summary
+        touch(updatedAt: updatedAt)
+    }
+
+    func storeRealtimeTranscript(_ text: String, updatedAt: Date = Date()) {
+        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        realtimeTranscriptText = normalizedText.isEmpty ? nil : normalizedText
         touch(updatedAt: updatedAt)
     }
 

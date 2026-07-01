@@ -17,6 +17,21 @@ protocol AudioCapturePipeline {
     func stop() async throws
 }
 
+nonisolated struct RealtimeAudioBuffer: Sendable, Equatable {
+    let samplesByChannel: [[Float]]
+    let sampleRate: Double
+
+    var frameCount: Int {
+        samplesByChannel.first?.count ?? 0
+    }
+
+    var channelCount: Int {
+        samplesByChannel.count
+    }
+}
+
+typealias RealtimeAudioBufferHandler = @Sendable (RealtimeAudioBuffer) -> Void
+
 private enum CapturedAudioSource {
     case system
     case microphone
@@ -154,6 +169,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     private let captureStopTimeout: TimeInterval
     private let microphoneDeviceProvider: () -> MicrophoneDevice?
     private let diagnosticHandler: @Sendable (RecordingDiagnostics) -> Void
+    private let realtimeAudioBufferHandler: RealtimeAudioBufferHandler?
     private var state: State = .idle
     private var activeMicrophoneDevice: MicrophoneDevice?
     private let logger = Logger(subsystem: "info.akitov.QuickMeeting", category: "Recording")
@@ -168,7 +184,8 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
                 MicrophoneDevice(id: $0.uniqueID, name: $0.localizedName)
             }
         },
-        diagnosticHandler: @escaping @Sendable (RecordingDiagnostics) -> Void = { _ in }
+        diagnosticHandler: @escaping @Sendable (RecordingDiagnostics) -> Void = { _ in },
+        realtimeAudioBufferHandler: RealtimeAudioBufferHandler? = nil
     ) {
         self.shareableContentProvider = shareableContentProvider
         self.writerFactory = writerFactory
@@ -176,13 +193,15 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         self.captureStopTimeout = captureStopTimeout
         self.microphoneDeviceProvider = microphoneDeviceProvider
         self.diagnosticHandler = diagnosticHandler
+        self.realtimeAudioBufferHandler = realtimeAudioBufferHandler
     }
 
-    convenience init() {
+    convenience init(realtimeAudioBufferHandler: RealtimeAudioBufferHandler? = nil) {
         self.init(
             shareableContentProvider: { try await Self.makeLiveCaptureTarget() },
             writerFactory: { try AACM4AAudioFileWriter(outputURL: $0) },
-            captureConfiguration: CaptureConfiguration(capturesMicrophone: true)
+            captureConfiguration: CaptureConfiguration(capturesMicrophone: true),
+            realtimeAudioBufferHandler: realtimeAudioBufferHandler
         )
     }
 
@@ -206,7 +225,8 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
             let target = try await shareableContentProvider()
             let createdOutputSink = CaptureOutputSink(
                 writer: writer,
-                captureConfiguration: resolvedCaptureConfiguration
+                captureConfiguration: resolvedCaptureConfiguration,
+                realtimeAudioBufferHandler: realtimeAudioBufferHandler
             )
             outputSink = createdOutputSink
             let session = try target.makeSession(resolvedCaptureConfiguration, createdOutputSink)
@@ -521,9 +541,13 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
 
     init(
         writer: any NativeAudioCapturePipeline.AudioFileWriting,
-        captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration = .init()
+        captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration = .init(),
+        realtimeAudioBufferHandler: RealtimeAudioBufferHandler? = nil
     ) {
-        let measuringWriter = MeasuringAudioFileWriter(base: writer)
+        let measuringWriter = MeasuringAudioFileWriter(
+            base: writer,
+            realtimeAudioBufferHandler: realtimeAudioBufferHandler
+        )
         self.writer = writer
         self.measuringWriter = measuringWriter
         mixer = CapturedAudioMixer(
@@ -851,9 +875,14 @@ private final class AudioSignalMetricsAccumulator {
 private final class MeasuringAudioFileWriter: NativeAudioCapturePipeline.AudioFileWriting {
     private let base: any NativeAudioCapturePipeline.AudioFileWriting
     private let accumulator = AudioSignalMetricsAccumulator()
+    private let realtimeAudioBufferHandler: RealtimeAudioBufferHandler?
 
-    init(base: any NativeAudioCapturePipeline.AudioFileWriting) {
+    init(
+        base: any NativeAudioCapturePipeline.AudioFileWriting,
+        realtimeAudioBufferHandler: RealtimeAudioBufferHandler? = nil
+    ) {
         self.base = base
+        self.realtimeAudioBufferHandler = realtimeAudioBufferHandler
     }
 
     var metrics: AudioSignalMetrics {
@@ -862,6 +891,9 @@ private final class MeasuringAudioFileWriter: NativeAudioCapturePipeline.AudioFi
 
     func append(_ buffer: AVAudioPCMBuffer) throws {
         accumulator.record(buffer)
+        if let realtimeBuffer = RealtimeAudioBuffer(buffer: buffer) {
+            realtimeAudioBufferHandler?(realtimeBuffer)
+        }
         try base.append(buffer)
     }
 
@@ -871,6 +903,30 @@ private final class MeasuringAudioFileWriter: NativeAudioCapturePipeline.AudioFi
 
     func resetMetrics() {
         accumulator.reset()
+    }
+}
+
+extension RealtimeAudioBuffer {
+    init?(buffer: AVAudioPCMBuffer) {
+        guard buffer.frameLength > 0,
+              let channelData = buffer.floatChannelData else {
+            return nil
+        }
+
+        let frameCount = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        var samplesByChannel = [[Float]]()
+        samplesByChannel.reserveCapacity(channelCount)
+
+        for channelIndex in 0..<channelCount {
+            let source = channelData[channelIndex]
+            samplesByChannel.append(Array(UnsafeBufferPointer(start: source, count: frameCount)))
+        }
+
+        self.init(
+            samplesByChannel: samplesByChannel,
+            sampleRate: buffer.format.sampleRate
+        )
     }
 }
 
