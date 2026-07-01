@@ -38,8 +38,6 @@ final class AppViewModel: ObservableObject {
     private let transcriptionService: any TranscriptionServicing
     private let meetingSummaryService: any MeetingSummaryServicing
     private let meetingSummarySettingsStore: any MeetingSummarySettingsStoring
-    private let transcriptionSettingsStore: any TranscriptionLanguageStoring
-    private let realtimeTranscriptionCoordinator: any RealtimeTranscriptionCoordinating
     private let meetingTranscriptStore: any MeetingTranscriptStoring
     private let knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)?
     private let recordingPermissions: any RecordingPermissions
@@ -59,8 +57,6 @@ final class AppViewModel: ObservableObject {
         transcriptionService: (any TranscriptionServicing)? = nil,
         meetingSummaryService: (any MeetingSummaryServicing)? = nil,
         meetingSummarySettingsStore: (any MeetingSummarySettingsStoring)? = nil,
-        transcriptionSettingsStore: (any TranscriptionLanguageStoring)? = nil,
-        realtimeTranscriptionCoordinator: (any RealtimeTranscriptionCoordinating)? = nil,
         transcriptionProgressCenter: TranscriptionProgressCenter? = nil,
         recordingPermissions: (any RecordingPermissions)? = nil,
         meetingTranscriptStore: (any MeetingTranscriptStoring)? = nil,
@@ -77,8 +73,6 @@ final class AppViewModel: ObservableObject {
         self.transcriptionService = transcriptionService ?? NoopTranscriptionService()
         self.meetingSummaryService = meetingSummaryService ?? NoopMeetingSummaryService()
         self.meetingSummarySettingsStore = meetingSummarySettingsStore ?? MeetingSummarySettingsStore()
-        self.transcriptionSettingsStore = transcriptionSettingsStore ?? TranscriptionSettingsStore()
-        self.realtimeTranscriptionCoordinator = realtimeTranscriptionCoordinator ?? NoopRealtimeTranscriptionCoordinator()
         self.recordingPermissions = recordingPermissions ?? NativeRecordingPermissions()
         self.meetingTranscriptStore = meetingTranscriptStore ?? MeetingTranscriptStore()
         self.knownSpeakerEnrollmentService = knownSpeakerEnrollmentService
@@ -139,14 +133,6 @@ final class AppViewModel: ObservableObject {
                 outputURL: artifacts.audioFileURL
             )
 
-            let transcriptionOptions = transcriptionSettingsStore.pipelineOptions()
-            if transcriptionOptions.isRealtimeTranscriptionEnabled {
-                await realtimeTranscriptionCoordinator.start(
-                    meeting: meeting,
-                    options: transcriptionOptions
-                )
-            }
-
             recordingState = .recording(meetingID: meetingID)
             recordingStartedAt = dateProvider()
             activeRecordingTitle = meeting.title
@@ -182,7 +168,6 @@ final class AppViewModel: ObservableObject {
                 meetingID: meetingID,
                 endedAt: dateProvider()
             )
-            await realtimeTranscriptionCoordinator.stop(meetingID: meetingID)
             recoverableRecordingMeetingID = nil
             recordingState = .idle
             recordingStartedAt = nil

@@ -11,8 +11,7 @@ struct TranscriptionSettingsStoreTests {
         #expect(store.pipelineOptions() == TranscriptionPipelineOptions(
             languageCode: nil,
             ctcMode: .off,
-            isLLMCorrectionEnabled: false,
-            isRealtimeTranscriptionEnabled: false
+            isLLMCorrectionEnabled: false
         ))
     }
 
@@ -25,16 +24,14 @@ struct TranscriptionSettingsStoreTests {
         store.savePipelineOptions(.init(
             languageCode: "fr",
             ctcMode: .ctc06b,
-            isLLMCorrectionEnabled: true,
-            isRealtimeTranscriptionEnabled: true
+            isLLMCorrectionEnabled: true
         ))
 
         #expect(store.languageCode() == "fr")
         #expect(store.pipelineOptions() == TranscriptionPipelineOptions(
             languageCode: "fr",
             ctcMode: .ctc06b,
-            isLLMCorrectionEnabled: true,
-            isRealtimeTranscriptionEnabled: true
+            isLLMCorrectionEnabled: true
         ))
     }
 

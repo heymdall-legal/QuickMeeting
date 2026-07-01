@@ -95,13 +95,12 @@ nonisolated func transcriptionPipelineWarningText(_ warnings: [String]?) -> Stri
 }
 
 enum MeetingDetailTab: CaseIterable, Hashable {
-    case transcript, summary, realtime
+    case transcript, summary
 
     var label: String {
         switch self {
         case .transcript: "Transcript"
         case .summary: "Summary"
-        case .realtime: "Realtime"
         }
     }
 }
@@ -160,8 +159,6 @@ func meetingDetailHeaderActions(
                 isEnabled: true
             )
         )
-    case .realtime:
-        break
     case .summary:
         if case .ready = summaryState {
             actions.append(
@@ -499,8 +496,6 @@ struct MeetingDetailView: View {
                     .padding(.horizontal, 30)
                     .padding(.bottom, 18)
                 }
-            } else if activeTab == .realtime {
-                realtimeTranscriptPane
             } else {
                 MeetingSummaryPane(
                     state: summaryViewState,
@@ -835,71 +830,64 @@ struct MeetingDetailView: View {
     private var recordedView: some View {
         VStack(spacing: 0) {
             simpleHeader(showDelete: true)
-            if hasRealtimeTranscript {
-                contentTabPicker
-            }
 
-            if activeTab == .realtime, hasRealtimeTranscript {
-                realtimeTranscriptPane
-            } else {
-                WaveformPlayerBar(
-                    currentTime: playback.currentTime,
-                    duration: playback.duration,
-                    isPlaying: playback.state == .playing,
-                    isAvailable: playback.isPlaybackAvailable,
-                    waveformSamples: playback.waveformSamples,
-                    onToggle: playback.togglePlayback,
-                    onSeek: seek(toFraction:)
-                )
-                .padding(.horizontal, 30)
+            WaveformPlayerBar(
+                currentTime: playback.currentTime,
+                duration: playback.duration,
+                isPlaying: playback.state == .playing,
+                isAvailable: playback.isPlaybackAvailable,
+                waveformSamples: playback.waveformSamples,
+                onToggle: playback.togglePlayback,
+                onSeek: seek(toFraction:)
+            )
+            .padding(.horizontal, 30)
 
-                VStack(spacing: 0) {
-                    Image(systemName: "text.alignleft")
-                        .font(.system(size: 24))
-                        .foregroundStyle(QMTheme.faint)
-                        .frame(width: 56, height: 56)
-                        .background(QMTheme.chip, in: Circle())
-                        .padding(.bottom, 18)
+            VStack(spacing: 0) {
+                Image(systemName: "text.alignleft")
+                    .font(.system(size: 24))
+                    .foregroundStyle(QMTheme.faint)
+                    .frame(width: 56, height: 56)
+                    .background(QMTheme.chip, in: Circle())
+                    .padding(.bottom, 18)
 
-                    Text("Not transcribed yet")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(QMTheme.ink)
-                        .padding(.bottom, 6)
+                Text("Not transcribed yet")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(QMTheme.ink)
+                    .padding(.bottom, 6)
 
-                    Text("Transcribe this recording to get a speaker-by-speaker transcript and attendee names from your calendar.")
-                        .font(.system(size: 13.5))
+                Text("Transcribe this recording to get a speaker-by-speaker transcript and attendee names from your calendar.")
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(QMTheme.tertiary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 340)
+                    .padding(.bottom, 20)
+
+                Button(action: handleTranscribeAction) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 13, weight: .bold))
+                        Text("Transcribe")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(QMTheme.sage, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canTranscribe)
+                .opacity(canTranscribe ? 1 : 0.5)
+
+                if let transcriptionDisabledReason {
+                    Text(transcriptionDisabledReason)
+                        .font(.system(size: 12))
                         .foregroundStyle(QMTheme.tertiary)
                         .multilineTextAlignment(.center)
-                        .frame(maxWidth: 340)
-                        .padding(.bottom, 20)
-
-                    Button(action: handleTranscribeAction) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 13, weight: .bold))
-                            Text("Transcribe")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(QMTheme.sage, in: RoundedRectangle(cornerRadius: 10))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canTranscribe)
-                    .opacity(canTranscribe ? 1 : 0.5)
-
-                    if let transcriptionDisabledReason {
-                        Text(transcriptionDisabledReason)
-                            .font(.system(size: 12))
-                            .foregroundStyle(QMTheme.tertiary)
-                            .multilineTextAlignment(.center)
-                            .padding(.top, 12)
-                    }
+                        .padding(.top, 12)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(30)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(30)
         }
     }
 
@@ -979,12 +967,7 @@ struct MeetingDetailView: View {
             .padding(.top, 22)
             .padding(.bottom, 16)
 
-            contentTabPicker
-
-            if activeTab == .realtime {
-                realtimeTranscriptPane
-            } else {
-                VStack(spacing: 0) {
+            VStack(spacing: 0) {
                 Text("RECORDING")
                     .font(.system(size: 13, weight: .semibold))
                     .tracking(1.3)
@@ -1017,42 +1000,7 @@ struct MeetingDetailView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(30)
-            }
         }
-    }
-
-    private var hasRealtimeTranscript: Bool {
-        !(meeting.realtimeTranscriptText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var realtimeTranscriptPane: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if let realtimeText = meeting.realtimeTranscriptText?
-                    .trimmingCharacters(in: .whitespacesAndNewlines),
-                   !realtimeText.isEmpty {
-                    Text(realtimeText)
-                        .font(.system(size: 14.5))
-                        .foregroundStyle(QMTheme.body)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    VStack(spacing: 10) {
-                        Image(systemName: "waveform.and.magnifyingglass")
-                            .font(.system(size: 24))
-                            .foregroundStyle(QMTheme.faint)
-                        Text("Realtime transcript will appear here.")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(QMTheme.tertiary)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 220)
-                }
-            }
-            .padding(.horizontal, 30)
-            .padding(.top, 6)
-            .padding(.bottom, 30)
-        }
-        .scrollContentBackground(.hidden)
     }
 
     // MARK: Shared header
