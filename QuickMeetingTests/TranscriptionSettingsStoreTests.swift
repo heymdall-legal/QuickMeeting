@@ -12,10 +12,7 @@ struct TranscriptionSettingsStoreTests {
             languageCode: nil,
             ctcMode: .off,
             isLLMCorrectionEnabled: false,
-            isRealtimeTranscriptionEnabled: false,
-            realtimeTranscriptionBackend: .fluidAudio,
-            realtimeTranscriptionEndpointURLString: "http://127.0.0.1:1234/v1/audio/transcriptions",
-            realtimeTranscriptionModelName: "gigaam"
+            isRealtimeTranscriptionEnabled: false
         ))
     }
 
@@ -29,10 +26,7 @@ struct TranscriptionSettingsStoreTests {
             languageCode: "fr",
             ctcMode: .ctc06b,
             isLLMCorrectionEnabled: true,
-            isRealtimeTranscriptionEnabled: true,
-            realtimeTranscriptionBackend: .customOpenAICompatible,
-            realtimeTranscriptionEndpointURLString: "http://127.0.0.1:9000/v1/audio/transcriptions",
-            realtimeTranscriptionModelName: "custom-ru"
+            isRealtimeTranscriptionEnabled: true
         ))
 
         #expect(store.languageCode() == "fr")
@@ -40,10 +34,7 @@ struct TranscriptionSettingsStoreTests {
             languageCode: "fr",
             ctcMode: .ctc06b,
             isLLMCorrectionEnabled: true,
-            isRealtimeTranscriptionEnabled: true,
-            realtimeTranscriptionBackend: .customOpenAICompatible,
-            realtimeTranscriptionEndpointURLString: "http://127.0.0.1:9000/v1/audio/transcriptions",
-            realtimeTranscriptionModelName: "custom-ru"
+            isRealtimeTranscriptionEnabled: true
         ))
     }
 
