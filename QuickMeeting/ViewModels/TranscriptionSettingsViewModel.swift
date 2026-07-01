@@ -14,6 +14,9 @@ final class TranscriptionSettingsViewModel: ObservableObject {
     @Published private(set) var ctcMode: TranscriptionCTCMode
     @Published private(set) var isLLMCorrectionEnabled: Bool
     @Published private(set) var isRealtimeTranscriptionEnabled: Bool
+    @Published private(set) var realtimeTranscriptionBackend: RealtimeTranscriptionBackend
+    @Published private(set) var realtimeTranscriptionEndpointURLString: String
+    @Published private(set) var realtimeTranscriptionModelName: String
     @Published private(set) var glossaryTerms: [TranscriptionGlossaryTerm]
     @Published private(set) var isGlossaryLoaded: Bool
 
@@ -31,12 +34,16 @@ final class TranscriptionSettingsViewModel: ObservableObject {
         ctcMode = options.ctcMode
         isLLMCorrectionEnabled = options.isLLMCorrectionEnabled
         isRealtimeTranscriptionEnabled = options.isRealtimeTranscriptionEnabled
+        realtimeTranscriptionBackend = options.realtimeTranscriptionBackend
+        realtimeTranscriptionEndpointURLString = options.realtimeTranscriptionEndpointURLString
+        realtimeTranscriptionModelName = options.realtimeTranscriptionModelName
         glossaryTerms = []
         isGlossaryLoaded = false
     }
 
     var options: [TranscriptionLanguageOption] { TranscriptionLanguageOption.all }
     var ctcOptions: [TranscriptionCTCMode] { TranscriptionCTCMode.allCases }
+    var realtimeBackendOptions: [RealtimeTranscriptionBackend] { RealtimeTranscriptionBackend.allCases }
 
     var selectedLanguageName: String { TranscriptionLanguageOption.name(for: languageCode) }
 
@@ -57,6 +64,21 @@ final class TranscriptionSettingsViewModel: ObservableObject {
 
     func setRealtimeTranscriptionEnabled(_ isEnabled: Bool) {
         isRealtimeTranscriptionEnabled = isEnabled
+        savePipelineOptions()
+    }
+
+    func selectRealtimeTranscriptionBackend(_ backend: RealtimeTranscriptionBackend) {
+        realtimeTranscriptionBackend = backend
+        savePipelineOptions()
+    }
+
+    func setRealtimeTranscriptionEndpointURLString(_ endpointURLString: String) {
+        realtimeTranscriptionEndpointURLString = endpointURLString
+        savePipelineOptions()
+    }
+
+    func setRealtimeTranscriptionModelName(_ modelName: String) {
+        realtimeTranscriptionModelName = modelName
         savePipelineOptions()
     }
 
@@ -104,7 +126,10 @@ final class TranscriptionSettingsViewModel: ObservableObject {
                 languageCode: languageCode,
                 ctcMode: ctcMode,
                 isLLMCorrectionEnabled: isLLMCorrectionEnabled,
-                isRealtimeTranscriptionEnabled: isRealtimeTranscriptionEnabled
+                isRealtimeTranscriptionEnabled: isRealtimeTranscriptionEnabled,
+                realtimeTranscriptionBackend: realtimeTranscriptionBackend,
+                realtimeTranscriptionEndpointURLString: realtimeTranscriptionEndpointURLString,
+                realtimeTranscriptionModelName: realtimeTranscriptionModelName
             )
         )
     }

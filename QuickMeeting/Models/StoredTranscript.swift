@@ -36,22 +36,48 @@ nonisolated enum TranscriptionCTCMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
+nonisolated enum RealtimeTranscriptionBackend: String, Codable, CaseIterable, Sendable {
+    case fluidAudio
+    case customOpenAICompatible
+
+    var displayName: String {
+        switch self {
+        case .fluidAudio:
+            "Fluid Audio"
+        case .customOpenAICompatible:
+            "Custom OpenAI-compatible"
+        }
+    }
+}
+
 nonisolated struct TranscriptionPipelineOptions: Codable, Equatable, Sendable {
+    static let defaultRealtimeTranscriptionEndpointURLString = "http://127.0.0.1:1234/v1/audio/transcriptions"
+    static let defaultRealtimeTranscriptionModelName = "gigaam"
+
     var languageCode: String?
     var ctcMode: TranscriptionCTCMode
     var isLLMCorrectionEnabled: Bool
     var isRealtimeTranscriptionEnabled: Bool
+    var realtimeTranscriptionBackend: RealtimeTranscriptionBackend
+    var realtimeTranscriptionEndpointURLString: String
+    var realtimeTranscriptionModelName: String
 
     init(
         languageCode: String? = nil,
         ctcMode: TranscriptionCTCMode = .off,
         isLLMCorrectionEnabled: Bool = false,
-        isRealtimeTranscriptionEnabled: Bool = false
+        isRealtimeTranscriptionEnabled: Bool = false,
+        realtimeTranscriptionBackend: RealtimeTranscriptionBackend = .fluidAudio,
+        realtimeTranscriptionEndpointURLString: String = Self.defaultRealtimeTranscriptionEndpointURLString,
+        realtimeTranscriptionModelName: String = Self.defaultRealtimeTranscriptionModelName
     ) {
         self.languageCode = languageCode
         self.ctcMode = ctcMode
         self.isLLMCorrectionEnabled = isLLMCorrectionEnabled
         self.isRealtimeTranscriptionEnabled = isRealtimeTranscriptionEnabled
+        self.realtimeTranscriptionBackend = realtimeTranscriptionBackend
+        self.realtimeTranscriptionEndpointURLString = realtimeTranscriptionEndpointURLString
+        self.realtimeTranscriptionModelName = realtimeTranscriptionModelName
     }
 }
 

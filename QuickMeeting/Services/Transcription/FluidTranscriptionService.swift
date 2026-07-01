@@ -262,22 +262,36 @@ final class FluidTranscriptionService: TranscriptionServicing {
 final class RealtimeTranscriptionCoordinator: RealtimeTranscriptionCoordinating {
     private let meetingStore: MeetingStore
     private let dateProvider: () -> Date
+    private let transcriberFactory: (
+        TranscriptionPipelineOptions,
+        @escaping @Sendable (String) -> Void
+    ) -> any RealtimeTranscribing
     private var activeMeetingID: UUID?
     private var transcriber: (any RealtimeTranscribing)?
 
     init(
         meetingStore: MeetingStore,
-        dateProvider: @escaping () -> Date = Date.init
+        dateProvider: @escaping () -> Date = Date.init,
+        transcriberFactory: @escaping (
+            TranscriptionPipelineOptions,
+            @escaping @Sendable (String) -> Void
+        ) -> any RealtimeTranscribing = { options, partialHandler in
+            RealtimeTranscriptionCoordinator.makeTranscriber(
+                options: options,
+                partialHandler: partialHandler
+            )
+        }
     ) {
         self.meetingStore = meetingStore
         self.dateProvider = dateProvider
+        self.transcriberFactory = transcriberFactory
     }
 
     func start(meeting: Meeting, options: TranscriptionPipelineOptions) async {
         activeMeetingID = meeting.id
         let meetingID = meeting.id
         let coordinator = self
-        let transcriber: any RealtimeTranscribing = Self.makeTranscriber(options: options) { text in
+        let transcriber = transcriberFactory(options) { text in
             Task { @MainActor in
                 coordinator.storeRealtimeTranscript(text, meetingID: meetingID)
             }
@@ -289,23 +303,31 @@ final class RealtimeTranscriptionCoordinator: RealtimeTranscriptionCoordinating 
                 try await transcriber.start()
             } catch {
                 await MainActor.run {
-                    self.storeRealtimeTranscript(
-                        "Realtime transcription unavailable: \(error.localizedDescription)",
-                        meetingID: meetingID
-                    )
+                    self.storeRealtimeUnavailableMessage(error, meetingID: meetingID)
                 }
             }
         }
     }
 
     func append(_ buffer: RealtimeAudioBuffer) {
-        guard activeMeetingID != nil,
+        guard let meetingID = activeMeetingID,
               let transcriber else {
             return
         }
 
         Task {
-            try? await transcriber.append(buffer)
+            do {
+                try await transcriber.append(buffer)
+            } catch {
+                await MainActor.run {
+                    guard self.activeMeetingID == meetingID else {
+                        return
+                    }
+
+                    self.storeRealtimeUnavailableMessage(error, meetingID: meetingID)
+                    self.transcriber = nil
+                }
+            }
         }
     }
 
@@ -340,25 +362,50 @@ final class RealtimeTranscriptionCoordinator: RealtimeTranscriptionCoordinating 
         )
     }
 
-    private static func makeTranscriber(
+    private func storeRealtimeUnavailableMessage(_ error: Error, meetingID: UUID) {
+        storeRealtimeTranscript(
+            Self.realtimeUnavailableMessage(for: error),
+            meetingID: meetingID
+        )
+    }
+
+    nonisolated static func realtimeUnavailableMessage(for error: Error) -> String {
+        let description = error.localizedDescription
+        if description.contains("Hugging Face rate limit")
+            || description.contains("Rate limited") {
+            return """
+            Realtime transcription unavailable: Fluid Audio models are not cached yet and Hugging Face rate-limited the download. Set HF_TOKEN or HUGGING_FACE_HUB_TOKEN, configure REGISTRY_URL, or retry later; after the models are cached, realtime transcription runs locally.
+            """
+        }
+
+        return "Realtime transcription unavailable: \(description)"
+    }
+
+    nonisolated static func makeTranscriber(
         options: TranscriptionPipelineOptions,
         partialHandler: @escaping @Sendable (String) -> Void
     ) -> any RealtimeTranscribing {
-        if options.languageCode == "ru" {
-            return GigaAMRealtimeTranscriber(partialHandler: partialHandler)
+        switch options.realtimeTranscriptionBackend {
+        case .fluidAudio:
+            return FluidRealtimeTranscriber(partialHandler: partialHandler)
+        case .customOpenAICompatible:
+            return CustomOpenAICompatibleRealtimeTranscriber(
+                endpointURLString: options.realtimeTranscriptionEndpointURLString,
+                modelName: options.realtimeTranscriptionModelName,
+                languageCode: options.languageCode,
+                partialHandler: partialHandler
+            )
         }
-
-        return FluidRealtimeTranscriber(partialHandler: partialHandler)
     }
 }
 
-private protocol RealtimeTranscribing: Sendable {
+nonisolated protocol RealtimeTranscribing: Sendable {
     func start() async throws
     func append(_ buffer: RealtimeAudioBuffer) async throws
     func finish() async throws -> String
 }
 
-private actor FluidRealtimeTranscriber: RealtimeTranscribing {
+actor FluidRealtimeTranscriber: RealtimeTranscribing {
     private let manager: StreamingEouAsrManager
     private let partialHandler: @Sendable (String) -> Void
     private var didStart = false
@@ -399,10 +446,24 @@ private actor FluidRealtimeTranscriber: RealtimeTranscribing {
     }
 }
 
-private actor GigaAMRealtimeTranscriber: RealtimeTranscribing {
-    private let endpointURL: URL
+nonisolated private enum RealtimeTranscriptionConfigurationError: LocalizedError {
+    case invalidEndpointURL
+    case emptyModelName
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidEndpointURL:
+            "Realtime transcription endpoint URL is invalid."
+        case .emptyModelName:
+            "Realtime transcription model name is empty."
+        }
+    }
+}
+
+actor CustomOpenAICompatibleRealtimeTranscriber: RealtimeTranscribing {
+    private let endpointURLString: String
     private let modelName: String
-    private let languageCode: String
+    private let languageCode: String?
     private let chunkDuration: TimeInterval
     private let partialHandler: @Sendable (String) -> Void
     private var pendingMonoSamples = [Float]()
@@ -410,20 +471,22 @@ private actor GigaAMRealtimeTranscriber: RealtimeTranscribing {
     private var accumulatedText = ""
 
     init(
-        endpointURL: URL = URL(string: "http://127.0.0.1:1234/v1/audio/transcriptions")!,
-        modelName: String = "gigaam",
-        languageCode: String = "ru",
+        endpointURLString: String = TranscriptionPipelineOptions.defaultRealtimeTranscriptionEndpointURLString,
+        modelName: String = TranscriptionPipelineOptions.defaultRealtimeTranscriptionModelName,
+        languageCode: String? = nil,
         chunkDuration: TimeInterval = 5,
         partialHandler: @escaping @Sendable (String) -> Void
     ) {
-        self.endpointURL = endpointURL
+        self.endpointURLString = endpointURLString
         self.modelName = modelName
         self.languageCode = languageCode
         self.chunkDuration = chunkDuration
         self.partialHandler = partialHandler
     }
 
-    func start() async throws {}
+    func start() async throws {
+        _ = try validatedConfiguration()
+    }
 
     func append(_ buffer: RealtimeAudioBuffer) async throws {
         guard buffer.frameCount > 0 else {
@@ -464,11 +527,16 @@ private actor GigaAMRealtimeTranscriber: RealtimeTranscribing {
     }
 
     private func transcribe(wavData: Data) async throws -> String {
+        let configuration = try validatedConfiguration()
         let boundary = "QuickMeetingRealtime-\(UUID().uuidString)"
-        var request = URLRequest(url: endpointURL)
+        var request = URLRequest(url: configuration.endpointURL)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = multipartBody(boundary: boundary, wavData: wavData)
+        request.httpBody = multipartBody(
+            boundary: boundary,
+            wavData: wavData,
+            modelName: configuration.modelName
+        )
 
         let (data, _) = try await URLSession.shared.data(for: request)
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -478,16 +546,35 @@ private actor GigaAMRealtimeTranscriber: RealtimeTranscribing {
         return text
     }
 
-    private func multipartBody(boundary: String, wavData: Data) -> Data {
+    private func multipartBody(boundary: String, wavData: Data, modelName: String) -> Data {
         var body = Data()
         appendField(name: "model", value: modelName, boundary: boundary, to: &body)
-        appendField(name: "language", value: languageCode, boundary: boundary, to: &body)
+        if let languageCode = languageCode?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !languageCode.isEmpty {
+            appendField(name: "language", value: languageCode, boundary: boundary, to: &body)
+        }
         body.appendString("--\(boundary)\r\n")
         body.appendString("Content-Disposition: form-data; name=\"file\"; filename=\"chunk.wav\"\r\n")
         body.appendString("Content-Type: audio/wav\r\n\r\n")
         body.append(wavData)
         body.appendString("\r\n--\(boundary)--\r\n")
         return body
+    }
+
+    private func validatedConfiguration() throws -> (endpointURL: URL, modelName: String) {
+        let trimmedEndpoint = endpointURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let endpointURL = URL(string: trimmedEndpoint),
+              endpointURL.scheme != nil,
+              endpointURL.host != nil else {
+            throw RealtimeTranscriptionConfigurationError.invalidEndpointURL
+        }
+
+        let trimmedModelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedModelName.isEmpty else {
+            throw RealtimeTranscriptionConfigurationError.emptyModelName
+        }
+
+        return (endpointURL, trimmedModelName)
     }
 
     private func appendField(name: String, value: String, boundary: String, to body: inout Data) {

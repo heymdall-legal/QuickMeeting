@@ -225,6 +225,42 @@ struct QMSettingsSheet: View {
                     set: { transcriptionViewModel.setRealtimeTranscriptionEnabled($0) }
                 ))
             }
+
+            if transcriptionViewModel.isRealtimeTranscriptionEnabled {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Realtime backend")
+                            .font(.system(size: 14.5, weight: .semibold))
+                            .foregroundStyle(QMTheme.ink)
+                        Text("Fluid Audio is used unless a custom OpenAI-compatible endpoint is selected.")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(QMTheme.tertiary)
+                    }
+                    Spacer(minLength: 0)
+                    realtimeBackendMenu
+                }
+
+                if transcriptionViewModel.realtimeTranscriptionBackend == .customOpenAICompatible {
+                    VStack(alignment: .leading, spacing: 10) {
+                        realtimeTextField(
+                            label: "Endpoint",
+                            placeholder: TranscriptionPipelineOptions.defaultRealtimeTranscriptionEndpointURLString,
+                            text: Binding(
+                                get: { transcriptionViewModel.realtimeTranscriptionEndpointURLString },
+                                set: { transcriptionViewModel.setRealtimeTranscriptionEndpointURLString($0) }
+                            )
+                        )
+                        realtimeTextField(
+                            label: "Model",
+                            placeholder: TranscriptionPipelineOptions.defaultRealtimeTranscriptionModelName,
+                            text: Binding(
+                                get: { transcriptionViewModel.realtimeTranscriptionModelName },
+                                set: { transcriptionViewModel.setRealtimeTranscriptionModelName($0) }
+                            )
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -294,6 +330,57 @@ struct QMSettingsSheet: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    private var realtimeBackendMenu: some View {
+        Menu {
+            ForEach(transcriptionViewModel.realtimeBackendOptions, id: \.self) { backend in
+                Button {
+                    transcriptionViewModel.selectRealtimeTranscriptionBackend(backend)
+                } label: {
+                    if transcriptionViewModel.realtimeTranscriptionBackend == backend {
+                        Label(backend.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(backend.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text(transcriptionViewModel.realtimeTranscriptionBackend.displayName)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(QMTheme.ink)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(QMTheme.muted)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(width: 220)
+            .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private func realtimeTextField(label: String, placeholder: String, text: Binding<String>) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(label)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(QMTheme.secondary)
+                .frame(width: 70, alignment: .leading)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
+                .foregroundStyle(QMTheme.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
+        }
     }
 
     // MARK: Glossary

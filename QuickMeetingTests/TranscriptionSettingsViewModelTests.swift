@@ -18,12 +18,18 @@ struct TranscriptionSettingsViewModelTests {
         viewModel.selectCTCMode(.ctc110m)
         viewModel.setLLMCorrectionEnabled(true)
         viewModel.setRealtimeTranscriptionEnabled(true)
+        viewModel.selectRealtimeTranscriptionBackend(.customOpenAICompatible)
+        viewModel.setRealtimeTranscriptionEndpointURLString("http://127.0.0.1:9000/v1/audio/transcriptions")
+        viewModel.setRealtimeTranscriptionModelName("custom-ru")
 
         #expect(settingsStore.pipelineOptions() == TranscriptionPipelineOptions(
             languageCode: "de",
             ctcMode: .ctc110m,
             isLLMCorrectionEnabled: true,
-            isRealtimeTranscriptionEnabled: true
+            isRealtimeTranscriptionEnabled: true,
+            realtimeTranscriptionBackend: .customOpenAICompatible,
+            realtimeTranscriptionEndpointURLString: "http://127.0.0.1:9000/v1/audio/transcriptions",
+            realtimeTranscriptionModelName: "custom-ru"
         ))
     }
 
