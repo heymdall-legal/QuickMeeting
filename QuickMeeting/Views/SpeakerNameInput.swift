@@ -1,5 +1,21 @@
 import SwiftUI
 
+enum SpeakerNameInputLayout {
+    static let suggestionRowHeight: CGFloat = 30
+    static let suggestionListSpacing: CGFloat = 4
+    static let maxSuggestionListHeight: CGFloat = 320
+
+    static func suggestionListHeight(suggestionCount: Int) -> CGFloat {
+        guard suggestionCount > 0 else {
+            return 0
+        }
+
+        let contentHeight = CGFloat(suggestionCount) * suggestionRowHeight
+            + CGFloat(suggestionCount - 1) * suggestionListSpacing
+        return min(contentHeight, maxSuggestionListHeight)
+    }
+}
+
 func speakerAutocompleteSuggestions(
     attendeeNames: [String],
     draft: String
@@ -105,25 +121,35 @@ struct SpeakerNameInput: View {
                 commitDraftIfNeeded()
             }
 
-            if state.showsSuggestions {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(state.suggestions.enumerated()), id: \.offset) { _, suggestion in
-                        Button {
-                            let selected = state.selectSuggestion(suggestion)
-                            onCommit(selected)
-                        } label: {
-                            Text(suggestion)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
+            let suggestions = state.suggestions
+            if !suggestions.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: SpeakerNameInputLayout.suggestionListSpacing) {
+                        ForEach(Array(suggestions.enumerated()), id: \.offset) { _, suggestion in
+                            Button {
+                                let selected = state.selectSuggestion(suggestion)
+                                onCommit(selected)
+                            } label: {
+                                Text(suggestion)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .frame(height: SpeakerNameInputLayout.suggestionRowHeight)
+                                    .padding(.horizontal, 10)
+                            }
+                            .buttonStyle(.plain)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(nsColor: .controlBackgroundColor))
+                            )
                         }
-                        .buttonStyle(.plain)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(nsColor: .controlBackgroundColor))
-                        )
                     }
                 }
+                .frame(
+                    maxHeight: SpeakerNameInputLayout.suggestionListHeight(
+                        suggestionCount: suggestions.count
+                    )
+                )
             }
         }
         .onChange(of: displayName) { _, newValue in

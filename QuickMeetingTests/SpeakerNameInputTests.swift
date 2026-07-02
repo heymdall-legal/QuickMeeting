@@ -90,6 +90,13 @@ struct SpeakerNameInputTests {
     }
 
     @Test
+    func suggestionListHeightIsCappedForLongAttendeeLists() {
+        #expect(SpeakerNameInputLayout.suggestionListHeight(suggestionCount: 0) == 0)
+        #expect(SpeakerNameInputLayout.suggestionListHeight(suggestionCount: 3) < SpeakerNameInputLayout.maxSuggestionListHeight)
+        #expect(SpeakerNameInputLayout.suggestionListHeight(suggestionCount: 60) == SpeakerNameInputLayout.maxSuggestionListHeight)
+    }
+
+    @Test
     func commitDraftReturnsTrailingWhitespaceWhenEditWasOnlyTypedLocally() {
         var state = SpeakerNameInputState(
             attendeeNames: ["Vasia Pupkin"],
