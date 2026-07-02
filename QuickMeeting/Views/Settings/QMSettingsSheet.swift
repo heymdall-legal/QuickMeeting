@@ -13,24 +13,35 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum QMSettingsTab: Hashable {
+    case general
+    case glossary
+}
+
 struct QMSettingsSheet: View {
     @ObservedObject var calendarViewModel: CalendarSettingsViewModel
     @ObservedObject var autoRecordingViewModel: AutoRecordingSettingsViewModel
     @ObservedObject var transcriptionViewModel: TranscriptionSettingsViewModel
     @ObservedObject var meetingSummaryViewModel: MeetingSummarySettingsViewModel
+    @ObservedObject var markdownExportViewModel: MarkdownExportSettingsViewModel
     let onClose: () -> Void
 
     @State private var isCalendarDropdownOpen = false
     @State private var isAppImporterPresented = false
+    @State private var isMarkdownDirectoryImporterPresented = false
+    @State private var glossaryDraft = ""
+    @State private var selectedTab: QMSettingsTab = .general
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider().overlay(QMTheme.hairline)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+            TabView(selection: $selectedTab) {
+                settingsScroll {
                     transcriptionSection
+                    Divider().overlay(QMTheme.hairline).padding(.vertical, 22)
+                    markdownExportSection
                     Divider().overlay(QMTheme.hairline).padding(.vertical, 22)
                     calendarsSection
                     Divider().overlay(QMTheme.hairline).padding(.vertical, 22)
@@ -38,9 +49,24 @@ struct QMSettingsSheet: View {
                     Divider().overlay(QMTheme.hairline).padding(.vertical, 22)
                     aiSummarizationSection
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 22)
-                .padding(.bottom, 8)
+                .tabItem {
+                    Label("Settings", systemImage: "slider.horizontal.3")
+                }
+                .tag(QMSettingsTab.general)
+
+                settingsScroll {
+                    glossarySection
+                }
+                .tabItem {
+                    Label("Glossary", systemImage: "text.book.closed")
+                }
+                .tag(QMSettingsTab.glossary)
+            }
+            .padding(.top, 12)
+            .onChange(of: selectedTab) { _, tab in
+                if tab == .glossary {
+                    transcriptionViewModel.loadGlossaryIfNeeded()
+                }
             }
 
             Divider().overlay(QMTheme.hairline)
@@ -60,10 +86,34 @@ struct QMSettingsSheet: View {
             guard case .success(let urls) = result, let url = urls.first else { return }
             Task { try? await autoRecordingViewModel.addSelectedApp(at: url) }
         }
+        .fileImporter(
+            isPresented: $isMarkdownDirectoryImporterPresented,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            markdownExportViewModel.selectDirectory(url)
+        }
         .alert("Auto Recording App Error", isPresented: autoRecordingErrorIsPresented) {
             Button("OK") { autoRecordingViewModel.clearError() }
         } message: {
             Text(autoRecordingViewModel.errorMessage ?? "Unknown error.")
+        }
+        .alert("Markdown Export Error", isPresented: markdownExportErrorIsPresented) {
+            Button("OK") { markdownExportViewModel.clearError() }
+        } message: {
+            Text(markdownExportViewModel.errorMessage ?? "Unknown error.")
+        }
+    }
+
+    private func settingsScroll<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                content()
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 18)
+            .padding(.bottom, 8)
         }
     }
 
@@ -130,6 +180,35 @@ struct QMSettingsSheet: View {
                 Spacer(minLength: 0)
                 languageMenu
             }
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Vocabulary assistance")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Optional batch-only CTC stage for glossary terms.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                ctcModeMenu
+            }
+
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("LLM transcript correction")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Runs after ASR and diarization when correction settings are complete.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                QMToggle(isOn: Binding(
+                    get: { transcriptionViewModel.isLLMCorrectionEnabled },
+                    set: { transcriptionViewModel.setLLMCorrectionEnabled($0) }
+                ))
+            }
         }
     }
 
@@ -165,6 +244,214 @@ struct QMSettingsSheet: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    private var ctcModeMenu: some View {
+        Menu {
+            ForEach(transcriptionViewModel.ctcOptions, id: \.self) { mode in
+                Button {
+                    transcriptionViewModel.selectCTCMode(mode)
+                } label: {
+                    if transcriptionViewModel.ctcMode == mode {
+                        Label(mode.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(mode.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text(transcriptionViewModel.ctcMode.displayName)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(QMTheme.ink)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(QMTheme.muted)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(width: 170)
+            .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    // MARK: Glossary
+
+    private var glossarySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                sectionHeader("Glossary")
+                Spacer()
+                glossaryCountText
+            }
+
+            Text("Terms are used by batch CTC vocabulary assistance and LLM transcript correction.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(QMTheme.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                TextField("Kubernetes, Core ML, Vector DB...", text: $glossaryDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(QMTheme.ink)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
+                    .onSubmit { addGlossaryDraft() }
+
+                Button {
+                    addGlossaryDraft()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(QMTheme.secondary)
+                        .frame(width: 32, height: 32)
+                        .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.recordedDot, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Add term")
+            }
+
+            if !transcriptionViewModel.isGlossaryLoaded {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, minHeight: 160)
+            } else if transcriptionViewModel.glossaryTerms.isEmpty {
+                Text("No glossary terms yet.")
+                    .font(.system(size: 12.5))
+                    .italic()
+                    .foregroundStyle(QMTheme.muted)
+                    .frame(maxWidth: .infinity, minHeight: 160, alignment: .center)
+            } else {
+                LazyVStack(spacing: 6) {
+                    ForEach(transcriptionViewModel.glossaryTerms) { term in
+                        glossaryRow(term)
+                    }
+                }
+            }
+        }
+    }
+
+    private var glossaryCountText: some View {
+        Group {
+            if transcriptionViewModel.isGlossaryLoaded {
+                Text("\(transcriptionViewModel.glossaryTerms.count) terms")
+            } else {
+                Text("Not loaded")
+            }
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(QMTheme.muted)
+    }
+
+    private func glossaryRow(_ term: TranscriptionGlossaryTerm) -> some View {
+        HStack(spacing: 9) {
+            QMToggle(isOn: Binding(
+                get: { term.isEnabled },
+                set: { transcriptionViewModel.setGlossaryTermEnabled(id: term.id, isEnabled: $0) }
+            ))
+            Text(term.text)
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(QMTheme.ink)
+                .lineLimit(1)
+            if !term.aliases.isEmpty {
+                Text(term.aliases.joined(separator: ", "))
+                    .font(.system(size: 12))
+                    .foregroundStyle(QMTheme.muted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Button {
+                transcriptionViewModel.removeGlossaryTerm(id: term.id)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(QMTheme.muted)
+                    .frame(width: 26, height: 26)
+            }
+            .buttonStyle(.plain)
+            .help("Remove term")
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.cardBorder, lineWidth: 1))
+    }
+
+    private func addGlossaryDraft() {
+        transcriptionViewModel.addGlossaryTerm(text: glossaryDraft)
+        glossaryDraft = ""
+    }
+
+    // MARK: Markdown Export
+
+    private var markdownExportSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Markdown Export")
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Obsidian folder")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("QuickMeeting writes transcript and summary Markdown files for every completed meeting.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 8) {
+                    if markdownExportViewModel.hasDirectory {
+                        Button {
+                            markdownExportViewModel.clearDirectory()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(QMTheme.muted)
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear folder")
+                    }
+
+                    Button {
+                        isMarkdownDirectoryImporterPresented = true
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text(markdownExportViewModel.hasDirectory ? "Change" : "Choose")
+                                .font(.system(size: 12.5, weight: .semibold))
+                        }
+                        .foregroundStyle(QMTheme.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.recordedDot, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text(markdownExportViewModel.displayPath)
+                .font(.system(size: 12.5, design: .monospaced))
+                .foregroundStyle(markdownExportViewModel.hasDirectory ? QMTheme.secondary : QMTheme.faint)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
+        }
     }
 
     // MARK: Calendars
@@ -511,6 +798,15 @@ struct QMSettingsSheet: View {
 
             summaryTemplateField
                 .padding(.bottom, 8)
+
+            Divider().overlay(QMTheme.hairline).padding(.vertical, 14)
+
+            summaryTextField(label: "Correction model", placeholder: "gpt-4.1-mini", hint: "Used only when LLM transcript correction is enabled.", text: $meetingSummaryViewModel.correctionModelName)
+                .onChange(of: meetingSummaryViewModel.correctionModelName) { _, _ in meetingSummaryViewModel.save() }
+                .padding(.bottom, 18)
+
+            correctionTemplateField
+                .padding(.bottom, 8)
         }
     }
 
@@ -582,6 +878,33 @@ struct QMSettingsSheet: View {
         }
     }
 
+    private var correctionTemplateField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Correction template")
+                .font(.system(size: 14.5, weight: .semibold))
+                .foregroundStyle(QMTheme.ink)
+            Text("This prompt is used after ASR. Keep the rules strict so the model only corrects transcript errors.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(QMTheme.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                summaryPlaceholderChip("{text}", description: "segment JSON")
+                summaryPlaceholderChip("{glossary}", description: "enabled terms")
+            }
+            .padding(.top, 5)
+            TextEditor(text: $meetingSummaryViewModel.correctionPromptTemplate)
+                .onChange(of: meetingSummaryViewModel.correctionPromptTemplate) { _, _ in meetingSummaryViewModel.save() }
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(QMTheme.ink)
+                .frame(minHeight: 132)
+                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(QMTheme.fieldBorder, lineWidth: 1))
+        }
+    }
+
     private func summaryPlaceholderChip(_ code: String, description: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
             Text(code)
@@ -618,6 +941,13 @@ struct QMSettingsSheet: View {
         Binding(
             get: { autoRecordingViewModel.errorMessage != nil },
             set: { if !$0 { autoRecordingViewModel.clearError() } }
+        )
+    }
+
+    private var markdownExportErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { markdownExportViewModel.errorMessage != nil },
+            set: { if !$0 { markdownExportViewModel.clearError() } }
         )
     }
 }

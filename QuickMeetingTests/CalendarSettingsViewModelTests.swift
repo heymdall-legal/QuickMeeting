@@ -181,4 +181,8 @@ private final class StubCalendarIntegration: CalendarIntegration, @unchecked Sen
     func eventMatchingRecordingStart(at startedAt: Date) -> UpcomingCalendarEvent? {
         matchingEventValue
     }
+
+    func calendarEventsForRecording(startedAt _: Date, endedAt _: Date?) -> [UpcomingCalendarEvent] {
+        []
+    }
 }

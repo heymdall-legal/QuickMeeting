@@ -12,7 +12,9 @@ struct MeetingSummarySettingsViewModelTests {
             authToken: "secret",
             authHeaderName: "x-api-key",
             modelName: "gpt-4o-mini",
-            promptTemplate: "Summarize {text} on {date}"
+            promptTemplate: "Summarize {text} on {date}",
+            correctionModelName: "gpt-4.1-mini",
+            correctionPromptTemplate: "Correct {text}"
         )
 
         let viewModel = MeetingSummarySettingsViewModel(settingsStore: store)
@@ -22,6 +24,8 @@ struct MeetingSummarySettingsViewModelTests {
         #expect(viewModel.authHeaderName == "x-api-key")
         #expect(viewModel.modelName == "gpt-4o-mini")
         #expect(viewModel.promptTemplate == "Summarize {text} on {date}")
+        #expect(viewModel.correctionModelName == "gpt-4.1-mini")
+        #expect(viewModel.correctionPromptTemplate == "Correct {text}")
     }
 
     @Test
@@ -33,6 +37,8 @@ struct MeetingSummarySettingsViewModelTests {
         viewModel.authHeaderName = "x-auth-token"
         viewModel.modelName = "local-model"
         viewModel.promptTemplate = "Template {text}"
+        viewModel.correctionModelName = "correction-model"
+        viewModel.correctionPromptTemplate = "Correction {text}"
 
         viewModel.save()
 
@@ -41,7 +47,9 @@ struct MeetingSummarySettingsViewModelTests {
             authToken: "token",
             authHeaderName: "x-auth-token",
             modelName: "local-model",
-            promptTemplate: "Template {text}"
+            promptTemplate: "Template {text}",
+            correctionModelName: "correction-model",
+            correctionPromptTemplate: "Correction {text}"
         ))
     }
 }
@@ -52,7 +60,9 @@ private final class StubMeetingSummarySettingsViewModelStore: MeetingSummarySett
         authToken: nil,
         authHeaderName: nil,
         modelName: nil,
-        promptTemplate: nil
+        promptTemplate: nil,
+        correctionModelName: nil,
+        correctionPromptTemplate: nil
     )
     var savedSettings: MeetingSummarySettings?
 
@@ -61,6 +71,10 @@ private final class StubMeetingSummarySettingsViewModelStore: MeetingSummarySett
     }
 
     func validatedSettings() -> ValidatedMeetingSummarySettings? {
+        nil
+    }
+
+    func validatedCorrectionSettings() -> ValidatedLLMCorrectionSettings? {
         nil
     }
 

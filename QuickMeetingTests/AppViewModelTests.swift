@@ -6,10 +6,80 @@ import Testing
 @MainActor
 struct AppViewModelTests {
     @Test
+    func startRecordingPersistsMatchedCalendarEventID() async throws {
+        let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
+        let matchingEvent = UpcomingCalendarEvent(
+            id: "event-123",
+            title: "Calendar Design Review",
+            startDate: startedAt,
+            endDate: startedAt.addingTimeInterval(1_800),
+            attendees: [
+                UpcomingCalendarAttendee(displayName: "Masha", emailAddress: "masha@example.com")
+            ]
+        )
+        let harness = try AppViewModelHarness(
+            calendarIntegration: StubCalendarIntegration(matchingEvent: matchingEvent),
+            dateProvider: { startedAt }
+        )
+
+        await harness.viewModel.startRecording()
+
+        let meeting = try #require(try harness.meetingStore.fetchMeetings().first)
+        #expect(meeting.title == "Calendar Design Review")
+        #expect(meeting.attendeeNames == ["Masha"])
+        #expect(meeting.calendarEventID == "event-123")
+    }
+
+    @Test
+    func selectCalendarEventPersistsTitleAttendeesAndCalendarEventID() async throws {
+        let harness = try AppViewModelHarness()
+        let meeting = try harness.createCompletedMeeting(summaryText: nil)
+        let selectedEvent = UpcomingCalendarEvent(
+            id: "event-correct",
+            title: "Correct Calendar Meeting",
+            startDate: meeting.startedAt,
+            endDate: meeting.startedAt.addingTimeInterval(1_800),
+            attendees: [
+                UpcomingCalendarAttendee(displayName: "Masha", emailAddress: "masha@example.com"),
+                UpcomingCalendarAttendee(displayName: "Ilya", emailAddress: "ilya@example.com")
+            ]
+        )
+
+        harness.viewModel.selectCalendarEvent(selectedEvent, for: meeting)
+
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.title == "Correct Calendar Meeting")
+        #expect(reloaded.attendeeNames == ["Masha", "Ilya"])
+        #expect(reloaded.calendarEventID == "event-correct")
+        #expect(reloaded.storedTranscript?.fullText == "Wrapped up launch prep.")
+        #expect(harness.viewModel.calendarEventSelectionErrorMessage == nil)
+    }
+
+    @Test
+    func reloadCalendarEventsStoresCandidatesForMeeting() throws {
+        let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
+        let candidate = UpcomingCalendarEvent(
+            id: "event-candidate",
+            title: "Candidate Meeting",
+            startDate: startedAt,
+            endDate: startedAt.addingTimeInterval(1_800),
+            attendees: []
+        )
+        let harness = try AppViewModelHarness(
+            calendarIntegration: StubCalendarIntegration(candidates: [candidate])
+        )
+        let meeting = try harness.createCompletedMeeting(summaryText: nil)
+
+        harness.viewModel.reloadCalendarEvents(for: meeting)
+
+        #expect(harness.viewModel.calendarEvents(for: meeting).map(\.id) == ["event-candidate"])
+    }
+
+    @Test
     func generateSummaryWithoutExistingSummarySavesResult() async throws {
         let harness = try AppViewModelHarness()
         let meeting = try harness.createCompletedMeeting(summaryText: nil)
-        await harness.summaryService.setSummaryResult(.success("Fresh summary"))
+        harness.summaryService.setSummaryResult(.success("Fresh summary"))
 
         await harness.viewModel.generateSummary(for: meeting)
 
@@ -29,7 +99,7 @@ struct AppViewModelTests {
         let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
         #expect(reloaded.summaryText == nil)
         #expect(harness.viewModel.summaryErrorMessage == MeetingSummaryServiceError.settingsIncomplete.localizedDescription)
-        #expect(await harness.summaryService.invocationCount == 0)
+        #expect(harness.summaryService.invocationCount == 0)
     }
 
     @Test
@@ -40,14 +110,14 @@ struct AppViewModelTests {
         await harness.viewModel.generateSummary(for: meeting)
 
         #expect(harness.viewModel.summaryConfirmationMeetingID == meeting.id)
-        #expect(await harness.summaryService.invocationCount == 0)
+        #expect(harness.summaryService.invocationCount == 0)
     }
 
     @Test
     func confirmSummaryReplacementOverwritesStoredSummary() async throws {
         let harness = try AppViewModelHarness()
         let meeting = try harness.createCompletedMeeting(summaryText: "Old summary")
-        await harness.summaryService.setSummaryResult(.success("New summary"))
+        harness.summaryService.setSummaryResult(.success("New summary"))
 
         await harness.viewModel.generateSummary(for: meeting)
         await harness.viewModel.confirmSummaryReplacement()
@@ -61,7 +131,7 @@ struct AppViewModelTests {
     func failedReplacementPreservesExistingSummary() async throws {
         let harness = try AppViewModelHarness()
         let meeting = try harness.createCompletedMeeting(summaryText: "Old summary")
-        await harness.summaryService.setSummaryResult(.failure(MeetingSummaryServiceError.responseInvalid))
+        harness.summaryService.setSummaryResult(.failure(MeetingSummaryServiceError.responseInvalid))
 
         await harness.viewModel.generateSummary(for: meeting)
         await harness.viewModel.confirmSummaryReplacement()
@@ -76,7 +146,7 @@ struct AppViewModelTests {
         let harness = try AppViewModelHarness()
         let failedMeeting = try harness.createCompletedMeeting(summaryText: nil)
         let otherMeeting = try harness.createCompletedMeeting(summaryText: nil)
-        await harness.summaryService.setSummaryResult(.failure(MeetingSummaryServiceError.responseInvalid))
+        harness.summaryService.setSummaryResult(.failure(MeetingSummaryServiceError.responseInvalid))
 
         await harness.viewModel.generateSummary(for: failedMeeting)
 
@@ -111,7 +181,102 @@ struct AppViewModelTests {
         let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
         #expect(reloaded.storedTranscript?.speakers.first?.displayName == "Masha")
         #expect(harness.viewModel.renameSpeakerErrorMessage == nil)
-        #expect(await harness.enrollmentService.calls.count == 1)
+        #expect(harness.enrollmentService.calls.count == 1)
+    }
+
+    @Test
+    func updateTranscriptSegmentTextPersistsThroughTranscriptStore() async throws {
+        let harness = try AppViewModelHarness()
+        let segmentID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let meeting = try harness.createMeetingWithTranscript(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(id: segmentID, text: "Original", speakerID: "speaker-1")]
+            )
+        )
+
+        try await harness.viewModel.updateTranscriptSegmentText(
+            meetingID: meeting.id,
+            segmentID: segmentID,
+            text: "Edited"
+        )
+
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.storedTranscript?.segments.map(\.text) == ["Edited"])
+        #expect(harness.viewModel.renameSpeakerErrorMessage == nil)
+    }
+
+    @Test
+    func splitTranscriptSegmentReturnsNewSegment() async throws {
+        let harness = try AppViewModelHarness()
+        let segmentID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let meeting = try harness.createMeetingWithTranscript(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(id: segmentID, text: "Hello Masha", speakerID: "speaker-1")]
+            )
+        )
+
+        let newSegment = try await harness.viewModel.splitTranscriptSegment(
+            meetingID: meeting.id,
+            segmentID: segmentID,
+            cursorOffset: 5
+        )
+
+        #expect(newSegment.text == "Masha")
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.storedTranscript?.segments.map(\.text) == ["Hello", "Masha"])
+    }
+
+    @Test
+    func mergeTranscriptSegmentWithPreviousReturnsMergedSegment() async throws {
+        let harness = try AppViewModelHarness()
+        let firstID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let secondID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let meeting = try harness.createMeetingWithTranscript(
+            StoredTranscript(
+                speakers: [
+                    TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1"),
+                    TranscriptSpeaker(id: "speaker-2", displayName: "Speaker 2"),
+                ],
+                segments: [
+                    TranscriptSegment(id: firstID, text: "First", speakerID: "speaker-1"),
+                    TranscriptSegment(id: secondID, text: "Second", speakerID: "speaker-2"),
+                ]
+            )
+        )
+
+        let merged = try await harness.viewModel.mergeTranscriptSegmentWithPrevious(
+            meetingID: meeting.id,
+            segmentID: secondID
+        )
+
+        #expect(merged.id == firstID)
+        #expect(merged.text == "First\nSecond")
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        #expect(reloaded.storedTranscript?.segments.map(\.text) == ["First\nSecond"])
+    }
+
+    @Test
+    func assignTranscriptSegmentTrimsSpeakerName() async throws {
+        let harness = try AppViewModelHarness()
+        let segmentID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let meeting = try harness.createMeetingWithTranscript(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(id: segmentID, text: "Hello", speakerID: "speaker-1")]
+            )
+        )
+
+        try await harness.viewModel.assignTranscriptSegment(
+            meetingID: meeting.id,
+            segmentID: segmentID,
+            speakerName: " Masha "
+        )
+
+        let reloaded = try harness.meetingStore.fetchMeeting(id: meeting.id)
+        let speaker = try #require(reloaded.storedTranscript?.speakers.first(where: { $0.displayName == "Masha" }))
+        #expect(reloaded.storedTranscript?.segments.map(\.speakerID) == [speaker.id])
     }
 }
 
@@ -134,7 +299,10 @@ private struct AppViewModelHarness {
             authHeaderName: "Authorization",
             modelName: "gpt-4o-mini",
             promptTemplate: "Summarize {text} on {date}"
-        )
+        ),
+        calendarIntegration: any CalendarIntegration = NoopCalendarIntegration(),
+        recordingPermissions: any RecordingPermissions = GrantedRecordingPermissions(),
+        dateProvider: @escaping () -> Date = Date.init
     ) throws {
         let schema = Schema([
             Meeting.self,
@@ -161,9 +329,11 @@ private struct AppViewModelHarness {
             recordingService: StubRecordingService(),
             meetingSummaryService: summaryService,
             meetingSummarySettingsStore: summarySettingsStore,
+            recordingPermissions: recordingPermissions,
             meetingTranscriptStore: meetingTranscriptStore,
             knownSpeakerEnrollmentService: enrollmentService,
-            calendarIntegration: NoopCalendarIntegration()
+            calendarIntegration: calendarIntegration,
+            dateProvider: dateProvider
         )
     }
 
@@ -207,7 +377,8 @@ private struct AppViewModelHarness {
     }
 }
 
-private actor StubKnownSpeakerEnrollmentService: KnownSpeakerEnrolling {
+@MainActor
+private final class StubKnownSpeakerEnrollmentService: KnownSpeakerEnrolling {
     struct Call: Sendable {
         let displayName: String
         let speaker: TranscriptSpeaker
@@ -227,7 +398,8 @@ private actor StubKnownSpeakerEnrollmentService: KnownSpeakerEnrolling {
     }
 }
 
-private actor StubMeetingSummaryService: MeetingSummaryServicing {
+@MainActor
+private final class StubMeetingSummaryService: MeetingSummaryServicing {
     private(set) var invocationCount = 0
     private var summaryResult: Result<String, Error> = .failure(MeetingSummaryServiceError.responseInvalid)
 
@@ -241,6 +413,49 @@ private actor StubMeetingSummaryService: MeetingSummaryServicing {
     }
 }
 
+private struct StubCalendarIntegration: CalendarIntegration {
+    let matchingEvent: UpcomingCalendarEvent?
+    let candidates: [UpcomingCalendarEvent]
+
+    init(
+        matchingEvent: UpcomingCalendarEvent? = nil,
+        candidates: [UpcomingCalendarEvent] = []
+    ) {
+        self.matchingEvent = matchingEvent
+        self.candidates = candidates
+    }
+
+    func authorizationState() -> CalendarAuthorizationState {
+        .authorized
+    }
+
+    func requestAccess() async -> CalendarAuthorizationState {
+        .authorized
+    }
+
+    func availableCalendars() -> [CalendarDescriptor] {
+        []
+    }
+
+    func upcomingEventForToday() -> UpcomingCalendarEvent? {
+        nil
+    }
+
+    func eventMatchingRecordingStart(at _: Date) -> UpcomingCalendarEvent? {
+        matchingEvent
+    }
+
+    func calendarEventsForRecording(startedAt _: Date, endedAt _: Date?) -> [UpcomingCalendarEvent] {
+        candidates
+    }
+}
+
+private struct GrantedRecordingPermissions: RecordingPermissions {
+    func ensurePermissions() async -> RecordingPermissionResult {
+        .granted
+    }
+}
+
 private struct StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring {
     let settingsValue: ValidatedMeetingSummarySettings?
 
@@ -251,7 +466,9 @@ private struct StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring {
                 authToken: settingsValue.authToken,
                 authHeaderName: settingsValue.authHeaderName,
                 modelName: settingsValue.modelName,
-                promptTemplate: settingsValue.promptTemplate
+                promptTemplate: settingsValue.promptTemplate,
+                correctionModelName: nil,
+                correctionPromptTemplate: nil
             )
         }
 
@@ -260,12 +477,18 @@ private struct StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring {
             authToken: nil,
             authHeaderName: nil,
             modelName: nil,
-            promptTemplate: nil
+            promptTemplate: nil,
+            correctionModelName: nil,
+            correctionPromptTemplate: nil
         )
     }
 
     func validatedSettings() -> ValidatedMeetingSummarySettings? {
         settingsValue
+    }
+
+    func validatedCorrectionSettings() -> ValidatedLLMCorrectionSettings? {
+        nil
     }
 
     func saveSettings(_: MeetingSummarySettings) {}

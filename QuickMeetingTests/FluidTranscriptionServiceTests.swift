@@ -49,12 +49,12 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        let received = await harness.pipeline.receivedKnownSpeakers
+        let received = harness.pipeline.receivedKnownSpeakers
         #expect(received.count == 1)
         let snapshot = try #require(received.first)
         #expect(snapshot.displayName == "Alice")
         #expect(snapshot.centroids == [[0.5, 0.25]])
-        #expect(await harness.pipeline.receivedThreshold == 0.73)
+        #expect(harness.pipeline.receivedThreshold == 0.73)
     }
 
     @Test
@@ -64,7 +64,7 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        #expect(await harness.pipeline.receivedLanguageCode == "de")
+        #expect(harness.pipeline.receivedOptions.languageCode == "de")
     }
 
     @Test
@@ -74,7 +74,7 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        #expect(await harness.pipeline.receivedLanguageCode == nil)
+        #expect(harness.pipeline.receivedOptions.languageCode == nil)
     }
 
     @Test
@@ -86,7 +86,112 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        #expect(await harness.pipeline.receivedKnownSpeakers.isEmpty)
+        #expect(harness.pipeline.receivedKnownSpeakers.isEmpty)
+    }
+
+    @Test
+    func transcribePersistsRawTranscriptAndPipelineMetadata() async throws {
+        let rawTranscript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "S1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "raw kubernettes", speakerID: "S1")]
+        )
+        let harness = try FluidTranscriptionHarness(
+            outcome: .success(
+                FluidTranscriptionResult(
+                    speakers: [TranscriptSpeaker(id: "S1", displayName: "Speaker 1")],
+                    segments: [TranscriptSegment(text: "raw Kubernetes", speakerID: "S1")],
+                    rawTranscript: rawTranscript,
+                    metadata: TranscriptionPipelineMetadata(
+                        asrModel: "Parakeet TDT v3",
+                        languageCode: "en",
+                        requestedCTCMode: .ctc110m,
+                        resolvedCTCMode: .ctc110m,
+                        glossaryTermCount: 1,
+                        warnings: ["test warning"]
+                    )
+                )
+            ),
+            languageCode: "en",
+            ctcMode: .ctc110m
+        )
+        let meeting = try harness.createRecordedMeeting()
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.rawStoredTranscript == rawTranscript)
+        #expect(reloaded.storedTranscript?.fullText == "raw Kubernetes")
+        #expect(reloaded.transcriptionPipelineMetadata?.requestedCTCMode == .ctc110m)
+        #expect(reloaded.transcriptionPipelineMetadata?.warnings == ["test warning"])
+    }
+
+    @Test
+    func transcribeRecordsWarningWhenLLMCorrectionReturnsNoTextChanges() async throws {
+        let segmentID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "S1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(id: segmentID, text: "raw Kubernetes", speakerID: "S1")]
+        )
+        let harness = try FluidTranscriptionHarness(
+            outcome: .success(
+                FluidTranscriptionResult(
+                    speakers: transcript.speakers,
+                    segments: transcript.segments
+                )
+            ),
+            isLLMCorrectionEnabled: true,
+            correctionService: StubTranscriptCorrectionService(
+                result: .success(
+                    LLMTranscriptCorrectionResult(
+                        transcript: transcript,
+                        modelName: "gpt-4.1-mini",
+                        matchedSegmentCount: 1,
+                        changedSegmentCount: 0
+                    )
+                )
+            )
+        )
+        let meeting = try harness.createRecordedMeeting()
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.transcriptionPipelineMetadata?.llmCorrectionModel == "gpt-4.1-mini")
+        #expect(reloaded.transcriptionPipelineMetadata?.warnings == ["LLM correction returned no text changes."])
+    }
+
+    @Test
+    func transcribeRecordsWarningWhenLLMCorrectionIDsDoNotMatchTranscript() async throws {
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "S1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "raw Kubernetes", speakerID: "S1")]
+        )
+        let harness = try FluidTranscriptionHarness(
+            outcome: .success(
+                FluidTranscriptionResult(
+                    speakers: transcript.speakers,
+                    segments: transcript.segments
+                )
+            ),
+            isLLMCorrectionEnabled: true,
+            correctionService: StubTranscriptCorrectionService(
+                result: .success(
+                    LLMTranscriptCorrectionResult(
+                        transcript: transcript,
+                        modelName: "gpt-4.1-mini",
+                        matchedSegmentCount: 0,
+                        changedSegmentCount: 0
+                    )
+                )
+            )
+        )
+        let meeting = try harness.createRecordedMeeting()
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.transcriptionPipelineMetadata?.llmCorrectionModel == "gpt-4.1-mini")
+        #expect(reloaded.transcriptionPipelineMetadata?.warnings == ["LLM correction returned no matching segment ids."])
     }
 
     @Test
@@ -112,7 +217,7 @@ struct FluidTranscriptionServiceTests {
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        let calls = await harness.enrollmentService.calls
+        let calls = harness.enrollmentService.calls
         #expect(calls.count == 1)
         let call = try #require(calls.first)
         #expect(call.displayName == "Alice")
@@ -145,7 +250,7 @@ struct FluidTranscriptionServiceTests {
 
         let reloaded = try harness.reloadMeeting(id: meeting.id)
         #expect(try reloaded.status == .completed)
-        #expect(await harness.enrollmentService.calls.count == 1)
+        #expect(harness.enrollmentService.calls.count == 1)
     }
 
     @Test
@@ -197,7 +302,7 @@ struct FluidTranscriptionServiceTests {
         let harness = try FluidTranscriptionHarness(outcome: .success(.empty))
         let firstMeeting = try harness.createRecordedMeeting()
         let secondMeeting = try harness.createRecordedMeeting()
-        await harness.pipeline.suspendNextRun()
+        harness.pipeline.suspendNextRun()
 
         let task = Task {
             try await harness.service.transcribe(meetingID: firstMeeting.id)
@@ -208,7 +313,7 @@ struct FluidTranscriptionServiceTests {
             try await harness.service.transcribe(meetingID: secondMeeting.id)
         }
 
-        await harness.pipeline.resume()
+        harness.pipeline.resume()
         try await task.value
     }
 }
@@ -425,7 +530,10 @@ private struct FluidTranscriptionHarness {
         outcome: StubFluidAudioPipeline.Outcome,
         similarityThreshold: Float = 0.8,
         enrollmentResult: Result<Void, Error> = .success(()),
-        languageCode: String? = nil
+        languageCode: String? = nil,
+        ctcMode: TranscriptionCTCMode = .off,
+        isLLMCorrectionEnabled: Bool = false,
+        correctionService: (any TranscriptLLMCorrecting)? = nil
     ) throws {
         let schema = Schema([
             Meeting.self,
@@ -452,7 +560,12 @@ private struct FluidTranscriptionHarness {
             pipeline: pipeline,
             knownSpeakerStore: knownSpeakerStore,
             knownSpeakerEnrollmentService: enrollmentService,
-            languageStore: StubTranscriptionLanguageStore(code: languageCode),
+            languageStore: StubTranscriptionLanguageStore(
+                code: languageCode,
+                ctcMode: ctcMode,
+                isLLMCorrectionEnabled: isLLMCorrectionEnabled
+            ),
+            correctionService: correctionService,
             similarityThreshold: similarityThreshold,
             fileManager: fileManager
         )
@@ -490,11 +603,33 @@ private struct FluidTranscriptionHarness {
 
 private struct StubTranscriptionLanguageStore: TranscriptionLanguageStoring {
     let code: String?
+    let ctcMode: TranscriptionCTCMode
+    let isLLMCorrectionEnabled: Bool
     func languageCode() -> String? { code }
     func saveLanguageCode(_: String?) {}
+    func pipelineOptions() -> TranscriptionPipelineOptions {
+        TranscriptionPipelineOptions(
+            languageCode: code,
+            ctcMode: ctcMode,
+            isLLMCorrectionEnabled: isLLMCorrectionEnabled
+        )
+    }
+    func savePipelineOptions(_: TranscriptionPipelineOptions) {}
 }
 
-private actor StubFluidAudioPipeline: FluidAudioTranscribing {
+private struct StubTranscriptCorrectionService: TranscriptLLMCorrecting {
+    let result: Result<LLMTranscriptCorrectionResult, Error>
+
+    func correct(
+        transcript _: StoredTranscript,
+        glossaryTerms _: [TranscriptionGlossaryTerm]
+    ) async throws -> LLMTranscriptCorrectionResult {
+        try result.get()
+    }
+}
+
+@MainActor
+private final class StubFluidAudioPipeline: FluidAudioTranscribing, @unchecked Sendable {
     enum Outcome {
         case success(FluidTranscriptionResult)
         case failure(Error)
@@ -503,7 +638,8 @@ private actor StubFluidAudioPipeline: FluidAudioTranscribing {
     private var outcome: Outcome
     private(set) var receivedKnownSpeakers: [FluidKnownSpeakerSnapshot] = []
     private(set) var receivedThreshold: Float?
-    private(set) var receivedLanguageCode: String?
+    private(set) var receivedOptions = TranscriptionPipelineOptions()
+    private(set) var receivedGlossaryTerms: [TranscriptionGlossaryTerm] = []
     private var shouldSuspendNextRun = false
     private var pendingRunCount = 0
     private var pendingContinuation: CheckedContinuation<Void, Never>?
@@ -532,12 +668,14 @@ private actor StubFluidAudioPipeline: FluidAudioTranscribing {
         audioFileURL _: URL,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         similarityThreshold: Float,
-        languageCode: String?,
+        options: TranscriptionPipelineOptions,
+        glossaryTerms: [TranscriptionGlossaryTerm],
         progress _: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult {
         receivedKnownSpeakers = knownSpeakers
         receivedThreshold = similarityThreshold
-        receivedLanguageCode = languageCode
+        receivedOptions = options
+        receivedGlossaryTerms = glossaryTerms
 
         if shouldSuspendNextRun {
             shouldSuspendNextRun = false
@@ -556,7 +694,8 @@ private actor StubFluidAudioPipeline: FluidAudioTranscribing {
     }
 }
 
-private actor RecordingKnownSpeakerEnrollmentService: KnownSpeakerEnrolling {
+@MainActor
+private final class RecordingKnownSpeakerEnrollmentService: KnownSpeakerEnrolling, @unchecked Sendable {
     struct Call: Sendable {
         let displayName: String
         let speaker: TranscriptSpeaker

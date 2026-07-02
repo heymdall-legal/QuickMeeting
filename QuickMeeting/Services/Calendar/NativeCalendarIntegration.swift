@@ -9,6 +9,7 @@ import EventKit
 import Foundation
 
 struct CalendarEvent: Sendable {
+    let id: String?
     let title: String
     let startDate: Date
     let endDate: Date
@@ -16,6 +17,26 @@ struct CalendarEvent: Sendable {
     let calendarID: String
     let organizer: UpcomingCalendarAttendee?
     let attendees: [UpcomingCalendarAttendee]
+
+    init(
+        id: String? = nil,
+        title: String,
+        startDate: Date,
+        endDate: Date,
+        isAllDay: Bool,
+        calendarID: String,
+        organizer: UpcomingCalendarAttendee?,
+        attendees: [UpcomingCalendarAttendee]
+    ) {
+        self.id = id
+        self.title = title
+        self.startDate = startDate
+        self.endDate = endDate
+        self.isAllDay = isAllDay
+        self.calendarID = calendarID
+        self.organizer = organizer
+        self.attendees = attendees
+    }
 }
 
 protocol CalendarEventStore: Sendable {
@@ -92,6 +113,7 @@ struct NativeCalendarIntegration: CalendarIntegration {
         .first
         .map {
             UpcomingCalendarEvent(
+                id: $0.id,
                 title: $0.title.isEmpty ? "Untitled Event" : $0.title,
                 startDate: $0.startDate,
                 endDate: $0.endDate,
@@ -136,6 +158,73 @@ struct NativeCalendarIntegration: CalendarIntegration {
             }
 
             return UpcomingCalendarEvent(
+                id: event.id,
+                title: title,
+                startDate: event.startDate,
+                endDate: event.endDate,
+                attendees: mergedAttendees(for: event)
+            )
+        }
+    }
+
+    func calendarEventsForRecording(startedAt: Date, endedAt: Date?) -> [UpcomingCalendarEvent] {
+        guard authorizationState() == .authorized else {
+            return []
+        }
+
+        let selectedCalendarIDs = settingsStore.selectedCalendarIDs()
+        guard !selectedCalendarIDs.isEmpty else {
+            return []
+        }
+
+        let startOfDay = calendar.startOfDay(for: startedAt)
+        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
+            return []
+        }
+
+        let recordingEnd = endedAt ?? startedAt
+
+        return eventStore.events(
+            from: startOfDay,
+            to: endOfDay,
+            selectedCalendarIDs: selectedCalendarIDs
+        )
+        .filter { !$0.isAllDay }
+        .sorted { lhs, rhs in
+            let lhsOverlaps = lhs.startDate < recordingEnd && lhs.endDate > startedAt
+            let rhsOverlaps = rhs.startDate < recordingEnd && rhs.endDate > startedAt
+
+            if lhsOverlaps != rhsOverlaps {
+                return lhsOverlaps
+            }
+
+            let lhsDistance = min(
+                abs(lhs.startDate.timeIntervalSince(startedAt)),
+                abs(lhs.endDate.timeIntervalSince(startedAt))
+            )
+            let rhsDistance = min(
+                abs(rhs.startDate.timeIntervalSince(startedAt)),
+                abs(rhs.endDate.timeIntervalSince(startedAt))
+            )
+
+            if lhsDistance != rhsDistance {
+                return lhsDistance < rhsDistance
+            }
+
+            if lhs.startDate != rhs.startDate {
+                return lhs.startDate < rhs.startDate
+            }
+
+            return lhs.endDate < rhs.endDate
+        }
+        .compactMap { event in
+            let title = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else {
+                return nil
+            }
+
+            return UpcomingCalendarEvent(
+                id: event.id,
                 title: title,
                 startDate: event.startDate,
                 endDate: event.endDate,
@@ -216,6 +305,7 @@ private struct EventKitCalendarEventStore: CalendarEventStore {
 
         return eventStore.events(matching: predicate).map { event in
             CalendarEvent(
+                id: event.eventIdentifier,
                 title: event.title ?? "",
                 startDate: event.startDate,
                 endDate: event.endDate,

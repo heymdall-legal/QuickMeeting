@@ -128,23 +128,165 @@ struct MeetingSummaryServiceTests {
             try await harness.service.summarize(meetingID: meeting.id)
         }
     }
+
+    @Test
+    func correctionUsesCorrectionModelPromptAndReplacesSegmentTextByID() async throws {
+        let harness = try MeetingSummaryServiceHarness()
+        let segmentID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [
+                TranscriptSegment(
+                    id: segmentID,
+                    text: "We ship cuber net ease today.",
+                    speakerID: "speaker-1"
+                )
+            ]
+        )
+        harness.settingsStore.correctionSettingsValue = ValidatedLLMCorrectionSettings(
+            baseURL: "https://example.com",
+            authToken: "secret-token",
+            authHeaderName: "Authorization",
+            modelName: "gpt-4.1-mini",
+            promptTemplate: "Correct {text}\nGlossary:\n{glossary}"
+        )
+        harness.transport.response = .success(
+            .init(
+                statusCode: 200,
+                body: """
+                {"choices":[{"message":{"content":"{\\"segments\\":[{\\"id\\":\\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\\",\\"text\\":\\"We ship Kubernetes today.\\"}]}"}}]}
+                """.data(using: .utf8)!
+            )
+        )
+        let service = LLMTranscriptCorrectionService(
+            settingsStore: harness.settingsStore,
+            transport: harness.transport
+        )
+
+        let result = try await service.correct(
+            transcript: transcript,
+            glossaryTerms: [TranscriptionGlossaryTerm(text: "Kubernetes")]
+        )
+
+        #expect(result.modelName == "gpt-4.1-mini")
+        #expect(result.transcript.segments.map(\.text) == ["We ship Kubernetes today."])
+        #expect(result.transcript.segments.map(\.id) == [segmentID])
+        #expect(result.matchedSegmentCount == 1)
+        #expect(result.changedSegmentCount == 1)
+        let request = try #require(harness.transport.lastRequest)
+        let body = try #require(request.httpBody)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["model"] as? String == "gpt-4.1-mini")
+        let messages = try #require(json["messages"] as? [[String: String]])
+        #expect(messages.first?["content"]?.contains("Kubernetes") == true)
+        #expect(messages.first?["content"]?.contains(segmentID.uuidString) == true)
+        #expect(Int(request.timeoutInterval) == 600)
+    }
+
+    @Test
+    func correctionReportsNoMatchedSegmentsWhenResponseIDsDoNotMatchTranscript() async throws {
+        let harness = try MeetingSummaryServiceHarness()
+        let segmentID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [
+                TranscriptSegment(
+                    id: segmentID,
+                    text: "We ship cuber net ease today.",
+                    speakerID: "speaker-1"
+                )
+            ]
+        )
+        harness.settingsStore.correctionSettingsValue = ValidatedLLMCorrectionSettings(
+            baseURL: "https://example.com",
+            authToken: "secret-token",
+            authHeaderName: "Authorization",
+            modelName: "gpt-4.1-mini",
+            promptTemplate: "Correct {text}"
+        )
+        harness.transport.response = .success(
+            .init(
+                statusCode: 200,
+                body: """
+                {"choices":[{"message":{"content":"{\\"segments\\":[{\\"id\\":\\"missing-id\\",\\"text\\":\\"We ship Kubernetes today.\\"}]}"}}]}
+                """.data(using: .utf8)!
+            )
+        )
+        let service = LLMTranscriptCorrectionService(
+            settingsStore: harness.settingsStore,
+            transport: harness.transport
+        )
+
+        let result = try await service.correct(transcript: transcript, glossaryTerms: [])
+
+        #expect(result.transcript == transcript)
+        #expect(result.matchedSegmentCount == 0)
+        #expect(result.changedSegmentCount == 0)
+    }
+
+    @Test
+    func correctionTimeoutReportsTranscriptSizeAndTimeoutInterval() async throws {
+        let harness = try MeetingSummaryServiceHarness()
+        let transcript = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [
+                TranscriptSegment(text: "First segment text.", speakerID: "speaker-1"),
+                TranscriptSegment(text: "Second segment text.", speakerID: "speaker-1")
+            ]
+        )
+        harness.settingsStore.correctionSettingsValue = ValidatedLLMCorrectionSettings(
+            baseURL: "https://example.com",
+            authToken: "secret-token",
+            authHeaderName: "Authorization",
+            modelName: "gpt-4.1-mini",
+            promptTemplate: "Correct {text}"
+        )
+        harness.transport.response = .failure(URLError(.timedOut))
+        let service = LLMTranscriptCorrectionService(
+            settingsStore: harness.settingsStore,
+            transport: harness.transport
+        )
+
+        await #expect(
+            throws: LLMTranscriptCorrectionError.requestTimedOut(
+                timeoutInterval: 600,
+                segmentCount: 2,
+                transcriptCharacterCount: 39
+            )
+        ) {
+            try await service.correct(transcript: transcript, glossaryTerms: [])
+        }
+    }
 }
 
-private final class StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring, @unchecked Sendable {
+nonisolated private final class StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring, @unchecked Sendable {
     var settingsValue: ValidatedMeetingSummarySettings?
+    var correctionSettingsValue: ValidatedLLMCorrectionSettings?
 
     func settings() -> MeetingSummarySettings {
-        .init(baseURL: nil, authToken: nil, authHeaderName: nil, modelName: nil, promptTemplate: nil)
+        .init(
+            baseURL: nil,
+            authToken: nil,
+            authHeaderName: nil,
+            modelName: nil,
+            promptTemplate: nil,
+            correctionModelName: nil,
+            correctionPromptTemplate: nil
+        )
     }
 
     func validatedSettings() -> ValidatedMeetingSummarySettings? {
         settingsValue
     }
 
+    func validatedCorrectionSettings() -> ValidatedLLMCorrectionSettings? {
+        correctionSettingsValue
+    }
+
     func saveSettings(_: MeetingSummarySettings) {}
 }
 
-private final class StubMeetingSummaryTransport: MeetingSummaryTransporting, @unchecked Sendable {
+nonisolated private final class StubMeetingSummaryTransport: MeetingSummaryTransporting, @unchecked Sendable {
     struct Response {
         let statusCode: Int
         let body: Data

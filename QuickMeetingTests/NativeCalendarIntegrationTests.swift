@@ -257,6 +257,74 @@ struct NativeCalendarIntegrationTests {
 
         #expect(event?.attendees.map(\.displayName) == ["Masha", "Olga"])
     }
+
+    @Test
+    func calendarEventsForRecordingReturnsSameDayCandidatesWithIdentifiersAndFiltersInvalidEvents() {
+        let startedAt = Date(timeIntervalSince1970: 36_000)
+        let eventStore = FakeCalendarEventStore(
+            authorizationState: .authorized,
+            calendars: [CalendarDescriptor(id: "work", title: "Work")],
+            events: [
+                CalendarEvent(
+                    id: "blank-title",
+                    title: "   ",
+                    startDate: startedAt.addingTimeInterval(-1_800),
+                    endDate: startedAt.addingTimeInterval(-900),
+                    isAllDay: false,
+                    calendarID: "work",
+                    organizer: nil,
+                    attendees: []
+                ),
+                CalendarEvent(
+                    id: "overlapping",
+                    title: "Overlapping Planning",
+                    startDate: startedAt.addingTimeInterval(-900),
+                    endDate: startedAt.addingTimeInterval(900),
+                    isAllDay: false,
+                    calendarID: "work",
+                    organizer: nil,
+                    attendees: [
+                        UpcomingCalendarAttendee(displayName: "Masha", emailAddress: "masha@example.com")
+                    ]
+                ),
+                CalendarEvent(
+                    id: "same-day",
+                    title: "Same Day Follow-up",
+                    startDate: startedAt.addingTimeInterval(3_600),
+                    endDate: startedAt.addingTimeInterval(5_400),
+                    isAllDay: false,
+                    calendarID: "work",
+                    organizer: nil,
+                    attendees: []
+                ),
+                CalendarEvent(
+                    id: "all-day",
+                    title: "Offsite",
+                    startDate: startedAt,
+                    endDate: startedAt.addingTimeInterval(86_400),
+                    isAllDay: true,
+                    calendarID: "work",
+                    organizer: nil,
+                    attendees: []
+                )
+            ]
+        )
+        let settingsStore = InMemoryCalendarSelectionStore(selectedCalendarIDs: ["work"])
+        let integration = NativeCalendarIntegration(
+            eventStore: eventStore,
+            settingsStore: settingsStore,
+            calendar: Calendar(identifier: .gregorian)
+        )
+
+        let events = integration.calendarEventsForRecording(
+            startedAt: startedAt,
+            endedAt: startedAt.addingTimeInterval(1_200)
+        )
+
+        #expect(events.map(\.id) == ["overlapping", "same-day"])
+        #expect(events.map(\.title) == ["Overlapping Planning", "Same Day Follow-up"])
+        #expect(events.first?.attendees.map(\.displayName) == ["Masha"])
+    }
 }
 
 private struct FakeCalendarEventStore: CalendarEventStore {

@@ -25,6 +25,7 @@ private enum CapturedAudioSource {
 enum NativeAudioCapturePipelineError: LocalizedError {
     case captureAlreadyRunning
     case noShareableDisplay
+    case captureStopTimedOut(TimeInterval)
     case invalidAudioSampleBuffer
     case audioBufferCopyFailed(OSStatus)
     case audioConversionFailed
@@ -35,6 +36,8 @@ enum NativeAudioCapturePipelineError: LocalizedError {
             "Audio capture is already running."
         case .noShareableDisplay:
             "No shareable display is available for audio capture."
+        case .captureStopTimedOut(let timeout):
+            "Stopping audio capture timed out after \(timeout) seconds."
         case .invalidAudioSampleBuffer:
             "The audio capture pipeline received an invalid audio sample buffer."
         case .audioBufferCopyFailed(let status):
@@ -148,6 +151,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     private let shareableContentProvider: () async throws -> CaptureTarget
     private let writerFactory: (URL) throws -> any AudioFileWriting
     private let captureConfiguration: CaptureConfiguration
+    private let captureStopTimeout: TimeInterval
     private let microphoneDeviceProvider: () -> MicrophoneDevice?
     private let diagnosticHandler: @Sendable (RecordingDiagnostics) -> Void
     private var state: State = .idle
@@ -158,6 +162,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         shareableContentProvider: @escaping () async throws -> CaptureTarget,
         writerFactory: @escaping (URL) throws -> any AudioFileWriting,
         captureConfiguration: CaptureConfiguration,
+        captureStopTimeout: TimeInterval = 10,
         microphoneDeviceProvider: @escaping () -> MicrophoneDevice? = {
             AVCaptureDevice.default(for: .audio).map {
                 MicrophoneDevice(id: $0.uniqueID, name: $0.localizedName)
@@ -168,6 +173,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         self.shareableContentProvider = shareableContentProvider
         self.writerFactory = writerFactory
         self.captureConfiguration = captureConfiguration
+        self.captureStopTimeout = captureStopTimeout
         self.microphoneDeviceProvider = microphoneDeviceProvider
         self.diagnosticHandler = diagnosticHandler
     }
@@ -276,8 +282,16 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
             return
         }
 
+        var stopError: Error?
+
         if !nativeStopCompleted {
-            try await session.stop()
+            do {
+                try await performCaptureStop {
+                    try await session.stop()
+                }
+            } catch {
+                stopError = error
+            }
             state = .stopping(
                 session: session,
                 outputSink: outputSink,
@@ -290,12 +304,15 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
             let captureDiagnostics = try await outputSink.finish()
             state = .idle
             emitDiagnostics(
-                event: .captureStopped,
+                event: stopError == nil ? .captureStopped : .captureStopFailed,
                 outputURL: outputURL,
                 captureDiagnostics: captureDiagnostics,
-                error: nil
+                error: stopError
             )
             activeMicrophoneDevice = nil
+            if let stopError, !isCaptureStopTimeout(stopError) {
+                throw stopError
+            }
         } catch {
             let captureDiagnostics = await outputSink.currentDiagnostics()
             emitDiagnostics(
@@ -307,6 +324,24 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
             activeMicrophoneDevice = nil
             throw error
         }
+    }
+
+    private func performCaptureStop(
+        operation: @escaping @MainActor () async throws -> Void
+    ) async throws {
+        try await TimedOperation.run(
+            timeout: captureStopTimeout,
+            timeoutError: NativeAudioCapturePipelineError.captureStopTimedOut(captureStopTimeout),
+            operation: operation
+        )
+    }
+
+    private func isCaptureStopTimeout(_ error: Error) -> Bool {
+        guard case NativeAudioCapturePipelineError.captureStopTimedOut = error else {
+            return false
+        }
+
+        return true
     }
 
     private func emitDiagnostics(
@@ -1318,6 +1353,69 @@ final class AACM4AAudioFileWriter: NativeAudioCapturePipeline.AudioFileWriting {
 
     func finish() throws {
         audioFile = nil
+    }
+}
+
+private enum TimedOperation {
+    static func run(
+        timeout: TimeInterval,
+        timeoutError: Error,
+        operation: @escaping @MainActor () async throws -> Void
+    ) async throws {
+        guard timeout > 0 else {
+            throw timeoutError
+        }
+
+        let race = TimedOperationRace()
+        let operationTask = Task { @MainActor in
+            do {
+                try await operation()
+                await race.complete(.success(()))
+            } catch {
+                await race.complete(.failure(error))
+            }
+        }
+        let timeoutTask = Task {
+            let nanoseconds = UInt64(timeout * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            guard !Task.isCancelled else {
+                return
+            }
+            await race.complete(.failure(timeoutError))
+        }
+
+        defer {
+            operationTask.cancel()
+            timeoutTask.cancel()
+        }
+
+        try await race.value()
+    }
+}
+
+private actor TimedOperationRace {
+    private var result: Result<Void, Error>?
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    func value() async throws {
+        if let result {
+            try result.get()
+            return
+        }
+
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func complete(_ result: Result<Void, Error>) {
+        guard self.result == nil else {
+            return
+        }
+
+        self.result = result
+        continuation?.resume(with: result)
+        continuation = nil
     }
 }
 

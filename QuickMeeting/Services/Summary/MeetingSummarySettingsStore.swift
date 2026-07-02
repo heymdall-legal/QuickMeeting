@@ -6,6 +6,8 @@ nonisolated struct MeetingSummarySettings: Equatable {
     var authHeaderName: String?
     var modelName: String?
     var promptTemplate: String?
+    var correctionModelName: String?
+    var correctionPromptTemplate: String?
 }
 
 nonisolated struct ValidatedMeetingSummarySettings: Equatable, Sendable {
@@ -16,13 +18,22 @@ nonisolated struct ValidatedMeetingSummarySettings: Equatable, Sendable {
     let promptTemplate: String
 }
 
-protocol MeetingSummarySettingsStoring: Sendable {
+nonisolated struct ValidatedLLMCorrectionSettings: Equatable, Sendable {
+    let baseURL: String
+    let authToken: String
+    let authHeaderName: String
+    let modelName: String
+    let promptTemplate: String
+}
+
+nonisolated protocol MeetingSummarySettingsStoring {
     func settings() -> MeetingSummarySettings
     func validatedSettings() -> ValidatedMeetingSummarySettings?
+    func validatedCorrectionSettings() -> ValidatedLLMCorrectionSettings?
     func saveSettings(_ settings: MeetingSummarySettings)
 }
 
-struct MeetingSummarySettingsStore: MeetingSummarySettingsStoring {
+nonisolated struct MeetingSummarySettingsStore: MeetingSummarySettingsStoring {
     private let userDefaults: UserDefaults
     private static let defaultAuthHeaderName = "Authorization"
     private let baseURLKey = "meetingSummary.baseURL"
@@ -30,6 +41,8 @@ struct MeetingSummarySettingsStore: MeetingSummarySettingsStoring {
     private let authHeaderNameKey = "meetingSummary.authHeaderName"
     private let modelNameKey = "meetingSummary.modelName"
     private let promptTemplateKey = "meetingSummary.promptTemplate"
+    private let correctionModelNameKey = "meetingSummary.correctionModelName"
+    private let correctionPromptTemplateKey = "meetingSummary.correctionPromptTemplate"
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -41,7 +54,9 @@ struct MeetingSummarySettingsStore: MeetingSummarySettingsStoring {
             authToken: userDefaults.string(forKey: authTokenKey),
             authHeaderName: userDefaults.string(forKey: authHeaderNameKey),
             modelName: userDefaults.string(forKey: modelNameKey),
-            promptTemplate: userDefaults.string(forKey: promptTemplateKey)
+            promptTemplate: userDefaults.string(forKey: promptTemplateKey),
+            correctionModelName: userDefaults.string(forKey: correctionModelNameKey),
+            correctionPromptTemplate: userDefaults.string(forKey: correctionPromptTemplateKey)
         )
     }
 
@@ -77,12 +92,46 @@ struct MeetingSummarySettingsStore: MeetingSummarySettingsStoring {
         )
     }
 
+    func validatedCorrectionSettings() -> ValidatedLLMCorrectionSettings? {
+        let current = settings()
+
+        guard
+            let baseURL = current.baseURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+            let authToken = current.authToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+            let modelName = current.correctionModelName?.trimmingCharacters(in: .whitespacesAndNewlines),
+            let promptTemplate = current.correctionPromptTemplate?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !baseURL.isEmpty,
+            !authToken.isEmpty,
+            !modelName.isEmpty,
+            !promptTemplate.isEmpty
+        else {
+            return nil
+        }
+        let trimmedAuthHeaderName = current.authHeaderName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let authHeaderName: String
+        if let trimmedAuthHeaderName, !trimmedAuthHeaderName.isEmpty {
+            authHeaderName = trimmedAuthHeaderName
+        } else {
+            authHeaderName = Self.defaultAuthHeaderName
+        }
+
+        return ValidatedLLMCorrectionSettings(
+            baseURL: baseURL,
+            authToken: authToken,
+            authHeaderName: authHeaderName,
+            modelName: modelName,
+            promptTemplate: promptTemplate
+        )
+    }
+
     func saveSettings(_ settings: MeetingSummarySettings) {
         save(settings.baseURL, forKey: baseURLKey)
         save(settings.authToken, forKey: authTokenKey)
         save(settings.authHeaderName, forKey: authHeaderNameKey)
         save(settings.modelName, forKey: modelNameKey)
         save(settings.promptTemplate, forKey: promptTemplateKey)
+        save(settings.correctionModelName, forKey: correctionModelNameKey)
+        save(settings.correctionPromptTemplate, forKey: correctionPromptTemplateKey)
     }
 
     private func save(_ value: String?, forKey key: String) {

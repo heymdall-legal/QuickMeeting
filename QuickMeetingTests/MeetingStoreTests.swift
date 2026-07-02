@@ -145,6 +145,46 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func completeTranscriptionPersistsRawCorrectedTranscriptAndPipelineMetadata() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createRecordedMeeting()
+        let raw = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "raw kubernettes", speakerID: "speaker-1")]
+        )
+        let corrected = StoredTranscript(
+            speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+            segments: [TranscriptSegment(text: "raw Kubernetes", speakerID: "speaker-1")]
+        )
+        let metadata = TranscriptionPipelineMetadata(
+            asrModel: "Parakeet TDT v3",
+            languageCode: "en",
+            requestedCTCMode: .ctc110m,
+            resolvedCTCMode: .ctc110m,
+            glossaryTermCount: 3,
+            isLLMCorrectionEnabled: true,
+            llmCorrectionModel: "gpt-4.1-mini",
+            warnings: ["ctc fallback"]
+        )
+
+        try harness.store.completeTranscription(
+            meetingID: meeting.id,
+            transcript: corrected,
+            transcriptPreview: corrected.fullText,
+            rawTranscript: raw,
+            correctedTranscript: corrected,
+            pipelineMetadata: metadata,
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_000)
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.storedTranscript == corrected)
+        #expect(reloaded.rawStoredTranscript == raw)
+        #expect(reloaded.correctedStoredTranscript == corrected)
+        #expect(reloaded.transcriptionPipelineMetadata == metadata)
+    }
+
+    @Test
     func createMeetingPersistsUnescapedFilesystemAudioPath() throws {
         let schema = Schema([
             Meeting.self,
@@ -202,6 +242,54 @@ struct MeetingStoreTests {
         let verificationContext = ModelContext(container)
         let persistedMeeting = try #require(try verificationContext.fetch(FetchDescriptor<Meeting>()).first)
         #expect(persistedMeeting.attendeeNames == ["Masha", "Ilya"])
+    }
+
+    @Test
+    func createMeetingPersistsCalendarEventIDAcrossFreshContext() throws {
+        let harness = try MeetingStoreHarness()
+        let folderURL = URL(fileURLWithPath: "/tmp/meeting-\(UUID().uuidString)")
+        let audioFileURL = folderURL.appendingPathComponent("audio.m4a")
+
+        let meeting = try harness.store.createMeeting(
+            title: "Design Review",
+            startedAt: Date(timeIntervalSince1970: 1_234_567_890),
+            calendarEventID: "event-123",
+            folderURL: folderURL,
+            audioFileURL: audioFileURL
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.calendarEventID == "event-123")
+    }
+
+    @Test
+    func updateCalendarEventPersistsTitleAttendeesIDAndPreservesTranscript() throws {
+        let harness = try MeetingStoreHarness()
+        let meeting = try harness.createCompletedMeeting(
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "Existing transcript", speakerID: "speaker-1")]
+            ),
+            transcriptPreview: "Existing transcript"
+        )
+        let updatedAt = Date(timeIntervalSince1970: 1_234_568_500)
+
+        try harness.store.updateCalendarEvent(
+            meetingID: meeting.id,
+            eventTitle: "Correct Calendar Meeting",
+            attendeeNames: ["Masha", "Ilya"],
+            calendarEventID: "event-correct",
+            updatedAt: updatedAt
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(reloaded.title == "Correct Calendar Meeting")
+        #expect(reloaded.attendeeNames == ["Masha", "Ilya"])
+        #expect(reloaded.calendarEventID == "event-correct")
+        #expect(reloaded.transcriptPreview == "Existing transcript")
+        #expect(reloaded.transcriptSegments.map(\.text) == ["Existing transcript"])
+        #expect(try reloaded.status == .completed)
+        #expect(reloaded.updatedAt == updatedAt)
     }
 
     @Test
@@ -265,6 +353,27 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func completeTranscriptionSyncsMarkdownTranscriptAndRemovesStaleSummary() throws {
+        let markdownExporter = SpyMarkdownExporter()
+        let harness = try MeetingStoreHarness(markdownExporter: markdownExporter)
+        let meeting = try harness.createRecordedMeeting()
+
+        try harness.store.completeTranscription(
+            meetingID: meeting.id,
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Alice")],
+                segments: [TranscriptSegment(text: "Fresh transcript", speakerID: "speaker-1")]
+            ),
+            transcriptPreview: "Fresh transcript",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_150)
+        )
+
+        #expect(markdownExporter.events.map(\.kind) == [.transcript, .removeSummary])
+        #expect(markdownExporter.events.first?.meetingID == meeting.id)
+        #expect(markdownExporter.events.first?.speakerNames == ["Alice"])
+    }
+
+    @Test
     func saveSummaryPersistsTextAndUpdatesMeetingTimestamp() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()
@@ -299,6 +408,29 @@ struct MeetingStoreTests {
 
         let reloaded = try harness.store.fetchMeeting(id: meeting.id)
         #expect(reloaded.summaryText == "New summary")
+    }
+
+    @Test
+    func saveSummarySyncsMarkdownSummary() throws {
+        let markdownExporter = SpyMarkdownExporter()
+        let harness = try MeetingStoreHarness(markdownExporter: markdownExporter)
+        let meeting = try harness.createCompletedMeeting(
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Alice")],
+                segments: [TranscriptSegment(text: "Launch prep", speakerID: "speaker-1")]
+            ),
+            transcriptPreview: "Launch prep"
+        )
+        markdownExporter.clear()
+
+        try harness.store.saveSummary(
+            meetingID: meeting.id,
+            summary: "Short recap",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_250)
+        )
+
+        #expect(markdownExporter.events.map(\.kind) == [.transcript, .summary])
+        #expect(markdownExporter.events.last?.summary == "Short recap")
     }
 
     @Test
@@ -387,6 +519,30 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func renameSpeakerSyncsMarkdownTranscriptWithUpdatedSpeakerName() throws {
+        let markdownExporter = SpyMarkdownExporter()
+        let harness = try MeetingStoreHarness(markdownExporter: markdownExporter)
+        let meeting = try harness.createCompletedMeeting(
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "Hello", speakerID: "speaker-1")]
+            ),
+            transcriptPreview: "Hello"
+        )
+        markdownExporter.clear()
+
+        try harness.store.renameSpeaker(
+            meetingID: meeting.id,
+            speakerID: "speaker-1",
+            displayName: "Masha",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_200)
+        )
+
+        #expect(markdownExporter.events.map(\.kind) == [.transcript, .removeSummary])
+        #expect(markdownExporter.events.first?.speakerNames == ["Masha"])
+    }
+
+    @Test
     func renameSpeakerMarksSpeakerAsUserAssignedAndClearsMatchedKnownSpeakerID() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createCompletedMeeting(
@@ -438,6 +594,58 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func renameMeetingSyncsMarkdownFilesWithUpdatedTitle() throws {
+        let markdownExporter = SpyMarkdownExporter()
+        let harness = try MeetingStoreHarness(markdownExporter: markdownExporter)
+        let meeting = try harness.createCompletedMeeting(
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Alice")],
+                segments: [TranscriptSegment(text: "Hello", speakerID: "speaker-1")]
+            ),
+            transcriptPreview: "Hello"
+        )
+        try harness.store.saveSummary(
+            meetingID: meeting.id,
+            summary: "Summary",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_250)
+        )
+        markdownExporter.clear()
+
+        try harness.store.renameMeeting(
+            meetingID: meeting.id,
+            title: "Renamed Review",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_300)
+        )
+
+        #expect(markdownExporter.events.map(\.kind) == [.transcript, .summary])
+        #expect(markdownExporter.events.map(\.title) == ["Renamed Review", "Renamed Review"])
+    }
+
+    @Test
+    func exportMarkdownForExistingMeetingsBackfillsTranscriptAndSummary() throws {
+        let markdownExporter = SpyMarkdownExporter()
+        let harness = try MeetingStoreHarness(markdownExporter: markdownExporter)
+        let meeting = try harness.createCompletedMeeting(
+            transcript: StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Alice")],
+                segments: [TranscriptSegment(text: "Hello", speakerID: "speaker-1")]
+            ),
+            transcriptPreview: "Hello"
+        )
+        try harness.store.saveSummary(
+            meetingID: meeting.id,
+            summary: "Summary",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_250)
+        )
+        markdownExporter.clear()
+
+        try harness.store.exportMarkdownForExistingMeetings()
+
+        #expect(markdownExporter.events.map(\.kind) == [.transcript, .summary])
+        #expect(markdownExporter.events.map(\.meetingID) == [meeting.id, meeting.id])
+    }
+
+    @Test
     func resetStuckTranscribingMeetingsMarksMeetingsAsFailed() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()
@@ -467,13 +675,15 @@ struct MeetingStoreTests {
     }
 
     @Test
-    func resetStuckRecordingMeetingsMarksMeetingsAsRecorded() throws {
+    func resetStuckRecordingMeetingsMarksNonEmptyAudioAsRecorded() throws {
         let harness = try MeetingStoreHarness()
         let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
         let updatedAt = Date(timeIntervalSince1970: 1_234_568_000)
         let resetAt = Date(timeIntervalSince1970: 1_234_568_999)
-        let folderURL = URL(fileURLWithPath: "/tmp/meeting-\(UUID().uuidString)")
-        let audioFileURL = folderURL.appendingPathComponent("audio.wav")
+        let folderURL = harness.temporaryFolderURL()
+        let audioFileURL = folderURL.appendingPathComponent("audio.m4a")
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: audioFileURL.path, contents: Data("audio".utf8))
 
         let meeting = try harness.store.createMeeting(
             title: "Interrupted Recording",
@@ -490,6 +700,58 @@ struct MeetingStoreTests {
         #expect(try reloaded.status == .recorded)
         #expect(reloaded.endedAt == resetAt)
         #expect(reloaded.duration == resetAt.timeIntervalSince(startedAt))
+        #expect(reloaded.updatedAt == resetAt)
+    }
+
+    @Test
+    func resetStuckRecordingMeetingsMarksMissingAudioAsFailed() throws {
+        let harness = try MeetingStoreHarness()
+        let resetAt = Date(timeIntervalSince1970: 1_234_568_999)
+        let folderURL = harness.temporaryFolderURL()
+        let audioFileURL = folderURL.appendingPathComponent("audio.m4a")
+
+        let meeting = try harness.store.createMeeting(
+            title: "Interrupted Recording",
+            startedAt: Date(timeIntervalSince1970: 1_234_567_890),
+            folderURL: folderURL,
+            audioFileURL: audioFileURL
+        )
+        meeting.setStatus(.recording, updatedAt: Date(timeIntervalSince1970: 1_234_568_000))
+        try harness.store.modelContext.save()
+
+        try harness.store.resetStuckRecordingMeetings(updatedAt: resetAt)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .failed)
+        #expect(reloaded.endedAt == nil)
+        #expect(reloaded.duration == nil)
+        #expect(reloaded.updatedAt == resetAt)
+    }
+
+    @Test
+    func resetStuckRecordingMeetingsMarksEmptyAudioAsFailed() throws {
+        let harness = try MeetingStoreHarness()
+        let resetAt = Date(timeIntervalSince1970: 1_234_568_999)
+        let folderURL = harness.temporaryFolderURL()
+        let audioFileURL = folderURL.appendingPathComponent("audio.m4a")
+        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: audioFileURL.path, contents: Data())
+
+        let meeting = try harness.store.createMeeting(
+            title: "Interrupted Recording",
+            startedAt: Date(timeIntervalSince1970: 1_234_567_890),
+            folderURL: folderURL,
+            audioFileURL: audioFileURL
+        )
+        meeting.setStatus(.recording, updatedAt: Date(timeIntervalSince1970: 1_234_568_000))
+        try harness.store.modelContext.save()
+
+        try harness.store.resetStuckRecordingMeetings(updatedAt: resetAt)
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        #expect(try reloaded.status == .failed)
+        #expect(reloaded.endedAt == nil)
+        #expect(reloaded.duration == nil)
         #expect(reloaded.updatedAt == resetAt)
     }
 
@@ -568,7 +830,7 @@ private struct MeetingStoreHarness {
     let container: ModelContainer
     let store: MeetingStore
 
-    init() throws {
+    init(markdownExporter: (any MeetingMarkdownExporting)? = nil) throws {
         let schema = Schema([
             Meeting.self,
             PersistedTranscriptSpeaker.self,
@@ -578,14 +840,14 @@ private struct MeetingStoreHarness {
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         container = try ModelContainer(for: schema, configurations: [configuration])
-        store = MeetingStore(modelContext: ModelContext(container))
+        store = MeetingStore(modelContext: ModelContext(container), markdownExporter: markdownExporter)
     }
 
     func createRecordedMeeting() throws -> Meeting {
         let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
         let endedAt = startedAt.addingTimeInterval(60)
-        let folderURL = URL(fileURLWithPath: "/tmp/meeting-\(UUID().uuidString)")
-        let audioFileURL = folderURL.appendingPathComponent("audio.wav")
+        let folderURL = temporaryFolderURL()
+        let audioFileURL = folderURL.appendingPathComponent("audio.m4a")
         let meeting = try store.createMeeting(
             title: "Design Review",
             startedAt: startedAt,
@@ -594,6 +856,11 @@ private struct MeetingStoreHarness {
         )
         try store.finishRecording(meetingID: meeting.id, endedAt: endedAt)
         return try reloadMeeting(id: meeting.id)
+    }
+
+    func temporaryFolderURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeting-\(UUID().uuidString)", isDirectory: true)
     }
 
     func createCompletedMeeting(
@@ -618,5 +885,72 @@ private struct MeetingStoreHarness {
             }
         )
         return try #require(context.fetch(descriptor).first)
+    }
+}
+
+private final class SpyMarkdownExporter: MeetingMarkdownExporting {
+    enum EventKind: Equatable {
+        case transcript
+        case summary
+        case removeTranscript
+        case removeSummary
+    }
+
+    struct Event: Equatable {
+        let kind: EventKind
+        let meetingID: UUID
+        let title: String?
+        let speakerNames: [String]
+        let summary: String?
+    }
+
+    private(set) var events = [Event]()
+
+    @discardableResult
+    func exportTranscript(for meeting: Meeting, transcript: StoredTranscript) throws -> URL {
+        events.append(Event(
+            kind: .transcript,
+            meetingID: meeting.id,
+            title: meeting.title,
+            speakerNames: transcript.speakers.map(\.displayName),
+            summary: nil
+        ))
+        return URL(fileURLWithPath: "/tmp/\(meeting.id.uuidString).transcript.md")
+    }
+
+    @discardableResult
+    func exportSummary(for meeting: Meeting, summary: String) throws -> URL {
+        events.append(Event(
+            kind: .summary,
+            meetingID: meeting.id,
+            title: meeting.title,
+            speakerNames: [],
+            summary: summary
+        ))
+        return URL(fileURLWithPath: "/tmp/\(meeting.id.uuidString).summary.md")
+    }
+
+    func removeTranscript(for meetingID: UUID) throws {
+        events.append(Event(
+            kind: .removeTranscript,
+            meetingID: meetingID,
+            title: nil,
+            speakerNames: [],
+            summary: nil
+        ))
+    }
+
+    func removeSummary(for meetingID: UUID) throws {
+        events.append(Event(
+            kind: .removeSummary,
+            meetingID: meetingID,
+            title: nil,
+            speakerNames: [],
+            summary: nil
+        ))
+    }
+
+    func clear() {
+        events.removeAll()
     }
 }

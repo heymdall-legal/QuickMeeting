@@ -42,4 +42,28 @@ struct MeetingDetailViewSpeakerIdentityTests {
 
         #expect(identity == ResolvedTranscriptBubbleSpeakerIdentity(id: "speaker-2", displayName: "Speaker 3"))
     }
+
+    @Test
+    func splitTranscriptTextReturnsTrimmedLeftAndRightSides() {
+        let split = splitTranscriptText("Hello Masha", cursorOffset: 5)
+
+        #expect(split == TranscriptTextSplit(left: "Hello", right: "Masha"))
+    }
+
+    @Test
+    func splitTranscriptTextRejectsCursorAtStartOrEnd() {
+        #expect(splitTranscriptText("Hello", cursorOffset: 0) == nil)
+        #expect(splitTranscriptText("Hello", cursorOffset: 5) == nil)
+    }
+
+    @Test
+    func splitTranscriptTextRejectsWhitespaceOnlySide() {
+        #expect(splitTranscriptText("Hello   ", cursorOffset: 5) == nil)
+        #expect(splitTranscriptText("   Hello", cursorOffset: 3) == nil)
+    }
+
+    @Test
+    func mergedTranscriptTextJoinsWithOneNewline() {
+        #expect(mergedTranscriptText(previous: "First\n", current: "\nSecond") == "First\nSecond")
+    }
 }

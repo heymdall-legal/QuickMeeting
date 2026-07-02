@@ -12,9 +12,86 @@ import AppKit
 #endif
 import SwiftUI
 
-struct ResolvedTranscriptBubbleSpeakerIdentity: Equatable {
+nonisolated struct ResolvedTranscriptBubbleSpeakerIdentity: Equatable {
     let id: String
     let displayName: String
+}
+
+nonisolated struct TranscriptGlossarySuggestion: Equatable {
+    let segmentID: UUID
+    let term: String
+}
+
+nonisolated func glossarySuggestionTerm(oldText: String, newText: String) -> String? {
+    let oldWords = Set(glossaryCandidateWords(in: oldText).map { $0.lowercased() })
+    let candidates = glossaryCandidateWords(in: newText)
+        .filter { !oldWords.contains($0.lowercased()) }
+        .sorted { lhs, rhs in
+            if lhs.count != rhs.count {
+                return lhs.count > rhs.count
+            }
+            return lhs < rhs
+        }
+    return candidates.first
+}
+
+private nonisolated func glossaryCandidateWords(in text: String) -> [String] {
+    text
+        .split { !$0.isLetter && !$0.isNumber && $0 != "-" }
+        .map(String.init)
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { word in
+            word.count >= 3 && word.rangeOfCharacter(from: .letters) != nil
+        }
+}
+
+nonisolated struct TranscriptTextSplit: Equatable {
+    let left: String
+    let right: String
+}
+
+nonisolated func splitTranscriptText(_ text: String, cursorOffset: Int) -> TranscriptTextSplit? {
+    guard cursorOffset > 0, cursorOffset < text.utf16.count else {
+        return nil
+    }
+
+    let splitIndex = String.Index(utf16Offset: cursorOffset, in: text)
+    let left = String(text[..<splitIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+    let right = String(text[splitIndex...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !left.isEmpty, !right.isEmpty else {
+        return nil
+    }
+
+    return TranscriptTextSplit(left: left, right: right)
+}
+
+nonisolated func mergedTranscriptText(previous: String, current: String) -> String {
+    [
+        previous.trimmingCharacters(in: .newlines),
+        current.trimmingCharacters(in: .newlines),
+    ]
+    .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    .joined(separator: "\n")
+}
+
+nonisolated func toggledRawASRExpandedSegmentIDs(_ expandedIDs: Set<UUID>, segmentID: UUID) -> Set<UUID> {
+    var next = expandedIDs
+    if next.contains(segmentID) {
+        next.remove(segmentID)
+    } else {
+        next.insert(segmentID)
+    }
+    return next
+}
+
+nonisolated func transcriptionPipelineWarningText(_ warnings: [String]?) -> String? {
+    let warnings = (warnings ?? [])
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+    guard !warnings.isEmpty else {
+        return nil
+    }
+    return warnings.joined(separator: "\n")
 }
 
 enum MeetingDetailTab: CaseIterable, Hashable {
@@ -29,6 +106,7 @@ enum MeetingDetailTab: CaseIterable, Hashable {
 }
 
 enum MeetingDetailHeaderActionID: Hashable {
+    case changeCalendarMeeting
     case copyTranscript
     case retranscribe
     case copySummary
@@ -50,6 +128,16 @@ func meetingDetailHeaderActions(
     canDelete: Bool = true
 ) -> [MeetingDetailHeaderAction] {
     var actions = [MeetingDetailHeaderAction]()
+
+    actions.append(
+        MeetingDetailHeaderAction(
+            id: .changeCalendarMeeting,
+            systemName: "calendar",
+            help: "Change calendar meeting",
+            tint: QMTheme.secondary,
+            isEnabled: true
+        )
+    )
 
     switch activeTab {
     case .transcript:
@@ -170,7 +258,15 @@ struct MeetingDetailView: View {
     let onCancelSummaryReplacement: () -> Void
     let onRenameMeeting: (String) async throws -> Void
     let onRenameSpeaker: (String, String) -> Void
+    let onUpdateTranscriptSegmentText: (UUID, String) async throws -> Void
+    let onAddGlossaryTerm: (String) -> Void
+    let onSplitTranscriptSegment: (UUID, Int) async throws -> TranscriptSegment
+    let onMergeTranscriptSegmentWithPrevious: (UUID) async throws -> TranscriptSegment
+    let onAssignTranscriptSegment: (UUID, String) async throws -> Void
     let onStoreWaveform: ([Double]) -> Void
+    let calendarEvents: [UpcomingCalendarEvent]
+    let onReloadCalendarEvents: () -> Void
+    let onSelectCalendarEvent: (UpcomingCalendarEvent) -> Void
     let isShowingSummaryReplacementConfirmation: Bool
     let isSummarizingMeeting: Bool
     let summaryErrorMessage: String?
@@ -191,8 +287,14 @@ struct MeetingDetailView: View {
     @State private var isCommittingMeetingTitle = false
     @State private var renameOpenSegmentID: UUID?
     @State private var renameValue = ""
+    @State private var focusedTranscriptSegmentID: UUID?
+    @State private var transcriptDrafts = [UUID: String]()
+    @State private var glossarySuggestion: TranscriptGlossarySuggestion?
+    @State private var segmentAssignmentOpenID: UUID?
+    @State private var expandedRawASRSegmentIDs = Set<UUID>()
     @State private var toastText: String?
     @State private var toastTask: Task<Void, Never>?
+    @State private var isShowingCalendarPicker = false
     #if canImport(AppKit)
     @State private var hostWindow: NSWindow?
     #endif
@@ -210,7 +312,10 @@ struct MeetingDetailView: View {
         }
         .task(id: meetingTranscriptReloadKey(for: meeting)) {
             let transcript = meeting.storedTranscript
-            transcriptContent = loadMeetingTranscriptContent(from: transcript)
+            transcriptContent = loadMeetingTranscriptContent(
+                from: transcript,
+                rawTranscript: meeting.rawStoredTranscript
+            )
             switch loadMeetingTranscriptSpeakers(from: transcript) {
             case .available(let speakers):
                 transcriptSpeakers = speakers
@@ -232,6 +337,11 @@ struct MeetingDetailView: View {
         .onChange(of: meeting.id) { _, _ in
             resetMeetingTitleDraft()
             renameOpenSegmentID = nil
+            focusedTranscriptSegmentID = nil
+            transcriptDrafts.removeAll()
+            glossarySuggestion = nil
+            segmentAssignmentOpenID = nil
+            expandedRawASRSegmentIDs.removeAll()
             isMeetingTitleFocused = false
             activeTab = .transcript
             #if canImport(AppKit)
@@ -364,20 +474,28 @@ struct MeetingDetailView: View {
             transcribedHeader
             contentTabPicker
             if activeTab == .transcript {
-                transcriptScroll
-                    .overlay(alignment: .bottom) {
-                        WaveformPlayerBar(
-                            currentTime: playback.currentTime,
-                            duration: playback.duration,
-                            isPlaying: playback.state == .playing,
-                            isAvailable: playback.isPlaybackAvailable,
-                            waveformSamples: playback.waveformSamples,
-                            onToggle: playback.togglePlayback,
-                            onSeek: seek(toFraction:)
-                        )
-                        .padding(.horizontal, 30)
-                        .padding(.bottom, 18)
+                VStack(spacing: 0) {
+                    if let warningText = transcriptionPipelineWarningText(
+                        meeting.transcriptionPipelineMetadata?.warnings
+                    ) {
+                        transcriptionWarningBanner(warningText)
                     }
+
+                    transcriptScroll
+                }
+                .overlay(alignment: .bottom) {
+                    WaveformPlayerBar(
+                        currentTime: playback.currentTime,
+                        duration: playback.duration,
+                        isPlaying: playback.state == .playing,
+                        isAvailable: playback.isPlaybackAvailable,
+                        waveformSamples: playback.waveformSamples,
+                        onToggle: playback.togglePlayback,
+                        onSeek: seek(toFraction:)
+                    )
+                    .padding(.horizontal, 30)
+                    .padding(.bottom, 18)
+                }
             } else {
                 MeetingSummaryPane(
                     state: summaryViewState,
@@ -403,13 +521,7 @@ struct MeetingDetailView: View {
 
                 HStack(spacing: 6) {
                     ForEach(headerActions, id: \.id) { action in
-                        iconButton(
-                            systemName: action.systemName,
-                            tint: action.tint,
-                            help: action.help,
-                            isEnabled: action.isEnabled,
-                            action: { performHeaderAction(action.id) }
-                        )
+                        headerActionButton(action)
                     }
                 }
             }
@@ -444,6 +556,28 @@ struct MeetingDetailView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.never)
+    }
+
+    private func transcriptionWarningBanner(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(QMTheme.secondary)
+                .padding(.top, 1)
+            Text(text)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(QMTheme.secondary)
+                .lineLimit(nil)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.cardBorder, lineWidth: 1))
+        .padding(.horizontal, 30)
+        .padding(.bottom, 8)
     }
 
     private var summaryViewState: SummaryPaneState {
@@ -490,8 +624,12 @@ struct MeetingDetailView: View {
                         }
                 }
                 .buttonStyle(.plain)
-                .popover(isPresented: renameBinding(for: bubble.id), arrowEdge: .bottom) {
-                    renamePopover(speakerID: bubble.speakerID)
+                .popover(isPresented: speakerPopoverBinding(for: bubble.id), arrowEdge: .bottom) {
+                    if segmentAssignmentOpenID == bubble.id {
+                        assignmentPopover(segmentID: bubble.id)
+                    } else {
+                        renamePopover(speakerID: bubble.speakerID)
+                    }
                 }
 
                 Text(bubble.timeLabel)
@@ -512,11 +650,41 @@ struct MeetingDetailView: View {
                 Spacer(minLength: 0)
             }
 
-            Text(bubble.text)
-                .font(.system(size: 14.5))
-                .lineSpacing(3)
-                .foregroundStyle(QMTheme.body)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            EditableTranscriptTextView(
+                text: transcriptDraftText(for: bubble),
+                isFocused: focusedTranscriptSegmentID == bubble.id,
+                onTextChange: { newText in
+                    transcriptDrafts[bubble.id] = newText
+                },
+                onTextCommit: { newText in
+                    commitTranscriptText(segmentID: bubble.id, text: newText)
+                },
+                onFocusApplied: {
+                    if focusedTranscriptSegmentID == bubble.id {
+                        focusedTranscriptSegmentID = nil
+                    }
+                },
+                onSplit: { cursorOffset in
+                    splitTranscriptSegment(bubble, cursorOffset: cursorOffset)
+                },
+                onMergeWithPrevious: {
+                    mergeTranscriptSegmentWithPrevious(bubble)
+                }
+            )
+            .frame(minHeight: 22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let originalText = bubble.originalText {
+                rawASRComparisonView(
+                    text: originalText,
+                    segmentID: bubble.id,
+                    isExpanded: expandedRawASRSegmentIDs.contains(bubble.id)
+                )
+            }
+
+            if glossarySuggestion?.segmentID == bubble.id, let suggestion = glossarySuggestion {
+                glossarySuggestionChip(suggestion)
+            }
         }
         .modifier(
             MeetingBubbleShell(
@@ -565,6 +733,58 @@ struct MeetingDetailView: View {
                     ForEach(suggestions, id: \.name) { suggestion in
                         Button {
                             commitRename(speakerID: speakerID, name: suggestion.name)
+                        } label: {
+                            HStack(spacing: 9) {
+                                Circle().fill(suggestion.color).frame(width: 9, height: 9)
+                                Text(suggestion.name)
+                                    .font(.system(size: 13.5))
+                                    .foregroundStyle(QMTheme.ink)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 7)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(13)
+        .frame(width: 264)
+        .background(QMTheme.card)
+    }
+
+    private func assignmentPopover(segmentID: UUID) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("ASSIGN SPEAKER")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(QMTheme.muted)
+
+            TextField("Speaker name", text: $renameValue)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .foregroundStyle(QMTheme.ink)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.sage, lineWidth: 1.5))
+                .onSubmit { commitAssignment(segmentID: segmentID, name: renameValue) }
+
+            let suggestions = renameSuggestions
+            if suggestions.isEmpty {
+                Text("Type a speaker name above.")
+                    .font(.system(size: 12))
+                    .italic()
+                    .foregroundStyle(QMTheme.muted)
+            } else {
+                Text("Suggestions from calendar")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(QMTheme.tertiary)
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(suggestions, id: \.name) { suggestion in
+                        Button {
+                            commitAssignment(segmentID: segmentID, name: suggestion.name)
                         } label: {
                             HStack(spacing: 9) {
                                 Circle().fill(suggestion.color).frame(width: 9, height: 9)
@@ -794,6 +1014,7 @@ struct MeetingDetailView: View {
                     .foregroundStyle(QMTheme.tertiary)
             }
             Spacer(minLength: 0)
+            calendarHeaderButton
             if showDelete {
                 iconButton(systemName: "trash", tint: QMTheme.danger, help: "Delete") {
                     isShowingDeleteConfirmation = true
@@ -817,6 +1038,34 @@ struct MeetingDetailView: View {
             .onChange(of: isMeetingTitleFocused) { _, isFocused in
                 if !isFocused { commitMeetingRename(dismissFocus: false) }
             }
+    }
+
+    @ViewBuilder
+    private func headerActionButton(_ action: MeetingDetailHeaderAction) -> some View {
+        let button = iconButton(
+            systemName: action.systemName,
+            tint: action.tint,
+            help: action.help,
+            isEnabled: action.isEnabled,
+            action: { performHeaderAction(action.id) }
+        )
+
+        if action.id == .changeCalendarMeeting {
+            button.popover(isPresented: $isShowingCalendarPicker, arrowEdge: .bottom) {
+                calendarPickerPopover
+            }
+        } else {
+            button
+        }
+    }
+
+    private var calendarHeaderButton: some View {
+        iconButton(systemName: "calendar", tint: QMTheme.secondary, help: "Change calendar meeting") {
+            openCalendarPicker()
+        }
+        .popover(isPresented: $isShowingCalendarPicker, arrowEdge: .bottom) {
+            calendarPickerPopover
+        }
     }
 
     private func iconButton(
@@ -854,6 +1103,68 @@ struct MeetingDetailView: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
+    private var calendarPickerPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("CALENDAR MEETING")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(QMTheme.muted)
+
+            if calendarEvents.isEmpty {
+                Text("No nearby calendar events found.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(QMTheme.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(calendarEvents.enumerated()), id: \.offset) { _, event in
+                            calendarEventRow(event)
+                        }
+                    }
+                }
+                .frame(maxHeight: 280)
+            }
+        }
+        .padding(13)
+        .frame(width: 320)
+        .background(QMTheme.card)
+    }
+
+    private func calendarEventRow(_ event: UpcomingCalendarEvent) -> some View {
+        let isSelected = event.id != nil && event.id == meeting.calendarEventID
+
+        return Button {
+            selectCalendarEvent(event)
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "calendar")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(isSelected ? QMTheme.sage : QMTheme.secondary)
+                    .frame(width: 18, height: 18)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(event.title)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                        .lineLimit(1)
+
+                    Text(calendarEventDetailText(for: event))
+                        .font(.system(size: 12))
+                        .foregroundStyle(QMTheme.tertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: Derived data
 
     private struct TranscriptBubble: Identifiable {
@@ -864,6 +1175,7 @@ struct MeetingDetailView: View {
         let timeLabel: String
         let startTime: TimeInterval?
         let text: String
+        let originalText: String?
         let isUnnamed: Bool
         let isActive: Bool
     }
@@ -910,6 +1222,7 @@ struct MeetingDetailView: View {
                 timeLabel: segment.startTime.map(segmentTimestampText(for:)) ?? "",
                 startTime: segment.startTime,
                 text: segment.text,
+                originalText: display.originalText(for: segment.id),
                 isUnnamed: QMSpeakerPalette.isUnnamed(speakerIdentity.displayName),
                 isActive: isActive
             )
@@ -951,12 +1264,15 @@ struct MeetingDetailView: View {
         playback.seek(to: fraction * playback.duration)
     }
 
-    private func renameBinding(for segmentID: UUID) -> Binding<Bool> {
+    private func speakerPopoverBinding(for segmentID: UUID) -> Binding<Bool> {
         Binding(
-            get: { renameOpenSegmentID == segmentID },
+            get: { renameOpenSegmentID == segmentID || segmentAssignmentOpenID == segmentID },
             set: { isOpen in
                 if !isOpen, renameOpenSegmentID == segmentID {
                     renameOpenSegmentID = nil
+                }
+                if !isOpen, segmentAssignmentOpenID == segmentID {
+                    segmentAssignmentOpenID = nil
                 }
             }
         )
@@ -964,7 +1280,14 @@ struct MeetingDetailView: View {
 
     private func openRename(segmentID: UUID, currentName: String) {
         renameValue = QMSpeakerPalette.isUnnamed(currentName) ? "" : currentName
+        segmentAssignmentOpenID = nil
         renameOpenSegmentID = segmentID
+    }
+
+    private func openAssignment(segmentID: UUID, currentName: String) {
+        renameValue = QMSpeakerPalette.isUnnamed(currentName) ? "" : currentName
+        renameOpenSegmentID = nil
+        segmentAssignmentOpenID = segmentID
     }
 
     private func commitRename(speakerID: String, name: String) {
@@ -972,6 +1295,182 @@ struct MeetingDetailView: View {
         renameOpenSegmentID = nil
         guard !trimmed.isEmpty else { return }
         updateSpeakerName(trimmed, for: speakerID)
+    }
+
+    private func commitAssignment(segmentID: UUID, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        segmentAssignmentOpenID = nil
+        guard !trimmed.isEmpty else { return }
+
+        Task {
+            do {
+                try await onAssignTranscriptSegment(segmentID, trimmed)
+                await MainActor.run {
+                    reloadTranscriptStateFromMeeting()
+                    showToast("Speaker assigned")
+                }
+            } catch {}
+        }
+    }
+
+    private func transcriptDraftText(for bubble: TranscriptBubble) -> String {
+        transcriptDrafts[bubble.id] ?? bubble.text
+    }
+
+    private func commitTranscriptText(segmentID: UUID, text: String) {
+        let oldText = transcriptBubbles.first(where: { $0.id == segmentID })?.text ?? ""
+        transcriptDrafts[segmentID] = text
+
+        Task {
+            do {
+                try await onUpdateTranscriptSegmentText(segmentID, text)
+                await MainActor.run {
+                    reloadTranscriptStateFromMeeting()
+                    updateGlossarySuggestion(
+                        segmentID: segmentID,
+                        oldText: oldText,
+                        newText: text
+                    )
+                }
+            } catch {}
+        }
+    }
+
+    private func updateGlossarySuggestion(segmentID: UUID, oldText: String, newText: String) {
+        let candidate = glossarySuggestionTerm(oldText: oldText, newText: newText)
+        if let candidate {
+            glossarySuggestion = TranscriptGlossarySuggestion(segmentID: segmentID, term: candidate)
+        } else if glossarySuggestion?.segmentID == segmentID {
+            glossarySuggestion = nil
+        }
+    }
+
+    private func glossarySuggestionChip(_ suggestion: TranscriptGlossarySuggestion) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "text.badge.plus")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(QMTheme.sage)
+            Text("Add “\(suggestion.term)” to glossary")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(QMTheme.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Button {
+                onAddGlossaryTerm(suggestion.term)
+                glossarySuggestion = nil
+                showToast("Glossary term added")
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(QMTheme.secondary)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            Button {
+                glossarySuggestion = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(QMTheme.muted)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.cardBorder, lineWidth: 1))
+    }
+
+    private func rawASRComparisonView(text: String, segmentID: UUID, isExpanded: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                expandedRawASRSegmentIDs = toggledRawASRExpandedSegmentIDs(
+                    expandedRawASRSegmentIDs,
+                    segmentID: segmentID
+                )
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(width: 12, height: 12)
+                    Image(systemName: "text.magnifyingglass")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Raw ASR")
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(QMTheme.tertiary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                Text(text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(QMTheme.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(nil)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 19)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.cardBorder, lineWidth: 1))
+    }
+
+    private func splitTranscriptSegment(_ bubble: TranscriptBubble, cursorOffset: Int) {
+        let draftText = transcriptDraftText(for: bubble)
+        guard splitTranscriptText(draftText, cursorOffset: cursorOffset) != nil else {
+            return
+        }
+
+        Task {
+            do {
+                try await onUpdateTranscriptSegmentText(bubble.id, draftText)
+                let newSegment = try await onSplitTranscriptSegment(bubble.id, cursorOffset)
+                await MainActor.run {
+                    transcriptDrafts.removeValue(forKey: bubble.id)
+                    reloadTranscriptStateFromMeeting()
+                    focusedTranscriptSegmentID = newSegment.id
+                    openAssignment(segmentID: newSegment.id, currentName: bubble.speakerName)
+                }
+            } catch {}
+        }
+    }
+
+    private func mergeTranscriptSegmentWithPrevious(_ bubble: TranscriptBubble) {
+        let draftText = transcriptDraftText(for: bubble)
+
+        Task {
+            do {
+                try await onUpdateTranscriptSegmentText(bubble.id, draftText)
+                let merged = try await onMergeTranscriptSegmentWithPrevious(bubble.id)
+                await MainActor.run {
+                    transcriptDrafts.removeValue(forKey: bubble.id)
+                    transcriptDrafts[merged.id] = merged.text
+                    reloadTranscriptStateFromMeeting()
+                    focusedTranscriptSegmentID = nil
+                }
+            } catch {}
+        }
+    }
+
+    private func reloadTranscriptStateFromMeeting() {
+        transcriptContent = loadMeetingTranscriptContent(
+            from: meeting.storedTranscript,
+            rawTranscript: meeting.rawStoredTranscript
+        )
+        switch loadMeetingTranscriptSpeakers(from: meeting.storedTranscript) {
+        case .available(let speakers):
+            transcriptSpeakers = speakers
+        case .unavailable:
+            transcriptSpeakers = []
+        }
     }
 
     private func handleTranscribeAction() {
@@ -984,6 +1483,35 @@ struct MeetingDetailView: View {
 
     private var shouldConfirmRetranscription: Bool {
         (try? meeting.status) == .completed
+    }
+
+    private func calendarEventDetailText(for event: UpcomingCalendarEvent) -> String {
+        var parts = [
+            event.startDate.formatted(.dateTime.hour().minute()),
+            event.endDate.formatted(.dateTime.hour().minute())
+        ]
+
+        let attendeeCount = event.attendees.count
+        if attendeeCount == 1 {
+            parts.append("1 attendee")
+        } else if attendeeCount > 1 {
+            parts.append("\(attendeeCount) attendees")
+        }
+
+        return parts.joined(separator: " · ")
+    }
+
+    private func openCalendarPicker() {
+        onReloadCalendarEvents()
+        isShowingCalendarPicker = true
+    }
+
+    private func selectCalendarEvent(_ event: UpcomingCalendarEvent) {
+        onSelectCalendarEvent(event)
+        meetingTitleDraft = event.title
+        originalMeetingTitle = event.title
+        isShowingCalendarPicker = false
+        showToast("Calendar meeting updated")
     }
 
     private func resetMeetingTitleDraft() {
@@ -1068,6 +1596,8 @@ struct MeetingDetailView: View {
 
     private func performHeaderAction(_ actionID: MeetingDetailHeaderActionID) {
         switch actionID {
+        case .changeCalendarMeeting:
+            openCalendarPicker()
         case .copyTranscript:
             copyTranscriptExport()
         case .retranscribe:
@@ -1094,6 +1624,202 @@ struct MeetingDetailView: View {
         }
     }
 }
+
+// MARK: - Editable transcript text
+
+#if canImport(AppKit)
+private struct EditableTranscriptTextView: NSViewRepresentable {
+    let text: String
+    let isFocused: Bool
+    let onTextChange: (String) -> Void
+    let onTextCommit: (String) -> Void
+    let onFocusApplied: () -> Void
+    let onSplit: (Int) -> Void
+    let onMergeWithPrevious: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            onTextChange: onTextChange,
+            onTextCommit: onTextCommit,
+            onFocusApplied: onFocusApplied,
+            onSplit: onSplit,
+            onMergeWithPrevious: onMergeWithPrevious
+        )
+    }
+
+    func makeNSView(context: Context) -> EditableTranscriptNSTextView {
+        let textView = EditableTranscriptNSTextView()
+        textView.delegate = context.coordinator
+        textView.onSplit = context.coordinator.handleSplit
+        textView.onMergeWithPrevious = context.coordinator.handleMergeWithPrevious
+        textView.configureForTranscript()
+        textView.string = text
+        return textView
+    }
+
+    func updateNSView(_ textView: EditableTranscriptNSTextView, context: Context) {
+        context.coordinator.onTextChange = onTextChange
+        context.coordinator.onTextCommit = onTextCommit
+        context.coordinator.onFocusApplied = onFocusApplied
+        context.coordinator.onSplit = onSplit
+        context.coordinator.onMergeWithPrevious = onMergeWithPrevious
+
+        if textView.string != text {
+            textView.string = text
+            textView.invalidateIntrinsicContentSize()
+        }
+
+        if isFocused, textView.window?.firstResponder !== textView {
+            DispatchQueue.main.async {
+                if textView.window?.makeFirstResponder(textView) == true {
+                    context.coordinator.onFocusApplied()
+                }
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var onTextChange: (String) -> Void
+        var onTextCommit: (String) -> Void
+        var onFocusApplied: () -> Void
+        var onSplit: (Int) -> Void
+        var onMergeWithPrevious: () -> Void
+
+        init(
+            onTextChange: @escaping (String) -> Void,
+            onTextCommit: @escaping (String) -> Void,
+            onFocusApplied: @escaping () -> Void,
+            onSplit: @escaping (Int) -> Void,
+            onMergeWithPrevious: @escaping () -> Void
+        ) {
+            self.onTextChange = onTextChange
+            self.onTextCommit = onTextCommit
+            self.onFocusApplied = onFocusApplied
+            self.onSplit = onSplit
+            self.onMergeWithPrevious = onMergeWithPrevious
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            textView.invalidateIntrinsicContentSize()
+            onTextChange(textView.string)
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            if let transcriptTextView = textView as? EditableTranscriptNSTextView,
+               transcriptTextView.consumePendingStructuralEditEnd() {
+                return
+            }
+            onTextCommit(textView.string)
+        }
+
+        func handleSplit(cursorOffset: Int) {
+            onSplit(cursorOffset)
+        }
+
+        func handleMergeWithPrevious() {
+            onMergeWithPrevious()
+        }
+    }
+}
+
+private final class EditableTranscriptNSTextView: NSTextView {
+    var onSplit: ((Int) -> Void)?
+    var onMergeWithPrevious: (() -> Void)?
+    private var pendingStructuralEditEnd = false
+
+    override var intrinsicContentSize: NSSize {
+        guard let textContainer, let layoutManager else {
+            return NSSize(width: NSView.noIntrinsicMetric, height: 22)
+        }
+
+        layoutManager.ensureLayout(for: textContainer)
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        return NSSize(width: NSView.noIntrinsicMetric, height: max(ceil(usedRect.height + 4), 22))
+    }
+
+    func configureForTranscript() {
+        isEditable = true
+        isSelectable = true
+        drawsBackground = false
+        isRichText = false
+        importsGraphics = false
+        allowsUndo = true
+        isVerticallyResizable = true
+        isHorizontallyResizable = false
+        minSize = .zero
+        maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textContainerInset = NSSize(width: 0, height: 0)
+        textContainer?.lineFragmentPadding = 0
+        textContainer?.widthTracksTextView = true
+        font = NSFont.systemFont(ofSize: 14.5)
+        textColor = NSColor.labelColor
+        insertionPointColor = NSColor.labelColor
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        if event.keyCode == 36 || event.keyCode == 76 {
+            if modifiers.contains(.shift) {
+                insertText("\n", replacementRange: selectedRange())
+            } else {
+                let cursorOffset = selectedRange().location
+                endEditingForStructuralCommand()
+                onSplit?(cursorOffset)
+            }
+            return
+        }
+
+        if (event.keyCode == 51 || event.keyCode == 117), selectedRange().location == 0, selectedRange().length == 0 {
+            endEditingForStructuralCommand()
+            onMergeWithPrevious?()
+            return
+        }
+
+        super.keyDown(with: event)
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        invalidateIntrinsicContentSize()
+    }
+
+    func consumePendingStructuralEditEnd() -> Bool {
+        guard pendingStructuralEditEnd else {
+            return false
+        }
+
+        pendingStructuralEditEnd = false
+        return true
+    }
+
+    private func endEditingForStructuralCommand() {
+        pendingStructuralEditEnd = true
+        if window?.makeFirstResponder(nil) != true {
+            pendingStructuralEditEnd = false
+        }
+    }
+}
+#else
+private struct EditableTranscriptTextView: View {
+    let text: String
+    let isFocused: Bool
+    let onTextChange: (String) -> Void
+    let onTextCommit: (String) -> Void
+    let onFocusApplied: () -> Void
+    let onSplit: (Int) -> Void
+    let onMergeWithPrevious: () -> Void
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 14.5))
+            .foregroundStyle(QMTheme.body)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+#endif
 
 // MARK: - Small animated pieces
 

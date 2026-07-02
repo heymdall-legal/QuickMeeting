@@ -50,6 +50,24 @@ struct AutoRecordingCoordinatorTests {
 
         #expect(sink.stopRequests == 0, "stopRequests was \(sink.stopRequests)")
     }
+
+    @Test
+    func inactivePresenceCancelsPendingStart() async {
+        let clock = TestAutoRecordingClock()
+        let sink = RecordingIntentSinkSpy()
+        let coordinator = AutoRecordingCoordinator(
+            clock: clock,
+            intentSink: sink,
+            startDelay: 10,
+            stopGracePeriod: 60
+        )
+
+        await coordinator.handle(.candidateActive)
+        await coordinator.handle(.inactive)
+        await clock.advance(by: 10)
+
+        #expect(sink.startRequests == 0, "startRequests was \(sink.startRequests)")
+    }
 }
 
 @MainActor

@@ -12,8 +12,8 @@ struct MeetingDetailFocusManagementTests {
             summaryState: .idle
         )
 
-        #expect(actions.map(\.help) == ["Copy transcript", "Re-transcribe", "Delete"])
-        #expect(actions.map(\.systemName) == ["doc.on.doc", "arrow.clockwise", "trash"])
+        #expect(actions.map(\.help) == ["Change calendar meeting", "Copy transcript", "Re-transcribe", "Delete"])
+        #expect(actions.map(\.systemName) == ["calendar", "doc.on.doc", "arrow.clockwise", "trash"])
     }
 
     @Test
@@ -23,8 +23,8 @@ struct MeetingDetailFocusManagementTests {
             summaryState: .ready("Stored summary")
         )
 
-        #expect(actions.map(\.help) == ["Copy summary", "Regenerate summary", "Delete"])
-        #expect(actions.map(\.systemName) == ["doc.on.doc", "sparkles", "trash"])
+        #expect(actions.map(\.help) == ["Change calendar meeting", "Copy summary", "Regenerate summary", "Delete"])
+        #expect(actions.map(\.systemName) == ["calendar", "doc.on.doc", "sparkles", "trash"])
     }
 
     @Test @MainActor
@@ -84,6 +84,34 @@ struct MeetingDetailFocusManagementTests {
         #expect(MeetingBubbleShellMetrics.transcript.cornerRadius == 16)
         #expect(MeetingBubbleShellMetrics.transcript.horizontalPadding == 18)
         #expect(MeetingBubbleShellMetrics.transcript.verticalPadding == 13)
+    }
+
+    @Test
+    func glossarySuggestionTermPrefersNewTechnicalWord() {
+        #expect(glossarySuggestionTerm(
+            oldText: "We should deploy to cuber net ease.",
+            newText: "We should deploy to Kubernetes."
+        ) == "Kubernetes")
+    }
+
+    @Test
+    func rawASRDisclosureToggleAddsAndRemovesSegmentID() {
+        let segmentID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+
+        #expect(toggledRawASRExpandedSegmentIDs([], segmentID: segmentID) == [segmentID])
+        #expect(toggledRawASRExpandedSegmentIDs([segmentID], segmentID: segmentID) == [])
+    }
+
+    @Test
+    func transcriptionPipelineWarningTextJoinsWarnings() {
+        #expect(transcriptionPipelineWarningText(nil) == nil)
+        #expect(transcriptionPipelineWarningText([]) == nil)
+        #expect(
+            transcriptionPipelineWarningText([
+                "LLM correction returned no text changes.",
+                "CTC vocabulary stage skipped."
+            ]) == "LLM correction returned no text changes.\nCTC vocabulary stage skipped."
+        )
     }
 
     @Test @MainActor

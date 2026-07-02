@@ -23,7 +23,9 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var summarizingMeetingID: UUID?
     @Published private(set) var renameSpeakerErrorMessage: String?
     @Published private(set) var renameMeetingErrorMessage: String?
+    @Published private(set) var calendarEventSelectionErrorMessage: String?
     @Published private(set) var upcomingCalendarEvent: UpcomingCalendarEvent?
+    @Published private var calendarEventCandidatesByMeetingID: [UUID: [UpcomingCalendarEvent]] = [:]
 
     var summaryErrorMessage: String? {
         summaryError?.message
@@ -120,6 +122,7 @@ final class AppViewModel: ObservableObject {
                 title: resolvedMeetingTitle(for: startedAt, matchingEvent: matchingEvent),
                 startedAt: startedAt,
                 attendeeNames: matchingEvent?.attendees.map(\.displayName) ?? [],
+                calendarEventID: matchingEvent?.id,
                 folderURL: artifacts.meetingFolderURL,
                 audioFileURL: artifacts.audioFileURL
             )
@@ -353,6 +356,36 @@ final class AppViewModel: ObservableObject {
         renameMeetingErrorMessage = nil
     }
 
+    func calendarEvents(for meeting: Meeting) -> [UpcomingCalendarEvent] {
+        calendarEventCandidatesByMeetingID[meeting.id] ?? []
+    }
+
+    func reloadCalendarEvents(for meeting: Meeting) {
+        calendarEventCandidatesByMeetingID[meeting.id] = calendarIntegration.calendarEventsForRecording(
+            startedAt: meeting.startedAt,
+            endedAt: meeting.endedAt
+        )
+    }
+
+    func selectCalendarEvent(_ event: UpcomingCalendarEvent, for meeting: Meeting) {
+        do {
+            try meetingStore.updateCalendarEvent(
+                meetingID: meeting.id,
+                eventTitle: event.title,
+                attendeeNames: event.attendees.map(\.displayName),
+                calendarEventID: event.id,
+                updatedAt: dateProvider()
+            )
+            calendarEventSelectionErrorMessage = nil
+        } catch {
+            calendarEventSelectionErrorMessage = error.localizedDescription
+        }
+    }
+
+    func clearCalendarEventSelectionError() {
+        calendarEventSelectionErrorMessage = nil
+    }
+
     func storeWaveform(meetingID: UUID, samples: [Double]) {
         try? meetingStore.storeWaveform(meetingID: meetingID, samples: samples)
     }
@@ -383,6 +416,80 @@ final class AppViewModel: ObservableObject {
                     // Best-effort enrollment. Keep the successful rename.
                 }
             }
+        } catch {
+            renameSpeakerErrorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    func updateTranscriptSegmentText(
+        meetingID: UUID,
+        segmentID: UUID,
+        text: String
+    ) async throws {
+        do {
+            _ = try meetingTranscriptStore.updateSegmentText(
+                segmentID: segmentID,
+                text: text,
+                in: meetingID
+            )
+            renameSpeakerErrorMessage = nil
+        } catch {
+            renameSpeakerErrorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    func splitTranscriptSegment(
+        meetingID: UUID,
+        segmentID: UUID,
+        cursorOffset: Int
+    ) async throws -> TranscriptSegment {
+        do {
+            let segment = try meetingTranscriptStore.splitSegment(
+                segmentID: segmentID,
+                at: cursorOffset,
+                in: meetingID
+            )
+            renameSpeakerErrorMessage = nil
+            return segment
+        } catch {
+            renameSpeakerErrorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    func mergeTranscriptSegmentWithPrevious(
+        meetingID: UUID,
+        segmentID: UUID
+    ) async throws -> TranscriptSegment {
+        do {
+            let segment = try meetingTranscriptStore.mergeSegmentWithPrevious(
+                segmentID: segmentID,
+                in: meetingID
+            )
+            renameSpeakerErrorMessage = nil
+            return segment
+        } catch {
+            renameSpeakerErrorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    func assignTranscriptSegment(
+        meetingID: UUID,
+        segmentID: UUID,
+        speakerName: String
+    ) async throws {
+        let trimmedName = speakerName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        do {
+            _ = try meetingTranscriptStore.assignSegment(
+                segmentID: segmentID,
+                toSpeakerNamed: trimmedName,
+                in: meetingID
+            )
+            renameSpeakerErrorMessage = nil
         } catch {
             renameSpeakerErrorMessage = error.localizedDescription
             throw error

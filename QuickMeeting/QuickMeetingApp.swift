@@ -17,6 +17,7 @@ struct QuickMeetingApp: App {
     @StateObject private var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
     @StateObject private var transcriptionSettingsViewModel: TranscriptionSettingsViewModel
     @StateObject private var meetingSummarySettingsViewModel: MeetingSummarySettingsViewModel
+    @StateObject private var markdownExportSettingsViewModel: MarkdownExportSettingsViewModel
     @State private var menuBarController: MenuBarController?
 
     init() {
@@ -35,7 +36,14 @@ struct QuickMeetingApp: App {
                 configurations: [modelConfiguration]
             )
             sharedModelContainer = modelContainer
-            let meetingStore = MeetingStore(modelContext: modelContainer.mainContext)
+            let markdownExportSettingsStore = MeetingMarkdownExportSettingsStore()
+            let markdownExporter = ConfiguredMeetingMarkdownExporter(
+                settingsStore: markdownExportSettingsStore
+            )
+            let meetingStore = MeetingStore(
+                modelContext: modelContainer.mainContext,
+                markdownExporter: markdownExporter
+            )
             let knownSpeakerStore = KnownSpeakerStore(modelContext: modelContainer.mainContext)
             let knownSpeakerEnrollmentService = KnownSpeakerEnrollmentService(store: knownSpeakerStore)
             try? meetingStore.resetStuckRecordingMeetings(updatedAt: Date())
@@ -46,18 +54,21 @@ struct QuickMeetingApp: App {
             )
             let transcriptionProgressCenter = TranscriptionProgressCenter()
             let transcriptionSettingsStore = TranscriptionSettingsStore()
+            let transcriptionGlossaryStore = TranscriptionGlossaryStore()
+            let meetingSummarySettingsStore = MeetingSummarySettingsStore()
             let transcriptionService = FluidTranscriptionService(
                 meetingStore: meetingStore,
                 progressCenter: transcriptionProgressCenter,
                 knownSpeakerStore: knownSpeakerStore,
                 knownSpeakerEnrollmentService: knownSpeakerEnrollmentService,
-                languageStore: transcriptionSettingsStore
+                languageStore: transcriptionSettingsStore,
+                glossaryStore: transcriptionGlossaryStore,
+                correctionService: LLMTranscriptCorrectionService(settingsStore: meetingSummarySettingsStore)
             )
             let meetingTranscriptStore = MeetingTranscriptStore(meetingStore: meetingStore)
             let calendarSettingsStore = CalendarSettingsStore()
             let calendarIntegration = NativeCalendarIntegration(settingsStore: calendarSettingsStore)
             let autoRecordingSettingsStore = AutoRecordingSettingsStore()
-            let meetingSummarySettingsStore = MeetingSummarySettingsStore()
             let meetingSummaryService = MeetingSummaryService(
                 meetingStore: meetingStore,
                 settingsStore: meetingSummarySettingsStore
@@ -96,11 +107,20 @@ struct QuickMeetingApp: App {
                 wrappedValue: autoRecordingSettingsViewModel
             )
             _transcriptionSettingsViewModel = StateObject(
-                wrappedValue: TranscriptionSettingsViewModel(settingsStore: transcriptionSettingsStore)
+                wrappedValue: TranscriptionSettingsViewModel(
+                    settingsStore: transcriptionSettingsStore,
+                    glossaryStore: transcriptionGlossaryStore
+                )
             )
             _meetingSummarySettingsViewModel = StateObject(
                 wrappedValue: MeetingSummarySettingsViewModel(
                     settingsStore: meetingSummarySettingsStore
+                )
+            )
+            _markdownExportSettingsViewModel = StateObject(
+                wrappedValue: MarkdownExportSettingsViewModel(
+                    settingsStore: markdownExportSettingsStore,
+                    meetingStore: meetingStore
                 )
             )
             autoRecordingMonitor = MeetingAppMonitor(
@@ -122,7 +142,8 @@ struct QuickMeetingApp: App {
                 calendarSettingsViewModel: calendarSettingsViewModel,
                 autoRecordingSettingsViewModel: autoRecordingSettingsViewModel,
                 transcriptionSettingsViewModel: transcriptionSettingsViewModel,
-                meetingSummarySettingsViewModel: meetingSummarySettingsViewModel
+                meetingSummarySettingsViewModel: meetingSummarySettingsViewModel,
+                markdownExportSettingsViewModel: markdownExportSettingsViewModel
             )
                 .task {
                     if menuBarController == nil {

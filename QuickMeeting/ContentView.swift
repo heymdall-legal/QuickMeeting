@@ -14,6 +14,7 @@ struct ContentView: View {
     @ObservedObject var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
     @ObservedObject var transcriptionSettingsViewModel: TranscriptionSettingsViewModel
     @ObservedObject var meetingSummarySettingsViewModel: MeetingSummarySettingsViewModel
+    @ObservedObject var markdownExportSettingsViewModel: MarkdownExportSettingsViewModel
     @Query(sort: \Meeting.startedAt, order: .reverse) private var meetings: [Meeting]
     @State private var selection = defaultSidebarSelection()
     @State private var isSettingsPresented = false
@@ -84,11 +85,48 @@ struct ContentView: View {
                                 )
                             }
                         },
+                        onUpdateTranscriptSegmentText: { segmentID, text in
+                            try await appViewModel.updateTranscriptSegmentText(
+                                meetingID: selectedMeeting.id,
+                                segmentID: segmentID,
+                                text: text
+                            )
+                        },
+                        onAddGlossaryTerm: { term in
+                            transcriptionSettingsViewModel.addGlossaryTerm(text: term)
+                        },
+                        onSplitTranscriptSegment: { segmentID, cursorOffset in
+                            try await appViewModel.splitTranscriptSegment(
+                                meetingID: selectedMeeting.id,
+                                segmentID: segmentID,
+                                cursorOffset: cursorOffset
+                            )
+                        },
+                        onMergeTranscriptSegmentWithPrevious: { segmentID in
+                            try await appViewModel.mergeTranscriptSegmentWithPrevious(
+                                meetingID: selectedMeeting.id,
+                                segmentID: segmentID
+                            )
+                        },
+                        onAssignTranscriptSegment: { segmentID, speakerName in
+                            try await appViewModel.assignTranscriptSegment(
+                                meetingID: selectedMeeting.id,
+                                segmentID: segmentID,
+                                speakerName: speakerName
+                            )
+                        },
                         onStoreWaveform: { samples in
                             appViewModel.storeWaveform(
                                 meetingID: selectedMeeting.id,
                                 samples: samples
                             )
+                        },
+                        calendarEvents: appViewModel.calendarEvents(for: selectedMeeting),
+                        onReloadCalendarEvents: {
+                            appViewModel.reloadCalendarEvents(for: selectedMeeting)
+                        },
+                        onSelectCalendarEvent: { event in
+                            appViewModel.selectCalendarEvent(event, for: selectedMeeting)
                         },
                         isShowingSummaryReplacementConfirmation: appViewModel.summaryConfirmationMeetingID == selectedMeeting.id,
                         isSummarizingMeeting: appViewModel.summarizingMeetingID == selectedMeeting.id,
@@ -120,6 +158,7 @@ struct ContentView: View {
                 autoRecordingViewModel: autoRecordingSettingsViewModel,
                 transcriptionViewModel: transcriptionSettingsViewModel,
                 meetingSummaryViewModel: meetingSummarySettingsViewModel,
+                markdownExportViewModel: markdownExportSettingsViewModel,
                 onClose: { isSettingsPresented = false }
             )
         }
@@ -169,6 +208,18 @@ struct ContentView: View {
             },
             message: {
                 Text(appViewModel.renameMeetingErrorMessage ?? "Unknown error.")
+            }
+        )
+        .alert(
+            "Unable to Change Calendar Meeting",
+            isPresented: calendarEventSelectionErrorIsPresented,
+            actions: {
+                Button("OK", role: .cancel) {
+                    appViewModel.clearCalendarEventSelectionError()
+                }
+            },
+            message: {
+                Text(appViewModel.calendarEventSelectionErrorMessage ?? "Unknown error.")
             }
         )
     }
@@ -223,6 +274,17 @@ struct ContentView: View {
             }
         )
     }
+
+    private var calendarEventSelectionErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { appViewModel.calendarEventSelectionErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appViewModel.clearCalendarEventSelectionError()
+                }
+            }
+        )
+    }
 }
 
 extension Notification.Name {
@@ -239,6 +301,10 @@ extension Notification.Name {
         transcriptionSettingsViewModel: TranscriptionSettingsViewModel(settingsStore: TranscriptionSettingsStore()),
         meetingSummarySettingsViewModel: MeetingSummarySettingsViewModel(
             settingsStore: MeetingSummarySettingsStore()
+        ),
+        markdownExportSettingsViewModel: MarkdownExportSettingsViewModel(
+            settingsStore: MeetingMarkdownExportSettingsStore(),
+            meetingStore: MeetingStore(modelContext: container.mainContext)
         )
     )
         .modelContainer(container)
