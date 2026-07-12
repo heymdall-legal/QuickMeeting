@@ -42,6 +42,7 @@ final class AppViewModel: ObservableObject {
     private let knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)?
     private let recordingPermissions: any RecordingPermissions
     private let calendarIntegration: any CalendarIntegration
+    private let speakerSuggestionService: (any SpeakerSuggestionRecomputing)?
     private let dateProvider: () -> Date
     private let meetingIDProvider: () -> UUID
     private let meetingTitleFormatter: DateFormatter
@@ -62,6 +63,7 @@ final class AppViewModel: ObservableObject {
         meetingTranscriptStore: (any MeetingTranscriptStoring)? = nil,
         knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)? = nil,
         calendarIntegration: (any CalendarIntegration)? = nil,
+        speakerSuggestionService: (any SpeakerSuggestionRecomputing)? = nil,
         dateProvider: @escaping () -> Date = Date.init,
         meetingIDProvider: @escaping () -> UUID = UUID.init,
         meetingTitleFormatter: DateFormatter = AppViewModel.makeMeetingTitleFormatter()
@@ -77,6 +79,7 @@ final class AppViewModel: ObservableObject {
         self.meetingTranscriptStore = meetingTranscriptStore ?? MeetingTranscriptStore()
         self.knownSpeakerEnrollmentService = knownSpeakerEnrollmentService
         self.calendarIntegration = calendarIntegration ?? NoopCalendarIntegration()
+        self.speakerSuggestionService = speakerSuggestionService
         self.dateProvider = dateProvider
         self.meetingIDProvider = meetingIDProvider
         self.meetingTitleFormatter = meetingTitleFormatter
@@ -377,6 +380,9 @@ final class AppViewModel: ObservableObject {
                 updatedAt: dateProvider()
             )
             calendarEventSelectionErrorMessage = nil
+            Task {
+                await speakerSuggestionService?.recomputeSuggestions(for: meeting.id)
+            }
         } catch {
             calendarEventSelectionErrorMessage = error.localizedDescription
         }
@@ -384,6 +390,18 @@ final class AppViewModel: ObservableObject {
 
     func clearCalendarEventSelectionError() {
         calendarEventSelectionErrorMessage = nil
+    }
+
+    func pendingSpeakerSuggestions(for meetingID: UUID) -> [SpeakerIdentitySuggestion] {
+        speakerSuggestionService?.pendingSuggestions(for: meetingID) ?? []
+    }
+
+    func acceptSpeakerSuggestion(_ suggestion: SpeakerIdentitySuggestion) {
+        speakerSuggestionService?.acceptSuggestion(id: suggestion.id)
+    }
+
+    func dismissSpeakerSuggestion(_ suggestion: SpeakerIdentitySuggestion) {
+        speakerSuggestionService?.dismissSuggestion(id: suggestion.id)
     }
 
     func storeWaveform(meetingID: UUID, samples: [Double]) {

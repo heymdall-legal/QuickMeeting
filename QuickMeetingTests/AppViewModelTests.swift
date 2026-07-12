@@ -56,6 +56,73 @@ struct AppViewModelTests {
     }
 
     @Test
+    func selectCalendarEventRecomputesSpeakerSuggestions() async throws {
+        let recomputeService = StubSpeakerSuggestionRecomputeService()
+        let harness = try AppViewModelHarness(speakerSuggestionRecomputeService: recomputeService)
+        let meeting = try harness.createMeetingWithTranscript(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "Hello", startTime: 1, endTime: 4, speakerID: "speaker-1")]
+            )
+        )
+        let selectedEvent = UpcomingCalendarEvent(
+            id: "event-correct",
+            title: "Correct Calendar Meeting",
+            startDate: meeting.startedAt,
+            endDate: meeting.startedAt.addingTimeInterval(1_800),
+            attendees: [UpcomingCalendarAttendee(displayName: "Masha", emailAddress: nil)]
+        )
+
+        harness.viewModel.selectCalendarEvent(selectedEvent, for: meeting)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(recomputeService.calls == [meeting.id])
+    }
+
+    @Test
+    func pendingSuggestionsForMeetingAreLoadedFromSuggestionService() throws {
+        let service = StubSpeakerSuggestionRecomputeService()
+        let suggestion = SpeakerIdentitySuggestion(
+            meetingID: UUID(),
+            speakerID: "speaker-1",
+            proposedName: "Masha",
+            confidence: .high,
+            reason: "Seen in active tile",
+            evidenceImageRelativePath: "screen-observations/0001.jpg",
+            evidenceThumbnailRelativePath: nil,
+            observationID: UUID(),
+            capturedAtOffset: 2
+        )
+        service.pendingSuggestions = [suggestion]
+        let harness = try AppViewModelHarness(speakerSuggestionRecomputeService: service)
+
+        #expect(harness.viewModel.pendingSpeakerSuggestions(for: suggestion.meetingID) == [suggestion])
+    }
+
+    @Test
+    func acceptAndDismissSpeakerSuggestionsForwardToSuggestionService() throws {
+        let service = StubSpeakerSuggestionRecomputeService()
+        let suggestion = SpeakerIdentitySuggestion(
+            meetingID: UUID(),
+            speakerID: "speaker-1",
+            proposedName: "Masha",
+            confidence: .high,
+            reason: "Seen in active tile",
+            evidenceImageRelativePath: "screen-observations/0001.jpg",
+            evidenceThumbnailRelativePath: nil,
+            observationID: UUID(),
+            capturedAtOffset: 2
+        )
+        let harness = try AppViewModelHarness(speakerSuggestionRecomputeService: service)
+
+        harness.viewModel.acceptSpeakerSuggestion(suggestion)
+        harness.viewModel.dismissSpeakerSuggestion(suggestion)
+
+        #expect(service.accepted == [suggestion.id])
+        #expect(service.dismissed == [suggestion.id])
+    }
+
+    @Test
     func reloadCalendarEventsStoresCandidatesForMeeting() throws {
         let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
         let candidate = UpcomingCalendarEvent(
@@ -302,6 +369,7 @@ private struct AppViewModelHarness {
         ),
         calendarIntegration: any CalendarIntegration = NoopCalendarIntegration(),
         recordingPermissions: any RecordingPermissions = GrantedRecordingPermissions(),
+        speakerSuggestionRecomputeService: (any SpeakerSuggestionRecomputing)? = nil,
         dateProvider: @escaping () -> Date = Date.init
     ) throws {
         let schema = Schema([
@@ -310,6 +378,8 @@ private struct AppViewModelHarness {
             PersistedTranscriptSegment.self,
             PersistedKnownSpeaker.self,
             PersistedKnownSpeakerCentroid.self,
+            PersistedScreenObservation.self,
+            PersistedSpeakerIdentitySuggestion.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         container = try ModelContainer(for: schema, configurations: [configuration])
@@ -333,6 +403,7 @@ private struct AppViewModelHarness {
             meetingTranscriptStore: meetingTranscriptStore,
             knownSpeakerEnrollmentService: enrollmentService,
             calendarIntegration: calendarIntegration,
+            speakerSuggestionService: speakerSuggestionRecomputeService,
             dateProvider: dateProvider
         )
     }
@@ -447,6 +518,30 @@ private struct StubCalendarIntegration: CalendarIntegration {
 
     func calendarEventsForRecording(startedAt _: Date, endedAt _: Date?) -> [UpcomingCalendarEvent] {
         candidates
+    }
+}
+
+@MainActor
+private final class StubSpeakerSuggestionRecomputeService: SpeakerSuggestionRecomputing {
+    var pendingSuggestions = [SpeakerIdentitySuggestion]()
+    private(set) var calls = [UUID]()
+    private(set) var accepted = [UUID]()
+    private(set) var dismissed = [UUID]()
+
+    func recomputeSuggestions(for meetingID: UUID) async {
+        calls.append(meetingID)
+    }
+
+    func pendingSuggestions(for meetingID: UUID) -> [SpeakerIdentitySuggestion] {
+        pendingSuggestions.filter { $0.meetingID == meetingID }
+    }
+
+    func acceptSuggestion(id: UUID) {
+        accepted.append(id)
+    }
+
+    func dismissSuggestion(id: UUID) {
+        dismissed.append(id)
     }
 }
 

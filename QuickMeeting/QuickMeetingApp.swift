@@ -46,6 +46,7 @@ struct QuickMeetingApp: App {
                 modelContext: modelContainer.mainContext,
                 markdownExporter: markdownExporter
             )
+            let screenObservationStore = ScreenObservationStore(modelContext: modelContainer.mainContext)
             let knownSpeakerStore = KnownSpeakerStore(modelContext: modelContainer.mainContext)
             let knownSpeakerEnrollmentService = KnownSpeakerEnrollmentService(store: knownSpeakerStore)
             try? meetingStore.resetStuckRecordingMeetings(updatedAt: Date())
@@ -70,6 +71,10 @@ struct QuickMeetingApp: App {
             let meetingTranscriptStore = MeetingTranscriptStore(meetingStore: meetingStore)
             let calendarSettingsStore = CalendarSettingsStore()
             let calendarIntegration = NativeCalendarIntegration(settingsStore: calendarSettingsStore)
+            let speakerSuggestionService = DefaultSpeakerSuggestionRecomputeService(
+                meetingStore: meetingStore,
+                observationStore: screenObservationStore
+            )
             let autoRecordingSettingsStore = AutoRecordingSettingsStore()
             let meetingSummaryService = MeetingSummaryService(
                 meetingStore: meetingStore,
@@ -88,7 +93,8 @@ struct QuickMeetingApp: App {
                 transcriptionProgressCenter: transcriptionProgressCenter,
                 meetingTranscriptStore: meetingTranscriptStore,
                 knownSpeakerEnrollmentService: knownSpeakerEnrollmentService,
-                calendarIntegration: calendarIntegration
+                calendarIntegration: calendarIntegration,
+                speakerSuggestionService: speakerSuggestionService
             )
             let autoRecordingSettings = autoRecordingSettingsStore.load()
             let autoRecordingCoordinator = AutoRecordingCoordinator(

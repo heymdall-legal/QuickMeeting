@@ -5,6 +5,14 @@
 
 import Foundation
 
+@MainActor
+protocol SpeakerSuggestionRecomputing: AnyObject {
+    func recomputeSuggestions(for meetingID: UUID) async
+    func pendingSuggestions(for meetingID: UUID) -> [SpeakerIdentitySuggestion]
+    func acceptSuggestion(id: UUID)
+    func dismissSuggestion(id: UUID)
+}
+
 struct SpeakerIdentitySuggestionService {
     func suggestions(
         meetingID: UUID,
@@ -81,5 +89,63 @@ struct SpeakerIdentitySuggestionService {
             return .medium
         }
         return .low
+    }
+}
+
+@MainActor
+final class DefaultSpeakerSuggestionRecomputeService: SpeakerSuggestionRecomputing {
+    private let meetingStore: MeetingStore
+    private let observationStore: ScreenObservationStore
+    private let scorer: SpeakerIdentitySuggestionService
+
+    convenience init(
+        meetingStore: MeetingStore,
+        observationStore: ScreenObservationStore
+    ) {
+        self.init(
+            meetingStore: meetingStore,
+            observationStore: observationStore,
+            scorer: SpeakerIdentitySuggestionService()
+        )
+    }
+
+    init(
+        meetingStore: MeetingStore,
+        observationStore: ScreenObservationStore,
+        scorer: SpeakerIdentitySuggestionService
+    ) {
+        self.meetingStore = meetingStore
+        self.observationStore = observationStore
+        self.scorer = scorer
+    }
+
+    func recomputeSuggestions(for meetingID: UUID) async {
+        do {
+            let meeting = try meetingStore.fetchMeeting(id: meetingID)
+            let observations = try observationStore.observations(for: meetingID)
+            let dismissed = try observationStore.dismissedKeys(for: meetingID)
+            let suggestions = scorer.suggestions(
+                meetingID: meetingID,
+                attendeeNames: meeting.attendeeNames,
+                transcript: meeting.storedTranscript,
+                observations: observations,
+                dismissed: dismissed
+            )
+            try observationStore.replacePendingSuggestions(for: meetingID, with: suggestions)
+        } catch {
+            // Speaker suggestions are opportunistic; never block core meeting flows.
+        }
+    }
+
+    func pendingSuggestions(for meetingID: UUID) -> [SpeakerIdentitySuggestion] {
+        (try? observationStore.pendingSuggestions(for: meetingID)) ?? []
+    }
+
+    func acceptSuggestion(id: UUID) {
+        try? observationStore.updateSuggestionStatus(suggestionID: id, status: .accepted)
+    }
+
+    func dismissSuggestion(id: UUID) {
+        try? observationStore.updateSuggestionStatus(suggestionID: id, status: .dismissed)
     }
 }
