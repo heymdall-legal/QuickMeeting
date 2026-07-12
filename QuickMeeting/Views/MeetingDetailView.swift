@@ -243,6 +243,21 @@ func resolvedTranscriptBubbleSpeakerIdentity(
     )
 }
 
+nonisolated func speakerSuggestion(
+    for speakerID: String,
+    in suggestions: [SpeakerIdentitySuggestion]
+) -> SpeakerIdentitySuggestion? {
+    suggestions.first { $0.speakerID == speakerID && $0.status == .pending }
+}
+
+nonisolated func speakerSuggestionConfidenceText(_ confidence: SpeakerIdentitySuggestionConfidence) -> String {
+    switch confidence {
+    case .high: "High"
+    case .medium: "Medium"
+    case .low: "Low"
+    }
+}
+
 struct MeetingDetailView: View {
     let meeting: Meeting
     let transcriptionProgress: Double?
@@ -267,6 +282,9 @@ struct MeetingDetailView: View {
     let calendarEvents: [UpcomingCalendarEvent]
     let onReloadCalendarEvents: () -> Void
     let onSelectCalendarEvent: (UpcomingCalendarEvent) -> Void
+    let speakerSuggestions: [SpeakerIdentitySuggestion]
+    let onAcceptSpeakerSuggestion: (SpeakerIdentitySuggestion) -> Void
+    let onDismissSpeakerSuggestion: (SpeakerIdentitySuggestion) -> Void
     let isShowingSummaryReplacementConfirmation: Bool
     let isSummarizingMeeting: Bool
     let summaryErrorMessage: String?
@@ -292,6 +310,7 @@ struct MeetingDetailView: View {
     @State private var glossarySuggestion: TranscriptGlossarySuggestion?
     @State private var segmentAssignmentOpenID: UUID?
     @State private var expandedRawASRSegmentIDs = Set<UUID>()
+    @State private var previewedSpeakerSuggestion: SpeakerIdentitySuggestion?
     @State private var toastText: String?
     @State private var toastTask: Task<Void, Never>?
     @State private var isShowingCalendarPicker = false
@@ -342,6 +361,7 @@ struct MeetingDetailView: View {
             glossarySuggestion = nil
             segmentAssignmentOpenID = nil
             expandedRawASRSegmentIDs.removeAll()
+            previewedSpeakerSuggestion = nil
             isMeetingTitleFocused = false
             activeTab = .transcript
             #if canImport(AppKit)
@@ -376,6 +396,12 @@ struct MeetingDetailView: View {
             Button("Cancel", role: .cancel, action: onCancelSummaryReplacement)
         } message: {
             Text("Generating a new summary will replace the summary currently stored for this meeting.")
+        }
+        .sheet(item: $previewedSpeakerSuggestion) { suggestion in
+            SpeakerSuggestionPreviewWindow(
+                meeting: meeting,
+                suggestion: suggestion
+            )
         }
         #if canImport(AppKit)
         .background(WindowReader(window: $hostWindow).frame(width: 0, height: 0))
@@ -710,6 +736,10 @@ struct MeetingDetailView: View {
                 .tracking(0.6)
                 .foregroundStyle(QMTheme.muted)
 
+            if let suggestion = speakerSuggestion(for: speakerID, in: speakerSuggestions) {
+                speakerSuggestionCard(suggestion)
+            }
+
             TextField("Speaker name", text: $renameValue)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
@@ -753,6 +783,61 @@ struct MeetingDetailView: View {
         .padding(13)
         .frame(width: 264)
         .background(QMTheme.card)
+    }
+
+    private func speakerSuggestionCard(_ suggestion: SpeakerIdentitySuggestion) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(QMTheme.sage)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Suggested: \(suggestion.proposedName)")
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                        .lineLimit(2)
+                    Text("\(suggestion.reason) · \(speakerSuggestionConfidenceText(suggestion.confidence))")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(QMTheme.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    previewedSpeakerSuggestion = suggestion
+                } label: {
+                    Label("Preview", systemImage: "photo")
+                }
+                .buttonStyle(.borderless)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    onDismissSpeakerSuggestion(suggestion)
+                    renameOpenSegmentID = nil
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+                .help("Dismiss suggestion")
+
+                Button {
+                    onAcceptSpeakerSuggestion(suggestion)
+                    renameOpenSegmentID = nil
+                } label: {
+                    Image(systemName: "checkmark")
+                }
+                .buttonStyle(.borderless)
+                .help("Accept suggestion")
+            }
+        }
+        .padding(10)
+        .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(QMTheme.cardBorder, lineWidth: 1))
     }
 
     private func assignmentPopover(segmentID: UUID) -> some View {
@@ -1897,6 +1982,61 @@ private struct ShimmerBar: View {
                 }
         }
     }
+}
+
+private struct SpeakerSuggestionPreviewWindow: View {
+    let meeting: Meeting
+    let suggestion: SpeakerIdentitySuggestion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(suggestion.proposedName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(QMTheme.ink)
+
+            Text("\(suggestion.reason) · \(speakerSuggestionConfidenceText(suggestion.confidence))")
+                .font(.system(size: 12))
+                .foregroundStyle(QMTheme.secondary)
+
+            previewContent
+        }
+        .padding(16)
+        .frame(width: 560)
+        .background(QMTheme.detailBackground)
+    }
+
+    @ViewBuilder
+    private var previewContent: some View {
+        #if canImport(AppKit)
+        if let image = evidenceImage {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 520, height: 320)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else {
+            unavailablePreview
+        }
+        #else
+        unavailablePreview
+        #endif
+    }
+
+    private var unavailablePreview: some View {
+        Text("Screenshot is unavailable.")
+            .font(.system(size: 13))
+            .foregroundStyle(QMTheme.secondary)
+            .frame(width: 520, height: 160)
+            .background(QMTheme.chip, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    #if canImport(AppKit)
+    private var evidenceImage: NSImage? {
+        let meetingFolderURL = URL(fileURLWithPath: meeting.audioFilePath)
+            .deletingLastPathComponent()
+        return NSImage(contentsOf: meetingFolderURL.appendingPathComponent(suggestion.evidenceImageRelativePath))
+    }
+    #endif
 }
 
 /// The animated sage bars shown while a recording is live.

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import QuickMeeting
 
@@ -65,5 +66,30 @@ struct MeetingDetailViewSpeakerIdentityTests {
     @Test
     func mergedTranscriptTextJoinsWithOneNewline() {
         #expect(mergedTranscriptText(previous: "First\n", current: "\nSecond") == "First\nSecond")
+    }
+
+    @Test
+    func suggestionForSpeakerReturnsPendingSuggestionForSpeakerID() {
+        let suggestion = SpeakerIdentitySuggestion(
+            meetingID: UUID(),
+            speakerID: "speaker-1",
+            proposedName: "Masha",
+            confidence: .high,
+            reason: "Seen in active tile",
+            evidenceImageRelativePath: "screen-observations/0001.jpg",
+            evidenceThumbnailRelativePath: nil,
+            observationID: UUID(),
+            capturedAtOffset: 2
+        )
+
+        #expect(speakerSuggestion(for: "speaker-1", in: [suggestion]) == suggestion)
+        #expect(speakerSuggestion(for: "speaker-2", in: [suggestion]) == nil)
+    }
+
+    @Test
+    func confidenceLabelIsHumanReadable() {
+        #expect(speakerSuggestionConfidenceText(.high) == "High")
+        #expect(speakerSuggestionConfidenceText(.medium) == "Medium")
+        #expect(speakerSuggestionConfidenceText(.low) == "Low")
     }
 }

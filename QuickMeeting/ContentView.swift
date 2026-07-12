@@ -128,6 +128,24 @@ struct ContentView: View {
                         onSelectCalendarEvent: { event in
                             appViewModel.selectCalendarEvent(event, for: selectedMeeting)
                         },
+                        speakerSuggestions: appViewModel.pendingSpeakerSuggestions(for: selectedMeeting.id),
+                        onAcceptSpeakerSuggestion: { suggestion in
+                            Task {
+                                do {
+                                    try await appViewModel.renameSpeaker(
+                                        meetingID: selectedMeeting.id,
+                                        speakerID: suggestion.speakerID,
+                                        displayName: suggestion.proposedName
+                                    )
+                                    appViewModel.acceptSpeakerSuggestion(suggestion)
+                                } catch {
+                                    // `renameSpeaker` publishes the user-facing error.
+                                }
+                            }
+                        },
+                        onDismissSpeakerSuggestion: { suggestion in
+                            appViewModel.dismissSpeakerSuggestion(suggestion)
+                        },
                         isShowingSummaryReplacementConfirmation: appViewModel.summaryConfirmationMeetingID == selectedMeeting.id,
                         isSummarizingMeeting: appViewModel.summarizingMeetingID == selectedMeeting.id,
                         summaryErrorMessage: appViewModel.summaryErrorMessage(forMeeting: selectedMeeting.id)
