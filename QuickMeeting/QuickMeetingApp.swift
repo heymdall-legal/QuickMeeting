@@ -27,6 +27,8 @@ struct QuickMeetingApp: App {
             PersistedTranscriptSegment.self,
             PersistedKnownSpeaker.self,
             PersistedKnownSpeakerCentroid.self,
+            PersistedScreenObservation.self,
+            PersistedSpeakerIdentitySuggestion.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
