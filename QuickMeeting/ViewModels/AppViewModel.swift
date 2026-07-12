@@ -43,6 +43,7 @@ final class AppViewModel: ObservableObject {
     private let recordingPermissions: any RecordingPermissions
     private let calendarIntegration: any CalendarIntegration
     private let speakerSuggestionService: (any SpeakerSuggestionRecomputing)?
+    private let screenObservationCapturer: (any MeetingScreenObservationCapturing)?
     private let dateProvider: () -> Date
     private let meetingIDProvider: () -> UUID
     private let meetingTitleFormatter: DateFormatter
@@ -64,6 +65,7 @@ final class AppViewModel: ObservableObject {
         knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)? = nil,
         calendarIntegration: (any CalendarIntegration)? = nil,
         speakerSuggestionService: (any SpeakerSuggestionRecomputing)? = nil,
+        screenObservationCapturer: (any MeetingScreenObservationCapturing)? = nil,
         dateProvider: @escaping () -> Date = Date.init,
         meetingIDProvider: @escaping () -> UUID = UUID.init,
         meetingTitleFormatter: DateFormatter = AppViewModel.makeMeetingTitleFormatter()
@@ -80,6 +82,7 @@ final class AppViewModel: ObservableObject {
         self.knownSpeakerEnrollmentService = knownSpeakerEnrollmentService
         self.calendarIntegration = calendarIntegration ?? NoopCalendarIntegration()
         self.speakerSuggestionService = speakerSuggestionService
+        self.screenObservationCapturer = screenObservationCapturer
         self.dateProvider = dateProvider
         self.meetingIDProvider = meetingIDProvider
         self.meetingTitleFormatter = meetingTitleFormatter
@@ -135,6 +138,11 @@ final class AppViewModel: ObservableObject {
                 meeting: meeting,
                 outputURL: artifacts.audioFileURL
             )
+            await screenObservationCapturer?.start(
+                meetingID: meetingID,
+                meetingFolderURL: artifacts.meetingFolderURL,
+                startedAt: startedAt
+            )
 
             recordingState = .recording(meetingID: meetingID)
             recordingStartedAt = dateProvider()
@@ -146,6 +154,7 @@ final class AppViewModel: ObservableObject {
             } catch {
                 // Best-effort teardown so a failed start cannot leave partial recorder state behind.
             }
+            await screenObservationCapturer?.stop()
             let rollbackFailureMessage = rollbackFailedRecordingStart(
                 meeting: createdMeeting,
                 artifacts: createdArtifacts
@@ -167,6 +176,7 @@ final class AppViewModel: ObservableObject {
 
         do {
             try await recordingService.stopRecording()
+            await screenObservationCapturer?.stop()
             try meetingStore.finishRecording(
                 meetingID: meetingID,
                 endedAt: dateProvider()

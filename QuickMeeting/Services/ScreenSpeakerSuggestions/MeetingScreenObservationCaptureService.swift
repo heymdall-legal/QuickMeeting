@@ -18,6 +18,33 @@ nonisolated protocol ScreenSnapshotRecording: Sendable {
     ) async throws -> ScreenObservation?
 }
 
+@MainActor
+protocol MeetingScreenObservationCapturing: AnyObject {
+    func start(meetingID: UUID, meetingFolderURL: URL, startedAt: Date) async
+    func stop() async
+}
+
+@MainActor
+final class MeetingScreenObservationCaptureController: MeetingScreenObservationCapturing {
+    private let service: MeetingScreenObservationCaptureService
+
+    init(service: MeetingScreenObservationCaptureService) {
+        self.service = service
+    }
+
+    func start(meetingID: UUID, meetingFolderURL: URL, startedAt: Date) async {
+        await service.start(
+            meetingID: meetingID,
+            meetingFolderURL: meetingFolderURL,
+            startedAt: startedAt
+        )
+    }
+
+    func stop() async {
+        await service.stop()
+    }
+}
+
 actor MeetingScreenObservationCaptureService {
     private let recorder: any ScreenSnapshotRecording
     private let observationSink: any ScreenObservationSinking

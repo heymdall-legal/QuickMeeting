@@ -143,6 +143,25 @@ struct AppViewModelTests {
     }
 
     @Test
+    func startAndStopRecordingControlScreenObservationCapture() async throws {
+        let captureService = StubMeetingScreenObservationCapturer()
+        let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
+        let harness = try AppViewModelHarness(
+            screenObservationCapturer: captureService,
+            dateProvider: { startedAt }
+        )
+
+        await harness.viewModel.startRecording()
+        await harness.viewModel.stopRecording()
+
+        let meetingID = try #require(captureService.started.first?.meetingID)
+        #expect(captureService.started.map(\.meetingID) == [meetingID])
+        #expect(captureService.started.first?.startedAt == startedAt)
+        #expect(captureService.started.first?.meetingFolderURL.lastPathComponent == meetingID.uuidString)
+        #expect(captureService.stoppedCount == 1)
+    }
+
+    @Test
     func generateSummaryWithoutExistingSummarySavesResult() async throws {
         let harness = try AppViewModelHarness()
         let meeting = try harness.createCompletedMeeting(summaryText: nil)
@@ -370,6 +389,7 @@ private struct AppViewModelHarness {
         calendarIntegration: any CalendarIntegration = NoopCalendarIntegration(),
         recordingPermissions: any RecordingPermissions = GrantedRecordingPermissions(),
         speakerSuggestionRecomputeService: (any SpeakerSuggestionRecomputing)? = nil,
+        screenObservationCapturer: (any MeetingScreenObservationCapturing)? = nil,
         dateProvider: @escaping () -> Date = Date.init
     ) throws {
         let schema = Schema([
@@ -404,6 +424,7 @@ private struct AppViewModelHarness {
             knownSpeakerEnrollmentService: enrollmentService,
             calendarIntegration: calendarIntegration,
             speakerSuggestionService: speakerSuggestionRecomputeService,
+            screenObservationCapturer: screenObservationCapturer,
             dateProvider: dateProvider
         )
     }
@@ -542,6 +563,32 @@ private final class StubSpeakerSuggestionRecomputeService: SpeakerSuggestionReco
 
     func dismissSuggestion(id: UUID) {
         dismissed.append(id)
+    }
+}
+
+@MainActor
+private final class StubMeetingScreenObservationCapturer: MeetingScreenObservationCapturing {
+    struct StartCall: Equatable {
+        let meetingID: UUID
+        let meetingFolderURL: URL
+        let startedAt: Date
+    }
+
+    private(set) var started = [StartCall]()
+    private(set) var stoppedCount = 0
+
+    func start(meetingID: UUID, meetingFolderURL: URL, startedAt: Date) async {
+        started.append(
+            StartCall(
+                meetingID: meetingID,
+                meetingFolderURL: meetingFolderURL,
+                startedAt: startedAt
+            )
+        )
+    }
+
+    func stop() async {
+        stoppedCount += 1
     }
 }
 

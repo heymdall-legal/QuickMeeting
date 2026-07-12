@@ -75,6 +75,21 @@ struct QuickMeetingApp: App {
                 meetingStore: meetingStore,
                 observationStore: screenObservationStore
             )
+            let screenSnapshotRecorder = NativeScreenSnapshotRecorder(
+                meetingFileStore: meetingFileStore,
+                attendeeNamesProvider: { meetingID in
+                    await MainActor.run {
+                        (try? meetingStore.fetchMeeting(id: meetingID).attendeeNames) ?? []
+                    }
+                }
+            )
+            let screenObservationCaptureService = MeetingScreenObservationCaptureService(
+                recorder: screenSnapshotRecorder,
+                observationSink: ScreenObservationStoreSink(store: screenObservationStore)
+            )
+            let screenObservationCaptureController = MeetingScreenObservationCaptureController(
+                service: screenObservationCaptureService
+            )
             let autoRecordingSettingsStore = AutoRecordingSettingsStore()
             let meetingSummaryService = MeetingSummaryService(
                 meetingStore: meetingStore,
@@ -94,7 +109,8 @@ struct QuickMeetingApp: App {
                 meetingTranscriptStore: meetingTranscriptStore,
                 knownSpeakerEnrollmentService: knownSpeakerEnrollmentService,
                 calendarIntegration: calendarIntegration,
-                speakerSuggestionService: speakerSuggestionService
+                speakerSuggestionService: speakerSuggestionService,
+                screenObservationCapturer: screenObservationCaptureController
             )
             let autoRecordingSettings = autoRecordingSettingsStore.load()
             let autoRecordingCoordinator = AutoRecordingCoordinator(
