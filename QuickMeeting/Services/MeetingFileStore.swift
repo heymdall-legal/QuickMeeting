@@ -40,6 +40,32 @@ struct MeetingFileStore {
         )
     }
 
+    func screenObservationsDirectory(forMeetingFolder meetingFolderURL: URL) throws -> URL {
+        let directory = meetingFolderURL
+            .standardizedFileURL
+            .appendingPathComponent("screen-observations", isDirectory: true)
+
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+
+        return directory
+    }
+
+    func relativePath(for fileURL: URL, inMeetingFolder meetingFolderURL: URL) throws -> String {
+        let normalizedFileURL = fileURL.standardizedFileURL
+        let normalizedMeetingFolderURL = meetingFolderURL.standardizedFileURL
+
+        guard Self.isFileURL(normalizedFileURL, inside: normalizedMeetingFolderURL) else {
+            throw MeetingStoreError.audioFileOutsideRecordingFolder
+        }
+
+        let folderComponents = normalizedMeetingFolderURL.pathComponents
+        let fileComponents = normalizedFileURL.pathComponents
+        return fileComponents.dropFirst(folderComponents.count).joined(separator: "/")
+    }
+
     func deleteArtifacts(for meeting: Meeting) throws {
         let audioFileURL = URL(fileURLWithPath: meeting.audioFilePath).standardizedFileURL
         let meetingFolderURL = audioFileURL.deletingLastPathComponent().standardizedFileURL

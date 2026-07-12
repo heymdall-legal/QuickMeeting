@@ -54,4 +54,49 @@ struct MeetingFileStoreTests {
         #expect(!fileManager.fileExists(atPath: artifacts.audioFileURL.path))
         #expect(!fileManager.fileExists(atPath: artifacts.meetingFolderURL.path))
     }
+
+    @Test
+    func createsScreenObservationDirectoryInsideMeetingFolder() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = MeetingFileStore(fileManager: .default, rootURL: rootURL)
+        let meetingID = UUID()
+        let artifacts = try store.createArtifacts(for: meetingID, startedAt: Date())
+
+        let directory = try store.screenObservationsDirectory(forMeetingFolder: artifacts.meetingFolderURL)
+
+        #expect(directory.lastPathComponent == "screen-observations")
+        #expect(FileManager.default.fileExists(atPath: directory.path))
+        #expect(directory.path.hasPrefix(artifacts.meetingFolderURL.path))
+    }
+
+    @Test
+    func relativePathForScreenObservationStaysInsideMeetingFolder() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = MeetingFileStore(fileManager: .default, rootURL: rootURL)
+        let artifacts = try store.createArtifacts(for: UUID(), startedAt: Date())
+        let imageURL = artifacts.meetingFolderURL
+            .appendingPathComponent("screen-observations", isDirectory: true)
+            .appendingPathComponent("0001.jpg")
+
+        let relativePath = try store.relativePath(for: imageURL, inMeetingFolder: artifacts.meetingFolderURL)
+
+        #expect(relativePath == "screen-observations/0001.jpg")
+    }
+
+    @Test
+    func relativePathRejectsFileOutsideMeetingFolder() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = MeetingFileStore(fileManager: .default, rootURL: rootURL)
+        let artifacts = try store.createArtifacts(for: UUID(), startedAt: Date())
+        let outsideURL = rootURL
+            .appendingPathComponent("outside", isDirectory: true)
+            .appendingPathComponent("0001.jpg")
+
+        #expect(throws: MeetingStoreError.audioFileOutsideRecordingFolder) {
+            try store.relativePath(for: outsideURL, inMeetingFolder: artifacts.meetingFolderURL)
+        }
+    }
 }
