@@ -917,7 +917,14 @@ private final class CapturedAudioMixer {
         presentationTimeSeconds: Double,
         source: CapturedAudioSource
     ) throws {
+        guard buffer.frameLength > 0 else {
+            return
+        }
+
         let canonicalBuffer = try converter.canonicalBuffer(from: buffer)
+        guard canonicalBuffer.frameLength > 0 else {
+            return
+        }
 
         if shouldPassthroughSoloSource(for: source) {
             try writer.append(canonicalBuffer)
@@ -925,7 +932,10 @@ private final class CapturedAudioMixer {
         }
 
         let timestampedBuffer = TimestampedPCMBuffer(
-            presentationTimeSeconds: presentationTimeSeconds,
+            presentationTimeSeconds: resolvedPresentationTimeSeconds(
+                presentationTimeSeconds,
+                source: source
+            ),
             buffer: canonicalBuffer
         )
         enqueue(timestampedBuffer, for: source)
@@ -944,6 +954,22 @@ private final class CapturedAudioMixer {
         case .microphone:
             capturesMicrophone && !capturesSystemAudio
         }
+    }
+
+    private func resolvedPresentationTimeSeconds(
+        _ presentationTimeSeconds: Double,
+        source: CapturedAudioSource
+    ) -> Double {
+        guard presentationTimeSeconds.isFinite else {
+            switch source {
+            case .system:
+                return latestSystemEndTimeSeconds ?? latestMicrophoneEndTimeSeconds ?? 0
+            case .microphone:
+                return latestMicrophoneEndTimeSeconds ?? latestSystemEndTimeSeconds ?? 0
+            }
+        }
+
+        return presentationTimeSeconds
     }
 
     private func enqueue(
@@ -968,85 +994,90 @@ private final class CapturedAudioMixer {
 
     private func flushReadyBuffers(force: Bool) throws {
         while true {
-            let systemHead = systemQueue.first
-            let microphoneHead = microphoneQueue.first
-
-            switch (systemHead, microphoneHead) {
-            case (nil, nil):
+            let progressBeforeFlush = queueProgress
+            guard try flushNextReadyBuffer(force: force) else {
                 return
-            case let (systemHead?, nil):
-                guard force || canFlushSolo(
-                    systemHead,
-                    otherLatestEndTimeSeconds: latestMicrophoneEndTimeSeconds
-                ) else {
-                    return
-                }
+            }
 
-                try writer.append(systemHead.buffer)
-                systemQueue.removeFirst()
-            case let (nil, microphoneHead?):
-                guard force || canFlushSolo(
-                    microphoneHead,
-                    otherLatestEndTimeSeconds: latestSystemEndTimeSeconds
-                ) else {
-                    return
-                }
+            if queueProgress == progressBeforeFlush {
+                try flushOldestBufferWithoutMixing()
+            }
+        }
+    }
 
-                try writer.append(microphoneHead.buffer)
-                microphoneQueue.removeFirst()
-            case let (systemHead?, microphoneHead?):
-                if systemHead.presentationTimeSeconds + Self.mixAlignmentToleranceSeconds
-                    < microphoneHead.presentationTimeSeconds {
-                    let splitTime = min(microphoneHead.presentationTimeSeconds, systemHead.endTimeSeconds)
-                    let prefix = try splitPrefix(
-                        from: systemHead,
-                        until: splitTime
-                    )
+    private func flushNextReadyBuffer(force: Bool) throws -> Bool {
+        let systemHead = systemQueue.first
+        let microphoneHead = microphoneQueue.first
 
-                    if prefix.consumedAllFrames {
-                        if force || canFlushSolo(
-                            systemHead,
-                            otherLatestEndTimeSeconds: latestMicrophoneEndTimeSeconds
-                        ) {
-                            try writer.append(prefix.prefixBuffer)
-                            systemQueue.removeFirst()
-                            continue
-                        }
+        switch (systemHead, microphoneHead) {
+        case (nil, nil):
+            return false
+        case let (systemHead?, nil):
+            guard force || canFlushSolo(
+                systemHead,
+                otherLatestEndTimeSeconds: latestMicrophoneEndTimeSeconds
+            ) else {
+                return false
+            }
 
-                        return
+            try writer.append(systemHead.buffer)
+            systemQueue.removeFirst()
+        case let (nil, microphoneHead?):
+            guard force || canFlushSolo(
+                microphoneHead,
+                otherLatestEndTimeSeconds: latestSystemEndTimeSeconds
+            ) else {
+                return false
+            }
+
+            try writer.append(microphoneHead.buffer)
+            microphoneQueue.removeFirst()
+        case let (systemHead?, microphoneHead?):
+            if systemHead.presentationTimeSeconds + Self.mixAlignmentToleranceSeconds
+                < microphoneHead.presentationTimeSeconds {
+                let splitTime = min(microphoneHead.presentationTimeSeconds, systemHead.endTimeSeconds)
+                let prefix = try splitPrefix(
+                    from: systemHead,
+                    until: splitTime
+                )
+
+                if prefix.consumedAllFrames {
+                    guard force || canFlushSolo(
+                        systemHead,
+                        otherLatestEndTimeSeconds: latestMicrophoneEndTimeSeconds
+                    ) else {
+                        return false
                     }
 
+                    try writer.append(prefix.prefixBuffer)
+                    systemQueue.removeFirst()
+                } else {
                     try writer.append(prefix.prefixBuffer)
                     systemQueue[0] = prefix.remainder
-                    continue
                 }
+            } else if microphoneHead.presentationTimeSeconds + Self.mixAlignmentToleranceSeconds
+                < systemHead.presentationTimeSeconds {
+                let splitTime = min(systemHead.presentationTimeSeconds, microphoneHead.endTimeSeconds)
+                let prefix = try splitPrefix(
+                    from: microphoneHead,
+                    until: splitTime
+                )
 
-                if microphoneHead.presentationTimeSeconds + Self.mixAlignmentToleranceSeconds
-                    < systemHead.presentationTimeSeconds {
-                    let splitTime = min(systemHead.presentationTimeSeconds, microphoneHead.endTimeSeconds)
-                    let prefix = try splitPrefix(
-                        from: microphoneHead,
-                        until: splitTime
-                    )
-
-                    if prefix.consumedAllFrames {
-                        if force || canFlushSolo(
-                            microphoneHead,
-                            otherLatestEndTimeSeconds: latestSystemEndTimeSeconds
-                        ) {
-                            try writer.append(prefix.prefixBuffer)
-                            microphoneQueue.removeFirst()
-                            continue
-                        }
-
-                        return
+                if prefix.consumedAllFrames {
+                    guard force || canFlushSolo(
+                        microphoneHead,
+                        otherLatestEndTimeSeconds: latestSystemEndTimeSeconds
+                    ) else {
+                        return false
                     }
 
                     try writer.append(prefix.prefixBuffer)
+                    microphoneQueue.removeFirst()
+                } else {
+                    try writer.append(prefix.prefixBuffer)
                     microphoneQueue[0] = prefix.remainder
-                    continue
                 }
-
+            } else {
                 let overlappedFrameCount = min(
                     systemHead.buffer.frameLength,
                     microphoneHead.buffer.frameLength
@@ -1066,6 +1097,38 @@ private final class CapturedAudioMixer {
                     for: &microphoneQueue,
                     consumedFrameCount: overlappedFrameCount
                 )
+            }
+        }
+
+        return true
+    }
+
+    private var queueProgress: MixerQueueProgress {
+        MixerQueueProgress(
+            systemBufferCount: systemQueue.count,
+            systemHeadFrameCount: systemQueue.first?.buffer.frameLength,
+            microphoneBufferCount: microphoneQueue.count,
+            microphoneHeadFrameCount: microphoneQueue.first?.buffer.frameLength
+        )
+    }
+
+    private func flushOldestBufferWithoutMixing() throws {
+        switch (systemQueue.first, microphoneQueue.first) {
+        case (nil, nil):
+            return
+        case let (systemHead?, nil):
+            try writer.append(systemHead.buffer)
+            systemQueue.removeFirst()
+        case let (nil, microphoneHead?):
+            try writer.append(microphoneHead.buffer)
+            microphoneQueue.removeFirst()
+        case let (systemHead?, microphoneHead?):
+            if systemHead.presentationTimeSeconds <= microphoneHead.presentationTimeSeconds {
+                try writer.append(systemHead.buffer)
+                systemQueue.removeFirst()
+            } else {
+                try writer.append(microphoneHead.buffer)
+                microphoneQueue.removeFirst()
             }
         }
     }
@@ -1101,7 +1164,7 @@ private final class CapturedAudioMixer {
                     frameCount: timestampedBuffer.buffer.frameLength
                 ),
                 remainder: timestampedBuffer,
-                consumedAllFrames: false
+                consumedAllFrames: true
             )
         }
 
@@ -1225,6 +1288,13 @@ private final class CapturedAudioMixer {
 
         return slicedBuffer
     }
+}
+
+private struct MixerQueueProgress: Equatable {
+    let systemBufferCount: Int
+    let systemHeadFrameCount: AVAudioFrameCount?
+    let microphoneBufferCount: Int
+    let microphoneHeadFrameCount: AVAudioFrameCount?
 }
 
 private struct BufferSplitResult {
