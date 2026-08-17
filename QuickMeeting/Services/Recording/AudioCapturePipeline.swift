@@ -150,6 +150,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
 
     private let shareableContentProvider: () async throws -> CaptureTarget
     private let writerFactory: (URL) throws -> any AudioFileWriting
+    private let isolatedTrackWriterFactory: ((URL) throws -> any AudioFileWriting)?
     private let captureConfiguration: CaptureConfiguration
     private let captureStopTimeout: TimeInterval
     private let microphoneDeviceProvider: () -> MicrophoneDevice?
@@ -161,6 +162,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     init(
         shareableContentProvider: @escaping () async throws -> CaptureTarget,
         writerFactory: @escaping (URL) throws -> any AudioFileWriting,
+        isolatedTrackWriterFactory: ((URL) throws -> any AudioFileWriting)? = nil,
         captureConfiguration: CaptureConfiguration,
         captureStopTimeout: TimeInterval = 10,
         microphoneDeviceProvider: @escaping () -> MicrophoneDevice? = {
@@ -172,6 +174,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     ) {
         self.shareableContentProvider = shareableContentProvider
         self.writerFactory = writerFactory
+        self.isolatedTrackWriterFactory = isolatedTrackWriterFactory
         self.captureConfiguration = captureConfiguration
         self.captureStopTimeout = captureStopTimeout
         self.microphoneDeviceProvider = microphoneDeviceProvider
@@ -181,7 +184,8 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     convenience init() {
         self.init(
             shareableContentProvider: { try await Self.makeLiveCaptureTarget() },
-            writerFactory: { try AACM4AAudioFileWriter(outputURL: $0) },
+            writerFactory: { try LosslessM4AAudioFileWriter(outputURL: $0) },
+            isolatedTrackWriterFactory: { try LosslessM4AAudioFileWriter(outputURL: $0) },
             captureConfiguration: CaptureConfiguration(capturesMicrophone: true)
         )
     }
@@ -191,7 +195,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
             throw NativeAudioCapturePipelineError.captureAlreadyRunning
         }
 
-        let writer = try writerFactory(outputURL)
+        let writers = try makeAudioWriters(mixedPreviewURL: outputURL)
         let resolvedCaptureConfiguration = resolvedCaptureConfiguration()
         activeMicrophoneDevice = resolvedCaptureConfiguration.capturesMicrophone ? microphoneDeviceProvider() : nil
         emitDiagnostics(
@@ -205,7 +209,9 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         do {
             let target = try await shareableContentProvider()
             let createdOutputSink = CaptureOutputSink(
-                writer: writer,
+                writer: writers.mixedPreview,
+                systemWriter: writers.system,
+                microphoneWriter: writers.microphone,
                 captureConfiguration: resolvedCaptureConfiguration
             )
             outputSink = createdOutputSink
@@ -237,7 +243,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
                     error: error
                 )
             } else {
-                try? writer.finish()
+                writers.finishIgnoringErrors()
                 emitDiagnostics(
                     event: .captureStartFailed,
                     outputURL: outputURL,
@@ -247,6 +253,40 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
             }
             activeMicrophoneDevice = nil
 
+            throw error
+        }
+    }
+
+    private func makeAudioWriters(mixedPreviewURL: URL) throws -> RecordingAudioWriters {
+        let mixedPreviewWriter = try writerFactory(mixedPreviewURL)
+        guard let isolatedTrackWriterFactory else {
+            return RecordingAudioWriters(mixedPreview: mixedPreviewWriter)
+        }
+
+        let outputDirectory = mixedPreviewURL.deletingLastPathComponent()
+        var systemWriter: (any AudioFileWriting)?
+        var microphoneWriter: (any AudioFileWriting)?
+
+        do {
+            if captureConfiguration.capturesSystemAudio {
+                systemWriter = try isolatedTrackWriterFactory(
+                    outputDirectory.appendingPathComponent("system_audio.m4a")
+                )
+            }
+            if captureConfiguration.capturesMicrophone {
+                microphoneWriter = try isolatedTrackWriterFactory(
+                    outputDirectory.appendingPathComponent("microphone.m4a")
+                )
+            }
+            return RecordingAudioWriters(
+                mixedPreview: mixedPreviewWriter,
+                system: systemWriter,
+                microphone: microphoneWriter
+            )
+        } catch {
+            try? microphoneWriter?.finish()
+            try? systemWriter?.finish()
+            try? mixedPreviewWriter.finish()
             throw error
         }
     }
@@ -473,6 +513,28 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     }
 }
 
+private struct RecordingAudioWriters {
+    let mixedPreview: any NativeAudioCapturePipeline.AudioFileWriting
+    let system: (any NativeAudioCapturePipeline.AudioFileWriting)?
+    let microphone: (any NativeAudioCapturePipeline.AudioFileWriting)?
+
+    init(
+        mixedPreview: any NativeAudioCapturePipeline.AudioFileWriting,
+        system: (any NativeAudioCapturePipeline.AudioFileWriting)? = nil,
+        microphone: (any NativeAudioCapturePipeline.AudioFileWriting)? = nil
+    ) {
+        self.mixedPreview = mixedPreview
+        self.system = system
+        self.microphone = microphone
+    }
+
+    func finishIgnoringErrors() {
+        try? microphone?.finish()
+        try? system?.finish()
+        try? mixedPreview.finish()
+    }
+}
+
 struct CaptureOutputDiagnostics {
     let sampleBufferCount: Int
     let systemSampleBufferCount: Int
@@ -521,6 +583,8 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
 
     init(
         writer: any NativeAudioCapturePipeline.AudioFileWriting,
+        systemWriter: (any NativeAudioCapturePipeline.AudioFileWriting)? = nil,
+        microphoneWriter: (any NativeAudioCapturePipeline.AudioFileWriting)? = nil,
         captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration = .init()
     ) {
         let measuringWriter = MeasuringAudioFileWriter(base: writer)
@@ -528,6 +592,8 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
         self.measuringWriter = measuringWriter
         mixer = CapturedAudioMixer(
             writer: measuringWriter,
+            systemWriter: systemWriter,
+            microphoneWriter: microphoneWriter,
             capturesSystemAudio: captureConfiguration.capturesSystemAudio,
             capturesMicrophone: captureConfiguration.capturesMicrophone
         )
@@ -876,8 +942,13 @@ private final class MeasuringAudioFileWriter: NativeAudioCapturePipeline.AudioFi
 
 private final class CapturedAudioMixer {
     private static let mixAlignmentToleranceSeconds = 0.01
+    /// Equal-gain averaging guarantees 6 dB of mix headroom for two
+    /// full-scale inputs, avoiding the former hard clip at +/-1.
+    private static let previewSourceGain: Float = 0.5
 
     private let writer: any NativeAudioCapturePipeline.AudioFileWriting
+    private let systemWriter: (any NativeAudioCapturePipeline.AudioFileWriting)?
+    private let microphoneWriter: (any NativeAudioCapturePipeline.AudioFileWriting)?
     private let capturesSystemAudio: Bool
     private let capturesMicrophone: Bool
     private let converter = CanonicalAudioBufferConverter()
@@ -888,10 +959,14 @@ private final class CapturedAudioMixer {
 
     init(
         writer: any NativeAudioCapturePipeline.AudioFileWriting,
+        systemWriter: (any NativeAudioCapturePipeline.AudioFileWriting)? = nil,
+        microphoneWriter: (any NativeAudioCapturePipeline.AudioFileWriting)? = nil,
         capturesSystemAudio: Bool,
         capturesMicrophone: Bool
     ) {
         self.writer = writer
+        self.systemWriter = systemWriter
+        self.microphoneWriter = microphoneWriter
         self.capturesSystemAudio = capturesSystemAudio
         self.capturesMicrophone = capturesMicrophone
     }
@@ -927,7 +1002,7 @@ private final class CapturedAudioMixer {
         }
 
         if shouldPassthroughSoloSource(for: source) {
-            try writer.append(canonicalBuffer)
+            try appendSolo(canonicalBuffer, source: source)
             return
         }
 
@@ -943,8 +1018,35 @@ private final class CapturedAudioMixer {
     }
 
     func finish() throws {
-        try flushReadyBuffers(force: true)
-        try writer.finish()
+        var firstError: Error?
+        do {
+            try flushReadyBuffers(force: true)
+        } catch {
+            firstError = error
+        }
+
+        var finishedWriterIDs = Set<ObjectIdentifier>()
+        let writers = [microphoneWriter, systemWriter, writer]
+        for candidate in writers {
+            guard let candidate else {
+                continue
+            }
+            let writerID = ObjectIdentifier(candidate)
+            guard finishedWriterIDs.insert(writerID).inserted else {
+                continue
+            }
+            do {
+                try candidate.finish()
+            } catch where firstError == nil {
+                firstError = error
+            } catch {
+                // Preserve the first failure while still closing every track.
+            }
+        }
+
+        if let firstError {
+            throw firstError
+        }
     }
 
     private func shouldPassthroughSoloSource(for source: CapturedAudioSource) -> Bool {
@@ -1020,7 +1122,7 @@ private final class CapturedAudioMixer {
                 return false
             }
 
-            try writer.append(systemHead.buffer)
+            try appendSolo(systemHead.buffer, source: .system)
             systemQueue.removeFirst()
         case let (nil, microphoneHead?):
             guard force || canFlushSolo(
@@ -1030,7 +1132,7 @@ private final class CapturedAudioMixer {
                 return false
             }
 
-            try writer.append(microphoneHead.buffer)
+            try appendSolo(microphoneHead.buffer, source: .microphone)
             microphoneQueue.removeFirst()
         case let (systemHead?, microphoneHead?):
             if systemHead.presentationTimeSeconds + Self.mixAlignmentToleranceSeconds
@@ -1049,10 +1151,10 @@ private final class CapturedAudioMixer {
                         return false
                     }
 
-                    try writer.append(prefix.prefixBuffer)
+                    try appendSolo(prefix.prefixBuffer, source: .system)
                     systemQueue.removeFirst()
                 } else {
-                    try writer.append(prefix.prefixBuffer)
+                    try appendSolo(prefix.prefixBuffer, source: .system)
                     systemQueue[0] = prefix.remainder
                 }
             } else if microphoneHead.presentationTimeSeconds + Self.mixAlignmentToleranceSeconds
@@ -1071,10 +1173,10 @@ private final class CapturedAudioMixer {
                         return false
                     }
 
-                    try writer.append(prefix.prefixBuffer)
+                    try appendSolo(prefix.prefixBuffer, source: .microphone)
                     microphoneQueue.removeFirst()
                 } else {
-                    try writer.append(prefix.prefixBuffer)
+                    try appendSolo(prefix.prefixBuffer, source: .microphone)
                     microphoneQueue[0] = prefix.remainder
                 }
             } else {
@@ -1082,12 +1184,11 @@ private final class CapturedAudioMixer {
                     systemHead.buffer.frameLength,
                     microphoneHead.buffer.frameLength
                 )
-                let mixedBuffer = try mix(
+                try appendOverlap(
                     systemBuffer: systemHead.buffer,
                     microphoneBuffer: microphoneHead.buffer,
                     frameCount: overlappedFrameCount
                 )
-                try writer.append(mixedBuffer)
 
                 updateQueueAfterConsumingFrames(
                     for: &systemQueue,
@@ -1117,17 +1218,17 @@ private final class CapturedAudioMixer {
         case (nil, nil):
             return
         case let (systemHead?, nil):
-            try writer.append(systemHead.buffer)
+            try appendSolo(systemHead.buffer, source: .system)
             systemQueue.removeFirst()
         case let (nil, microphoneHead?):
-            try writer.append(microphoneHead.buffer)
+            try appendSolo(microphoneHead.buffer, source: .microphone)
             microphoneQueue.removeFirst()
         case let (systemHead?, microphoneHead?):
             if systemHead.presentationTimeSeconds <= microphoneHead.presentationTimeSeconds {
-                try writer.append(systemHead.buffer)
+                try appendSolo(systemHead.buffer, source: .system)
                 systemQueue.removeFirst()
             } else {
-                try writer.append(microphoneHead.buffer)
+                try appendSolo(microphoneHead.buffer, source: .microphone)
                 microphoneQueue.removeFirst()
             }
         }
@@ -1229,6 +1330,102 @@ private final class CapturedAudioMixer {
         }
     }
 
+    private func appendSolo(
+        _ buffer: AVAudioPCMBuffer,
+        source: CapturedAudioSource
+    ) throws {
+        switch source {
+        case .system:
+            try systemWriter?.append(buffer)
+            if let microphoneWriter {
+                try microphoneWriter.append(try silentBuffer(frameCount: buffer.frameLength))
+            }
+        case .microphone:
+            if let systemWriter {
+                try systemWriter.append(try silentBuffer(frameCount: buffer.frameLength))
+            }
+            try microphoneWriter?.append(buffer)
+        }
+
+        let previewBuffer: AVAudioPCMBuffer
+        if capturesSystemAudio && capturesMicrophone {
+            previewBuffer = try scaledBuffer(buffer, gain: Self.previewSourceGain)
+        } else {
+            previewBuffer = buffer
+        }
+        try writer.append(previewBuffer)
+    }
+
+    private func appendOverlap(
+        systemBuffer: AVAudioPCMBuffer,
+        microphoneBuffer: AVAudioPCMBuffer,
+        frameCount: AVAudioFrameCount
+    ) throws {
+        let systemPrefix = try sliceBuffer(
+            systemBuffer,
+            offsetFrames: 0,
+            frameCount: frameCount
+        )
+        let microphonePrefix = try sliceBuffer(
+            microphoneBuffer,
+            offsetFrames: 0,
+            frameCount: frameCount
+        )
+
+        try systemWriter?.append(systemPrefix)
+        try microphoneWriter?.append(microphonePrefix)
+        try writer.append(
+            try mix(
+                systemBuffer: systemPrefix,
+                microphoneBuffer: microphonePrefix,
+                frameCount: frameCount
+            )
+        )
+    }
+
+    private func silentBuffer(frameCount: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: CanonicalAudioBufferConverter.canonicalFormat,
+            frameCapacity: frameCount
+        ) else {
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+        buffer.frameLength = frameCount
+        guard let channelData = buffer.floatChannelData else {
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+
+        for channelIndex in 0 ..< Int(buffer.format.channelCount) {
+            channelData[channelIndex].initialize(repeating: 0, count: Int(frameCount))
+        }
+        return buffer
+    }
+
+    private func scaledBuffer(
+        _ source: AVAudioPCMBuffer,
+        gain: Float
+    ) throws -> AVAudioPCMBuffer {
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: CanonicalAudioBufferConverter.canonicalFormat,
+            frameCapacity: source.frameLength
+        ) else {
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+        buffer.frameLength = source.frameLength
+        guard let sourceChannelData = source.floatChannelData,
+              let channelData = buffer.floatChannelData else {
+            throw NativeAudioCapturePipelineError.audioConversionFailed
+        }
+
+        for channelIndex in 0 ..< Int(buffer.format.channelCount) {
+            for frameIndex in 0 ..< Int(buffer.frameLength) {
+                channelData[channelIndex][frameIndex] =
+                    sourceChannelData[channelIndex][frameIndex] * gain
+            }
+        }
+        return buffer
+    }
+
     private func mix(
         systemBuffer: AVAudioPCMBuffer,
         microphoneBuffer: AVAudioPCMBuffer,
@@ -1251,9 +1448,9 @@ private final class CapturedAudioMixer {
 
         for channelIndex in 0 ..< Int(CanonicalAudioBufferConverter.canonicalFormat.channelCount) {
             for frameIndex in 0 ..< Int(frameCount) {
-                let mixedSample = systemChannelData[channelIndex][frameIndex]
-                    + microphoneChannelData[channelIndex][frameIndex]
-                mixedChannelData[channelIndex][frameIndex] = min(max(mixedSample, -1), 1)
+                mixedChannelData[channelIndex][frameIndex] =
+                    systemChannelData[channelIndex][frameIndex] * Self.previewSourceGain
+                    + microphoneChannelData[channelIndex][frameIndex] * Self.previewSourceGain
             }
         }
 
@@ -1384,10 +1581,10 @@ private final class ScreenCaptureAudioStreamSession: NativeAudioCapturePipeline.
     }
 }
 
-final class AACM4AAudioFileWriter: NativeAudioCapturePipeline.AudioFileWriting {
+final class LosslessM4AAudioFileWriter: NativeAudioCapturePipeline.AudioFileWriting {
     private static let outputSettings: [String: Any] = [
-        AVFormatIDKey: kAudioFormatMPEG4AAC,
-        AVEncoderBitRateKey: 96_000,
+        AVFormatIDKey: kAudioFormatAppleLossless,
+        AVEncoderBitDepthHintKey: 24,
         AVNumberOfChannelsKey: 2,
         AVSampleRateKey: 48_000
     ]

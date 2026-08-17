@@ -77,7 +77,88 @@ struct NativeAudioCapturePipelineTests {
 
         #expect(writer.finishCallCount == 1)
         #expect(writer.appendedFrameLengths == [2])
-        #expect(writer.firstChannelFirstSamples == [0.75])
+        #expect(writer.firstChannelFirstSamples == [0.375])
+    }
+
+    @Test
+    func captureOutputSinkPreservesIsolatedTracksAndMixesWithHeadroom() async throws {
+        let previewWriter = SpyAudioFileWriter()
+        let systemWriter = SpyAudioFileWriter()
+        let microphoneWriter = SpyAudioFileWriter()
+        let sink = CaptureOutputSink(
+            writer: previewWriter,
+            systemWriter: systemWriter,
+            microphoneWriter: microphoneWriter,
+            captureConfiguration: .init(capturesMicrophone: true)
+        )
+
+        try sink.appendForTesting(
+            makePCMBuffer(samples: [0.9, 0.9]),
+            presentationTimeSeconds: 0,
+            outputType: .audio
+        )
+        try sink.appendForTesting(
+            makePCMBuffer(samples: [0.9, 0.9]),
+            presentationTimeSeconds: 0,
+            outputType: .microphone
+        )
+
+        _ = try await sink.finish()
+
+        #expect(systemWriter.firstChannelFirstSamples == [0.9])
+        #expect(microphoneWriter.firstChannelFirstSamples == [0.9])
+        #expect(previewWriter.firstChannelFirstSamples == [0.9])
+        #expect(previewWriter.firstChannelFirstSamples.allSatisfy { abs($0) <= 1 })
+        #expect(systemWriter.finishCallCount == 1)
+        #expect(microphoneWriter.finishCallCount == 1)
+    }
+
+    @Test
+    func isolatedTracksRemainTimelineAlignedAcrossSoloRegions() async throws {
+        let previewWriter = SpyAudioFileWriter()
+        let systemWriter = SpyAudioFileWriter()
+        let microphoneWriter = SpyAudioFileWriter()
+        let sink = CaptureOutputSink(
+            writer: previewWriter,
+            systemWriter: systemWriter,
+            microphoneWriter: microphoneWriter,
+            captureConfiguration: .init(capturesMicrophone: true)
+        )
+
+        try sink.appendForTesting(
+            makePCMBuffer(samples: [0.8, 0.8]),
+            presentationTimeSeconds: 0,
+            outputType: .audio
+        )
+        try sink.appendForTesting(
+            makePCMBuffer(samples: [0.2, 0.2]),
+            presentationTimeSeconds: 1,
+            outputType: .microphone
+        )
+
+        _ = try await sink.finish()
+
+        #expect(systemWriter.firstChannelFirstSamples == [0.8, 0])
+        #expect(microphoneWriter.firstChannelFirstSamples == [0, 0.2])
+        #expect(previewWriter.firstChannelFirstSamples == [0.4, 0.1])
+        #expect(systemWriter.appendedFrameLengths == microphoneWriter.appendedFrameLengths)
+    }
+
+    @Test
+    func losslessM4AWriterStoresCanonicalAudioAsAppleLossless() throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("quickmeeting-lossless-\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let writer = try LosslessM4AAudioFileWriter(outputURL: outputURL)
+        try writer.append(makePCMBuffer(samples: [0.25, -0.25]))
+        try writer.finish()
+
+        let audioFile = try AVAudioFile(forReading: outputURL)
+        let streamDescription = audioFile.fileFormat.streamDescription
+        #expect(streamDescription.pointee.mFormatID == kAudioFormatAppleLossless)
+        #expect(audioFile.processingFormat.sampleRate == 48_000)
+        #expect(audioFile.processingFormat.channelCount == 2)
     }
 
     private func makePCMBuffer(samples: [Float]) throws -> AVAudioPCMBuffer {
