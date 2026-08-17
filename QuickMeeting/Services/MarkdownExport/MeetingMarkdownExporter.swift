@@ -13,11 +13,14 @@ protocol MeetingMarkdownExporting {
 
 enum MeetingMarkdownExporterError: LocalizedError, Equatable {
     case exportDirectoryMissing
+    case exportDirectoryAccessUnavailable
 
     var errorDescription: String? {
         switch self {
         case .exportDirectoryMissing:
             return "Choose a Markdown export folder in Settings before exporting meeting notes."
+        case .exportDirectoryAccessUnavailable:
+            return "QuickMeeting no longer has access to the Markdown export folder. Choose the folder again in Settings."
         }
     }
 }
@@ -26,15 +29,21 @@ struct ConfiguredMeetingMarkdownExporter: MeetingMarkdownExporting {
     private let settingsStore: any MeetingMarkdownExportSettingsStoring
     private let fileManager: FileManager
     private let dateProvider: () -> Date
+    private let startAccessingSecurityScopedResource: (URL) -> Bool
+    private let stopAccessingSecurityScopedResource: (URL) -> Void
 
     init(
         settingsStore: any MeetingMarkdownExportSettingsStoring,
         fileManager: FileManager = .default,
-        dateProvider: @escaping () -> Date = Date.init
+        dateProvider: @escaping () -> Date = Date.init,
+        startAccessingSecurityScopedResource: @escaping (URL) -> Bool = { $0.startAccessingSecurityScopedResource() },
+        stopAccessingSecurityScopedResource: @escaping (URL) -> Void = { $0.stopAccessingSecurityScopedResource() }
     ) {
         self.settingsStore = settingsStore
         self.fileManager = fileManager
         self.dateProvider = dateProvider
+        self.startAccessingSecurityScopedResource = startAccessingSecurityScopedResource
+        self.stopAccessingSecurityScopedResource = stopAccessingSecurityScopedResource
     }
 
     @discardableResult
@@ -68,12 +77,10 @@ struct ConfiguredMeetingMarkdownExporter: MeetingMarkdownExporting {
             throw MeetingMarkdownExporterError.exportDirectoryMissing
         }
 
-        let didStartAccessing = directoryURL.startAccessingSecurityScopedResource()
-        defer {
-            if didStartAccessing {
-                directoryURL.stopAccessingSecurityScopedResource()
-            }
+        guard startAccessingSecurityScopedResource(directoryURL) else {
+            throw MeetingMarkdownExporterError.exportDirectoryAccessUnavailable
         }
+        defer { stopAccessingSecurityScopedResource(directoryURL) }
 
         let exporter = MeetingMarkdownExporter(
             fileManager: fileManager,
