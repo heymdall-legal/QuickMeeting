@@ -209,6 +209,22 @@ struct QMSettingsSheet: View {
                     set: { transcriptionViewModel.setLLMCorrectionEnabled($0) }
                 ))
             }
+
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Automatically transcribe after recording")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Starts transcription when a recording ends.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                QMToggle(isOn: Binding(
+                    get: { transcriptionViewModel.isAutomaticTranscriptionEnabled },
+                    set: { transcriptionViewModel.setAutomaticTranscriptionEnabled($0) }
+                ))
+            }
         }
     }
 

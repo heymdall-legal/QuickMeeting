@@ -13,6 +13,7 @@ final class TranscriptionSettingsViewModel: ObservableObject {
     @Published private(set) var languageCode: String?
     @Published private(set) var ctcMode: TranscriptionCTCMode
     @Published private(set) var isLLMCorrectionEnabled: Bool
+    @Published private(set) var isAutomaticTranscriptionEnabled: Bool
     @Published private(set) var glossaryTerms: [TranscriptionGlossaryTerm]
     @Published private(set) var isGlossaryLoaded: Bool
 
@@ -29,6 +30,7 @@ final class TranscriptionSettingsViewModel: ObservableObject {
         languageCode = options.languageCode
         ctcMode = options.ctcMode
         isLLMCorrectionEnabled = options.isLLMCorrectionEnabled
+        isAutomaticTranscriptionEnabled = options.isAutomaticTranscriptionEnabled
         glossaryTerms = []
         isGlossaryLoaded = false
     }
@@ -50,6 +52,11 @@ final class TranscriptionSettingsViewModel: ObservableObject {
 
     func setLLMCorrectionEnabled(_ isEnabled: Bool) {
         isLLMCorrectionEnabled = isEnabled
+        savePipelineOptions()
+    }
+
+    func setAutomaticTranscriptionEnabled(_ isEnabled: Bool) {
+        isAutomaticTranscriptionEnabled = isEnabled
         savePipelineOptions()
     }
 
@@ -96,7 +103,8 @@ final class TranscriptionSettingsViewModel: ObservableObject {
             TranscriptionPipelineOptions(
                 languageCode: languageCode,
                 ctcMode: ctcMode,
-                isLLMCorrectionEnabled: isLLMCorrectionEnabled
+                isLLMCorrectionEnabled: isLLMCorrectionEnabled,
+                isAutomaticTranscriptionEnabled: isAutomaticTranscriptionEnabled
             )
         )
     }
