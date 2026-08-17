@@ -32,6 +32,92 @@ struct FluidTranscriptionServiceTests {
     }
 
     @Test
+    func transcribeUsesSeparatedTracksAndAssignsMicrophoneToConfiguredKnownSpeaker() async throws {
+        let harness = try FluidTranscriptionHarness(outcome: .success(.empty))
+        let knownSpeaker = try harness.knownSpeakerStore.findOrCreateSpeaker(
+            named: FluidTranscriptionService.defaultMicrophoneSpeakerDisplayName,
+            now: .now
+        )
+        let meeting = try harness.createRecordedMeeting()
+        try harness.createSeparatedTracks(for: meeting)
+        let microphoneSpeakerID = "microphone-\(knownSpeaker.id)"
+        harness.pipeline.replaceOutcomes([
+            .success(
+                FluidTranscriptionResult(
+                    speakers: [TranscriptSpeaker(id: "remote", displayName: "Remote Speaker")],
+                    segments: [
+                        TranscriptSegment(
+                            text: "Remote update",
+                            startTime: 5,
+                            endTime: 6,
+                            speakerID: "remote"
+                        )
+                    ]
+                )
+            ),
+            .success(
+                FluidTranscriptionResult(
+                    speakers: [
+                        TranscriptSpeaker(
+                            id: microphoneSpeakerID,
+                            displayName: knownSpeaker.displayName,
+                            labelSource: .bankMatched,
+                            matchedKnownSpeakerID: knownSpeaker.id
+                        )
+                    ],
+                    segments: [
+                        TranscriptSegment(
+                            text: "Local opening",
+                            startTime: 1,
+                            endTime: 2,
+                            speakerID: microphoneSpeakerID
+                        )
+                    ]
+                )
+            ),
+        ])
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        #expect(harness.pipeline.calls.map(\.audioFileURL.lastPathComponent) == [
+            MeetingArtifacts.systemAudioFilename,
+            MeetingArtifacts.microphoneAudioFilename,
+        ])
+        #expect(harness.pipeline.calls.first?.speakerAssignment == .diarized)
+        #expect(
+            harness.pipeline.calls.last?.speakerAssignment
+                == .fixed(
+                    transcriptSpeakerID: microphoneSpeakerID,
+                    knownSpeaker: FluidKnownSpeakerSnapshot(
+                        id: knownSpeaker.id,
+                        displayName: knownSpeaker.displayName,
+                        centroids: []
+                    )
+                )
+        )
+
+        let transcript = try #require(try harness.reloadMeeting(id: meeting.id).storedTranscript)
+        #expect(transcript.segments.map(\.text) == ["Local opening", "Remote update"])
+        #expect(transcript.segments.map(\.speakerID) == [microphoneSpeakerID, "remote"])
+        #expect(
+            transcript.speakers.first(where: { $0.id == microphoneSpeakerID })?.matchedKnownSpeakerID
+                == knownSpeaker.id
+        )
+    }
+
+    @Test
+    func transcribeFallsBackToMixedTrackWhenConfiguredMicrophoneSpeakerIsMissing() async throws {
+        let harness = try FluidTranscriptionHarness(outcome: .success(.empty))
+        let meeting = try harness.createRecordedMeeting()
+        try harness.createSeparatedTracks(for: meeting)
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        #expect(harness.pipeline.calls.map(\.audioFileURL.path) == [meeting.audioFilePath])
+        #expect(harness.pipeline.calls.first?.speakerAssignment == .diarized)
+    }
+
+    @Test
     func transcribeForwardsKnownSpeakerSnapshotsAndThresholdToPipeline() async throws {
         let harness = try FluidTranscriptionHarness(
             outcome: .success(.empty),
@@ -523,6 +609,27 @@ struct DefaultFluidAudioPipelineMappingTests {
     }
 
     @Test
+    func splitSameSystemSpeakerAcrossLongPausesForSeparatedTrackMerging() throws {
+        let result = DefaultFluidAudioPipeline.makeResult(
+            transcription: makeTimedTranscript(
+                text: "Before after",
+                tokens: [
+                    token(" Before", start: 0.2, end: 0.5),
+                    token(" after", start: 3.0, end: 3.3),
+                ]
+            ),
+            segments: [segment(speaker: "A", embedding: [1, 0], start: 0, end: 4)],
+            speakerDatabase: nil,
+            knownSpeakers: [],
+            similarityThreshold: 0.8
+        )
+
+        #expect(result.segments.map(\.text) == ["Before", "after"])
+        #expect(result.segments.map(\.speakerID) == ["A", "A"])
+        #expect(result.segments.map(\.startTime) == [0.2, 3.0])
+    }
+
+    @Test
     func produceSingleSegmentWhenTokenTimingsMissing() throws {
         let result = DefaultFluidAudioPipeline.makeResult(
             transcription: makeTimedTranscript(text: "Full text here", tokens: nil),
@@ -555,6 +662,38 @@ struct DefaultFluidAudioPipelineMappingTests {
 
         let speaker = try #require(result.speakers.first)
         #expect(speaker.centroid == [1, 1])
+    }
+
+    @Test
+    func fixedSpeakerMappingUsesKnownIdentityAndSplitsUtterancesAcrossLongPauses() throws {
+        let knownSpeaker = FluidKnownSpeakerSnapshot(
+            id: "known-lev",
+            displayName: FluidTranscriptionService.defaultMicrophoneSpeakerDisplayName,
+            centroids: [[1, 0]]
+        )
+        let result = DefaultFluidAudioPipeline.makeFixedSpeakerResult(
+            transcription: TimedTranscript(
+                text: "First second",
+                words: [
+                    TimedWord(text: "First", startTime: 1, endTime: 1.4, confidence: 1),
+                    TimedWord(text: "second", startTime: 4, endTime: 4.4, confidence: 1),
+                ]
+            ),
+            transcriptSpeakerID: "microphone-known-lev",
+            knownSpeaker: knownSpeaker
+        )
+
+        #expect(result.speakers == [
+            TranscriptSpeaker(
+                id: "microphone-known-lev",
+                displayName: FluidTranscriptionService.defaultMicrophoneSpeakerDisplayName,
+                labelSource: .bankMatched,
+                matchedKnownSpeakerID: "known-lev"
+            )
+        ])
+        #expect(result.segments.map(\.text) == ["First", "second"])
+        #expect(result.segments.map(\.startTime) == [1, 4])
+        #expect(result.segments.allSatisfy { $0.speakerID == "microphone-known-lev" })
     }
 
     // MARK: Fixtures
@@ -666,6 +805,18 @@ private struct FluidTranscriptionHarness {
         return try reloadMeeting(id: meeting.id)
     }
 
+    func createSeparatedTracks(for meeting: Meeting) throws {
+        let folderURL = URL(fileURLWithPath: meeting.audioFilePath).deletingLastPathComponent()
+        fileManager.createFile(
+            atPath: folderURL.appendingPathComponent(MeetingArtifacts.systemAudioFilename).path,
+            contents: Data("system".utf8)
+        )
+        fileManager.createFile(
+            atPath: folderURL.appendingPathComponent(MeetingArtifacts.microphoneAudioFilename).path,
+            contents: Data("microphone".utf8)
+        )
+    }
+
     func reloadMeeting(id: UUID) throws -> Meeting {
         let verificationContext = ModelContext(container)
         let descriptor = FetchDescriptor<Meeting>(
@@ -715,7 +866,13 @@ private final class StubFluidAudioPipeline: FluidAudioTranscribing, @unchecked S
         case failure(Error)
     }
 
-    private var outcome: Outcome
+    struct Call {
+        let audioFileURL: URL
+        let speakerAssignment: FluidSpeakerAssignment
+    }
+
+    private var outcomes: [Outcome]
+    private(set) var calls: [Call] = []
     private(set) var receivedKnownSpeakers: [FluidKnownSpeakerSnapshot] = []
     private(set) var receivedVoiceBankConfiguration: VoiceBankMatchingConfiguration?
     private(set) var receivedOptions = TranscriptionPipelineOptions()
@@ -725,7 +882,11 @@ private final class StubFluidAudioPipeline: FluidAudioTranscribing, @unchecked S
     private var pendingContinuation: CheckedContinuation<Void, Never>?
 
     init(outcome: Outcome) {
-        self.outcome = outcome
+        outcomes = [outcome]
+    }
+
+    func replaceOutcomes(_ outcomes: [Outcome]) {
+        self.outcomes = outcomes
     }
 
     func suspendNextRun() {
@@ -745,13 +906,15 @@ private final class StubFluidAudioPipeline: FluidAudioTranscribing, @unchecked S
     }
 
     func transcribe(
-        audioFileURL _: URL,
+        audioFileURL: URL,
+        speakerAssignment: FluidSpeakerAssignment,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         voiceBankConfiguration: VoiceBankMatchingConfiguration,
         options: TranscriptionPipelineOptions,
         glossaryTerms: [TranscriptionGlossaryTerm],
         progress _: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult {
+        calls.append(Call(audioFileURL: audioFileURL, speakerAssignment: speakerAssignment))
         receivedKnownSpeakers = knownSpeakers
         receivedVoiceBankConfiguration = voiceBankConfiguration
         receivedOptions = options
@@ -765,6 +928,7 @@ private final class StubFluidAudioPipeline: FluidAudioTranscribing, @unchecked S
             }
         }
 
+        let outcome = outcomes.count > 1 ? outcomes.removeFirst() : outcomes[0]
         switch outcome {
         case .success(let result):
             return result

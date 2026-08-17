@@ -8,13 +8,17 @@
 import Foundation
 
 struct MeetingArtifacts {
+    static let systemAudioFilename = "system_audio.m4a"
+    static let microphoneAudioFilename = "microphone.m4a"
+    static let mixedPreviewAudioFilename = "mixed_preview.m4a"
+
     let meetingFolderURL: URL
     let systemAudioFileURL: URL
     let microphoneAudioFileURL: URL
     let mixedPreviewAudioFileURL: URL
 
-    /// The headroom-safe mixed track remains the primary meeting audio so
-    /// playback and the existing transcription pipeline keep working.
+    /// The headroom-safe mixed track remains the primary meeting audio for
+    /// playback and for transcription fallback when isolated tracks are absent.
     var audioFileURL: URL {
         mixedPreviewAudioFileURL
     }
@@ -44,9 +48,9 @@ struct MeetingFileStore {
 
         return MeetingArtifacts(
             meetingFolderURL: meetingFolderURL,
-            systemAudioFileURL: meetingFolderURL.appendingPathComponent("system_audio.m4a"),
-            microphoneAudioFileURL: meetingFolderURL.appendingPathComponent("microphone.m4a"),
-            mixedPreviewAudioFileURL: meetingFolderURL.appendingPathComponent("mixed_preview.m4a")
+            systemAudioFileURL: meetingFolderURL.appendingPathComponent(MeetingArtifacts.systemAudioFilename),
+            microphoneAudioFileURL: meetingFolderURL.appendingPathComponent(MeetingArtifacts.microphoneAudioFilename),
+            mixedPreviewAudioFileURL: meetingFolderURL.appendingPathComponent(MeetingArtifacts.mixedPreviewAudioFilename)
         )
     }
 

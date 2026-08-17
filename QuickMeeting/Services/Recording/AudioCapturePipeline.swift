@@ -270,12 +270,12 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         do {
             if captureConfiguration.capturesSystemAudio {
                 systemWriter = try isolatedTrackWriterFactory(
-                    outputDirectory.appendingPathComponent("system_audio.m4a")
+                    outputDirectory.appendingPathComponent(MeetingArtifacts.systemAudioFilename)
                 )
             }
             if captureConfiguration.capturesMicrophone {
                 microphoneWriter = try isolatedTrackWriterFactory(
-                    outputDirectory.appendingPathComponent("microphone.m4a")
+                    outputDirectory.appendingPathComponent(MeetingArtifacts.microphoneAudioFilename)
                 )
             }
             return RecordingAudioWriters(

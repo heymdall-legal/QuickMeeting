@@ -34,6 +34,11 @@ struct FluidKnownSpeakerSnapshot: Sendable, Equatable {
     let centroids: [[Float]]
 }
 
+enum FluidSpeakerAssignment: Sendable, Equatable {
+    case diarized
+    case fixed(transcriptSpeakerID: String, knownSpeaker: FluidKnownSpeakerSnapshot)
+}
+
 private nonisolated struct VoiceBankMatchEvaluation: Sendable {
     let match: FluidKnownSpeakerSnapshot?
     let telemetry: VoiceBankMatchTelemetry
@@ -66,6 +71,7 @@ struct FluidTranscriptionResult: Sendable, Equatable {
 protocol FluidAudioTranscribing: Sendable {
     func transcribe(
         audioFileURL: URL,
+        speakerAssignment: FluidSpeakerAssignment,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         voiceBankConfiguration: VoiceBankMatchingConfiguration,
         options: TranscriptionPipelineOptions,
@@ -78,6 +84,8 @@ protocol FluidAudioTranscribing: Sendable {
 
 @MainActor
 final class FluidTranscriptionService: TranscriptionServicing {
+    nonisolated static let defaultMicrophoneSpeakerDisplayName = "Немировский Лев Дмитриевич"
+
     private static let telemetryLogger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "QuickMeeting",
         category: "TranscriptionTelemetry"
@@ -90,6 +98,7 @@ final class FluidTranscriptionService: TranscriptionServicing {
     private let glossaryStore: TranscriptionGlossaryStore?
     private let correctionService: (any TranscriptLLMCorrecting)?
     private let voiceBankConfigurationOverride: VoiceBankMatchingConfiguration?
+    private let microphoneSpeakerDisplayName: String
     private let fileManager: FileManager
     private let dateProvider: () -> Date
     private var activeMeetingID: UUID?
@@ -105,6 +114,7 @@ final class FluidTranscriptionService: TranscriptionServicing {
         similarityThreshold: Float? = nil,
         ambiguityMargin: Float? = nil,
         minimumSpeakerSpeechDuration: TimeInterval? = nil,
+        microphoneSpeakerDisplayName: String = FluidTranscriptionService.defaultMicrophoneSpeakerDisplayName,
         fileManager: FileManager = .default,
         dateProvider: @escaping () -> Date = Date.init
     ) {
@@ -126,6 +136,7 @@ final class FluidTranscriptionService: TranscriptionServicing {
         } else {
             voiceBankConfigurationOverride = nil
         }
+        self.microphoneSpeakerDisplayName = microphoneSpeakerDisplayName
         self.fileManager = fileManager
         self.dateProvider = dateProvider
     }
@@ -167,17 +178,15 @@ final class FluidTranscriptionService: TranscriptionServicing {
             let options = languageStore?.pipelineOptions() ?? TranscriptionPipelineOptions()
             let voiceBankConfiguration = voiceBankConfigurationOverride ?? options.voiceBankMatching
             let glossaryTerms = glossaryStore?.enabledTerms() ?? []
-            let result = try await pipeline.transcribe(
-                audioFileURL: audioFileURL,
+            let result = try await transcribeRecording(
+                primaryAudioFileURL: audioFileURL,
                 knownSpeakers: knownSpeakers,
                 voiceBankConfiguration: voiceBankConfiguration,
                 options: options,
-                glossaryTerms: glossaryTerms
-            ) { update in
-                Task { @MainActor in
-                    Self.applyProgress(update, meetingID: meetingID, progressCenter: progressCenter)
-                }
-            }
+                glossaryTerms: glossaryTerms,
+                meetingID: meetingID,
+                progressCenter: progressCenter
+            )
 
             let pipelineTranscript = StoredTranscript(speakers: result.speakers, segments: result.segments)
             var visibleTranscript = pipelineTranscript
@@ -269,6 +278,191 @@ final class FluidTranscriptionService: TranscriptionServicing {
             .filter { !$0.centroids.isEmpty }
     }
 
+    private func transcribeRecording(
+        primaryAudioFileURL: URL,
+        knownSpeakers: [FluidKnownSpeakerSnapshot],
+        voiceBankConfiguration: VoiceBankMatchingConfiguration,
+        options: TranscriptionPipelineOptions,
+        glossaryTerms: [TranscriptionGlossaryTerm],
+        meetingID: UUID,
+        progressCenter: TranscriptionProgressCenter
+    ) async throws -> FluidTranscriptionResult {
+        let folderURL = primaryAudioFileURL.deletingLastPathComponent()
+        let systemAudioFileURL = folderURL.appendingPathComponent(MeetingArtifacts.systemAudioFilename)
+        let microphoneAudioFileURL = folderURL.appendingPathComponent(MeetingArtifacts.microphoneAudioFilename)
+        let hasSeparatedTracks = fileManager.fileExists(atPath: systemAudioFileURL.path)
+            && fileManager.fileExists(atPath: microphoneAudioFileURL.path)
+
+        guard hasSeparatedTracks, let microphoneSpeaker = try makeMicrophoneSpeakerSnapshot() else {
+            return try await pipeline.transcribe(
+                audioFileURL: primaryAudioFileURL,
+                speakerAssignment: .diarized,
+                knownSpeakers: knownSpeakers,
+                voiceBankConfiguration: voiceBankConfiguration,
+                options: options,
+                glossaryTerms: glossaryTerms,
+                progress: progressHandler(
+                    meetingID: meetingID,
+                    progressCenter: progressCenter,
+                    transcriptionRange: 0...1
+                )
+            )
+        }
+
+        let systemResult = try await pipeline.transcribe(
+            audioFileURL: systemAudioFileURL,
+            speakerAssignment: .diarized,
+            knownSpeakers: knownSpeakers,
+            voiceBankConfiguration: voiceBankConfiguration,
+            options: options,
+            glossaryTerms: glossaryTerms,
+            progress: progressHandler(
+                meetingID: meetingID,
+                progressCenter: progressCenter,
+                transcriptionRange: 0...0.5
+            )
+        )
+        let microphoneResult = try await pipeline.transcribe(
+            audioFileURL: microphoneAudioFileURL,
+            speakerAssignment: .fixed(
+                transcriptSpeakerID: "microphone-\(microphoneSpeaker.id)",
+                knownSpeaker: microphoneSpeaker
+            ),
+            knownSpeakers: [],
+            voiceBankConfiguration: voiceBankConfiguration,
+            options: options,
+            glossaryTerms: glossaryTerms,
+            progress: progressHandler(
+                meetingID: meetingID,
+                progressCenter: progressCenter,
+                transcriptionRange: 0.5...1,
+                forwardsDiarization: false
+            )
+        )
+
+        return Self.mergeSeparatedResults(system: systemResult, microphone: microphoneResult)
+    }
+
+    private func makeMicrophoneSpeakerSnapshot() throws -> FluidKnownSpeakerSnapshot? {
+        guard
+            let speaker = try knownSpeakerStore?.findSpeaker(exactName: microphoneSpeakerDisplayName)
+        else {
+            return nil
+        }
+
+        return FluidKnownSpeakerSnapshot(
+            id: speaker.id,
+            displayName: speaker.displayName,
+            centroids: speaker.centroids
+                .sorted { $0.createdAt < $1.createdAt }
+                .map { $0.values.map(Float.init) }
+        )
+    }
+
+    private func progressHandler(
+        meetingID: UUID,
+        progressCenter: TranscriptionProgressCenter,
+        transcriptionRange: ClosedRange<Double>,
+        forwardsDiarization: Bool = true
+    ) -> @Sendable (FluidTranscriptionProgress) -> Void {
+        { update in
+            let mappedUpdate: FluidTranscriptionProgress?
+            switch update {
+            case .transcribing(let value):
+                let boundedValue = min(max(value, 0), 1)
+                mappedUpdate = .transcribing(
+                    transcriptionRange.lowerBound
+                        + boundedValue * (transcriptionRange.upperBound - transcriptionRange.lowerBound)
+                )
+            case .diarizing where !forwardsDiarization:
+                mappedUpdate = nil
+            case .diarizing:
+                mappedUpdate = update
+            }
+
+            guard let mappedUpdate else { return }
+            Task { @MainActor in
+                Self.applyProgress(mappedUpdate, meetingID: meetingID, progressCenter: progressCenter)
+            }
+        }
+    }
+
+    static func mergeSeparatedResults(
+        system: FluidTranscriptionResult,
+        microphone: FluidTranscriptionResult
+    ) -> FluidTranscriptionResult {
+        let visibleTranscript = mergeTranscripts(
+            StoredTranscript(speakers: system.speakers, segments: system.segments),
+            StoredTranscript(speakers: microphone.speakers, segments: microphone.segments)
+        )
+        let rawTranscript = mergeTranscripts(
+            system.rawTranscript ?? StoredTranscript(speakers: system.speakers, segments: system.segments),
+            microphone.rawTranscript ?? StoredTranscript(speakers: microphone.speakers, segments: microphone.segments)
+        )
+        var metadata = system.metadata
+        metadata.warnings = Array(Set(system.metadata.warnings + microphone.metadata.warnings)).sorted()
+        metadata.jobTelemetry = mergeTelemetry(
+            system.metadata.jobTelemetry,
+            microphone.metadata.jobTelemetry
+        )
+
+        return FluidTranscriptionResult(
+            speakers: visibleTranscript.speakers,
+            segments: visibleTranscript.segments,
+            rawTranscript: rawTranscript,
+            metadata: metadata
+        )
+    }
+
+    private static func mergeTranscripts(
+        _ system: StoredTranscript,
+        _ microphone: StoredTranscript
+    ) -> StoredTranscript {
+        var seenSpeakerIDs = Set<String>()
+        let speakers = (system.speakers + microphone.speakers).filter {
+            seenSpeakerIDs.insert($0.id).inserted
+        }
+        let segments = (system.segments + microphone.segments)
+            .enumerated()
+            .sorted { lhs, rhs in
+                let lhsStart = lhs.element.startTime ?? .greatestFiniteMagnitude
+                let rhsStart = rhs.element.startTime ?? .greatestFiniteMagnitude
+                if lhsStart != rhsStart { return lhsStart < rhsStart }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
+        return StoredTranscript(speakers: speakers, segments: segments)
+    }
+
+    private static func mergeTelemetry(
+        _ system: TranscriptionJobTelemetry?,
+        _ microphone: TranscriptionJobTelemetry?
+    ) -> TranscriptionJobTelemetry? {
+        guard var combined = system else { return microphone }
+        guard let additional = microphone else { return combined }
+
+        if additional.runKind == .cold {
+            combined.runKind = .cold
+        }
+        combined.decodeResamplingSeconds += additional.decodeResamplingSeconds
+        combined.modelLoadingSeconds += additional.modelLoadingSeconds
+        combined.asrSeconds += additional.asrSeconds
+        combined.ctcSeconds += additional.ctcSeconds
+        combined.alignmentSeconds += additional.alignmentSeconds
+        combined.llmSeconds += additional.llmSeconds
+        combined.fluidAudioASRProcessingSeconds = sumOptional(
+            combined.fluidAudioASRProcessingSeconds,
+            additional.fluidAudioASRProcessingSeconds
+        )
+        combined.peakMemoryBytes = max(combined.peakMemoryBytes, additional.peakMemoryBytes)
+        return combined
+    }
+
+    private static func sumOptional(_ lhs: TimeInterval?, _ rhs: TimeInterval?) -> TimeInterval? {
+        guard lhs != nil || rhs != nil else { return nil }
+        return (lhs ?? 0) + (rhs ?? 0)
+    }
+
     private static func applyProgress(
         _ update: FluidTranscriptionProgress,
         meetingID: UUID,
@@ -330,16 +524,25 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
 
     func transcribe(
         audioFileURL: URL,
+        speakerAssignment: FluidSpeakerAssignment,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         voiceBankConfiguration: VoiceBankMatchingConfiguration,
         options: TranscriptionPipelineOptions,
         glossaryTerms: [TranscriptionGlossaryTerm],
         progress: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult {
-        let needsDiarizerLoad = diarizer == nil
-            || (diarizerConfigOverride == nil && activeDiarizationConfiguration != options.offlineDiarization)
+        let needsDiarizerLoad: Bool
+        switch speakerAssignment {
+        case .diarized:
+            needsDiarizerLoad = diarizer == nil
+                || (diarizerConfigOverride == nil && activeDiarizationConfiguration != options.offlineDiarization)
+        case .fixed:
+            needsDiarizerLoad = false
+        }
         var telemetry = TranscriptionJobTelemetry(runKind: .warm)
-        telemetry.offlineDiarizationConfiguration = options.offlineDiarization
+        if case .diarized = speakerAssignment {
+            telemetry.offlineDiarizationConfiguration = options.offlineDiarization
+        }
 
         let decodeStart = ProcessInfo.processInfo.systemUptime
         let samples = try AudioConverter().resampleAudioFile(path: audioFileURL.path)
@@ -365,6 +568,39 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         telemetry.asrSeconds = asrOutput.asrWallSeconds
         telemetry.ctcSeconds = asrOutput.ctcWallSeconds
         telemetry.fluidAudioASRProcessingSeconds = asrOutput.nativeProcessingSeconds
+
+        if case .fixed(let transcriptSpeakerID, let knownSpeaker) = speakerAssignment {
+            let timedTranscript = asrOutput.transcript
+            let replacements = asrOutput.replacements
+            let hasAdjustedText = asrOutput.adjustedText != nil
+            let pipelineTelemetry = telemetry
+            return await MainActor.run {
+                let rawResult = Self.makeFixedSpeakerResult(
+                    transcription: timedTranscript,
+                    transcriptSpeakerID: transcriptSpeakerID,
+                    knownSpeaker: knownSpeaker
+                )
+                let adjustedSegments = Self.applyCTCReplacements(replacements, to: rawResult.segments)
+                return FluidTranscriptionResult(
+                    speakers: rawResult.speakers,
+                    segments: hasAdjustedText ? adjustedSegments : rawResult.segments,
+                    rawTranscript: StoredTranscript(
+                        speakers: rawResult.speakers,
+                        segments: rawResult.segments
+                    ),
+                    metadata: TranscriptionPipelineMetadata(
+                        asrModel: asrOutput.modelName,
+                        languageCode: options.languageCode,
+                        requestedCTCMode: options.ctcMode,
+                        resolvedCTCMode: asrOutput.resolvedCTCMode,
+                        glossaryTermCount: glossaryTerms.count,
+                        isLLMCorrectionEnabled: options.isLLMCorrectionEnabled,
+                        warnings: asrOutput.warnings,
+                        jobTelemetry: pipelineTelemetry
+                    )
+                )
+            }
+        }
 
         // 2) Diarization (reuses the same samples).
         Self.logDiarizationConfiguration(options.offlineDiarization)
@@ -467,6 +703,27 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
     }
 
     // MARK: Mapping
+
+    @MainActor
+    static func makeFixedSpeakerResult(
+        transcription: TimedTranscript,
+        transcriptSpeakerID: String,
+        knownSpeaker: FluidKnownSpeakerSnapshot
+    ) -> FluidTranscriptionResult {
+        let speaker = TranscriptSpeaker(
+            id: transcriptSpeakerID,
+            displayName: knownSpeaker.displayName,
+            labelSource: .bankMatched,
+            matchedKnownSpeakerID: knownSpeaker.id
+        )
+        return FluidTranscriptionResult(
+            speakers: [speaker],
+            segments: makeFixedSpeakerSegments(
+                transcription: transcription,
+                speakerID: transcriptSpeakerID
+            )
+        )
+    }
 
     @MainActor
     static func makeResult(
@@ -766,7 +1023,9 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
                 speakerID = lastKnownSpeaker
             }
 
-            if !groups.isEmpty, groups[groups.count - 1].speakerID == speakerID {
+            if !groups.isEmpty,
+               groups[groups.count - 1].speakerID == speakerID,
+               word.startTime - groups[groups.count - 1].endTime <= 1.5 {
                 groups[groups.count - 1].text += " " + word.text
                 groups[groups.count - 1].endTime = word.endTime
             } else {
@@ -789,6 +1048,52 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
                 startTime: group.startTime,
                 endTime: group.endTime,
                 speakerID: group.speakerID
+            )
+        }
+    }
+
+    @MainActor
+    private static func makeFixedSpeakerSegments(
+        transcription: TimedTranscript,
+        speakerID: String
+    ) -> [TranscriptSegment] {
+        guard !transcription.words.isEmpty else {
+            let text = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return [] }
+            return [TranscriptSegment(text: text, speakerID: speakerID)]
+        }
+
+        struct Utterance {
+            var text: String
+            var startTime: TimeInterval
+            var endTime: TimeInterval
+        }
+
+        var utterances: [Utterance] = []
+        for word in transcription.words {
+            if !utterances.isEmpty,
+               word.startTime - utterances[utterances.count - 1].endTime <= 1.5 {
+                utterances[utterances.count - 1].text += " " + word.text
+                utterances[utterances.count - 1].endTime = word.endTime
+            } else {
+                utterances.append(
+                    Utterance(
+                        text: word.text,
+                        startTime: word.startTime,
+                        endTime: word.endTime
+                    )
+                )
+            }
+        }
+
+        return utterances.compactMap { utterance in
+            let text = utterance.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return TranscriptSegment(
+                text: text,
+                startTime: utterance.startTime,
+                endTime: utterance.endTime,
+                speakerID: speakerID
             )
         }
     }
