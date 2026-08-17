@@ -91,13 +91,16 @@ actor ParakeetASRBackend: ASRBackend {
 
         var words: [TimedWord] = []
         for token in tokens {
+            guard token.token != "<blank>", token.token != "<pad>", !token.token.isEmpty else {
+                continue
+            }
             let startsWord = token.token.hasPrefix(" ")
                 || token.token.hasPrefix("\u{2581}")
                 || words.isEmpty
             if startsWord {
                 words.append(
                     TimedWord(
-                        text: token.token,
+                        text: normalizedWordStart(token.token),
                         startTime: token.startTime,
                         endTime: token.endTime,
                         confidence: token.confidence
@@ -113,6 +116,13 @@ actor ParakeetASRBackend: ASRBackend {
             }
         }
         return TimedTranscript(text: result.text, words: words)
+    }
+
+    private nonisolated static func normalizedWordStart(_ token: String) -> String {
+        if token.hasPrefix("\u{2581}") {
+            return String(token.dropFirst())
+        }
+        return token.trimmingCharacters(in: .whitespaces)
     }
 
     private func loadManager(config: ASRConfig) async throws -> AsrManager {

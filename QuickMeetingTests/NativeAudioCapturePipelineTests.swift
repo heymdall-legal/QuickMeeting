@@ -93,21 +93,21 @@ struct NativeAudioCapturePipelineTests {
         )
 
         try sink.appendForTesting(
-            makePCMBuffer(samples: [0.9, 0.9]),
+            makePCMBuffer(samples: [1, 1]),
             presentationTimeSeconds: 0,
             outputType: .audio
         )
         try sink.appendForTesting(
-            makePCMBuffer(samples: [0.9, 0.9]),
+            makePCMBuffer(samples: [1, 1]),
             presentationTimeSeconds: 0,
             outputType: .microphone
         )
 
         _ = try await sink.finish()
 
-        #expect(systemWriter.firstChannelFirstSamples == [0.9])
-        #expect(microphoneWriter.firstChannelFirstSamples == [0.9])
-        #expect(previewWriter.firstChannelFirstSamples == [0.9])
+        #expect(systemWriter.firstChannelFirstSamples == [1])
+        #expect(microphoneWriter.firstChannelFirstSamples == [1])
+        #expect(previewWriter.firstChannelFirstSamples == [1])
         #expect(previewWriter.firstChannelFirstSamples.allSatisfy { abs($0) <= 1 })
         #expect(systemWriter.finishCallCount == 1)
         #expect(microphoneWriter.finishCallCount == 1)

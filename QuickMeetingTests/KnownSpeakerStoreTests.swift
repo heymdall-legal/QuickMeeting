@@ -62,6 +62,39 @@ struct KnownSpeakerStoreTests {
             [0, 0, 0, 1],
         ])
     }
+
+    @Test
+    func appendCentroidRejectsExactAndNearDuplicateDirections() throws {
+        let harness = try KnownSpeakerStoreHarness()
+        let speaker = try harness.store.findOrCreateSpeaker(named: "Alice", now: .now)
+
+        let inserted = try harness.store.appendCentroid(
+            [1, 0],
+            to: speaker.id,
+            sourceMeetingID: nil,
+            sourceSpeakerID: nil,
+            now: Date(timeIntervalSince1970: 10)
+        )
+        let exactDuplicate = try harness.store.appendCentroid(
+            [1, 0],
+            to: speaker.id,
+            sourceMeetingID: UUID(),
+            sourceSpeakerID: "S2",
+            now: Date(timeIntervalSince1970: 20)
+        )
+        let nearDuplicate = try harness.store.appendCentroid(
+            [0.999, 0.01],
+            to: speaker.id,
+            sourceMeetingID: UUID(),
+            sourceSpeakerID: "S3",
+            now: Date(timeIntervalSince1970: 30)
+        )
+
+        #expect(inserted)
+        #expect(exactDuplicate == false)
+        #expect(nearDuplicate == false)
+        #expect(try harness.fetchKnownSpeakers().first?.centroids.count == 1)
+    }
 }
 
 @MainActor

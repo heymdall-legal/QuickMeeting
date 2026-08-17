@@ -507,7 +507,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
     }
 
     @MainActor
-    private static func makeResultWithTimings(
+    static func makeResultWithTimings(
         transcription: TimedTranscript,
         segments: [TimedSpeakerSegment],
         speakerDatabase: [String: [Float]]?,
@@ -767,7 +767,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
             }
 
             if !groups.isEmpty, groups[groups.count - 1].speakerID == speakerID {
-                groups[groups.count - 1].text += word.text
+                groups[groups.count - 1].text += " " + word.text
                 groups[groups.count - 1].endTime = word.endTime
             } else {
                 groups.append(

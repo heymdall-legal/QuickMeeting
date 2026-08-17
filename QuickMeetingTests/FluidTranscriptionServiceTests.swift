@@ -419,6 +419,61 @@ struct DefaultFluidAudioPipelineMappingTests {
     }
 
     @Test
+    func ambiguityMarginKeepsSpeakerUnknownAndRecordsBestTwoScores() throws {
+        let mapping = DefaultFluidAudioPipeline.makeResultWithTimings(
+            transcription: makeTimedTranscript(
+                text: "hi",
+                tokens: [token(" hi", start: 0.1, end: 0.4)]
+            ),
+            segments: [segment(speaker: "S1", embedding: [1, 0], start: 0, end: 3)],
+            speakerDatabase: ["S1": [1, 0]],
+            knownSpeakers: [
+                FluidKnownSpeakerSnapshot(id: "alice", displayName: "Alice", centroids: [[1, 0]]),
+                FluidKnownSpeakerSnapshot(id: "bob", displayName: "Bob", centroids: [[0.995, 0.1]]),
+            ],
+            voiceBankConfiguration: VoiceBankMatchingConfiguration(
+                minimumScore: 0.8,
+                ambiguityMargin: 0.05,
+                minimumSpeechDurationSeconds: 2
+            )
+        )
+
+        let speaker = try #require(mapping.result.speakers.first)
+        let evidence = try #require(mapping.voiceBankMatches.first)
+        #expect(speaker.displayName == "Speaker 1")
+        #expect(speaker.labelSource == .generic)
+        #expect(evidence.bestKnownSpeakerID == "alice")
+        #expect(evidence.secondBestKnownSpeakerID == "bob")
+        #expect(evidence.bestScore == 1)
+        #expect((evidence.secondBestScore ?? 0) > 0.99)
+        #expect(evidence.decision == .ambiguous)
+    }
+
+    @Test
+    func minimumSpeechDurationKeepsHighScoreSpeakerUnknown() throws {
+        let mapping = DefaultFluidAudioPipeline.makeResultWithTimings(
+            transcription: makeTimedTranscript(
+                text: "hi",
+                tokens: [token(" hi", start: 0.1, end: 0.4)]
+            ),
+            segments: [segment(speaker: "S1", embedding: [1, 0], start: 0, end: 1)],
+            speakerDatabase: ["S1": [1, 0]],
+            knownSpeakers: [
+                FluidKnownSpeakerSnapshot(id: "alice", displayName: "Alice", centroids: [[1, 0]])
+            ],
+            voiceBankConfiguration: VoiceBankMatchingConfiguration(
+                minimumScore: 0.8,
+                ambiguityMargin: 0.05,
+                minimumSpeechDurationSeconds: 2
+            )
+        )
+
+        #expect(mapping.result.speakers.first?.displayName == "Speaker 1")
+        #expect(mapping.voiceBankMatches.first?.bestScore == 1)
+        #expect(mapping.voiceBankMatches.first?.decision == .insufficientSpeech)
+    }
+
+    @Test
     func groupTokensIntoSpeakerSegmentsAndJoinSubwords() throws {
         let result = DefaultFluidAudioPipeline.makeResult(
             transcription: makeTimedTranscript(
