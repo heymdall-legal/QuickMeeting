@@ -589,7 +589,7 @@ final class AppViewModel: ObservableObject {
 
     private func removeArtifactsDirectory(at meetingFolderURL: URL) throws {
         let fileManager = meetingFileStore.fileManager
-        guard fileManager.fileExists(atPath: meetingFolderURL.path()) else {
+        guard fileManager.fileExists(atPath: meetingFolderURL.path(percentEncoded: false)) else {
             return
         }
 

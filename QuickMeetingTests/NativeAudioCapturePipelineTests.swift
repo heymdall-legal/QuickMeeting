@@ -169,9 +169,10 @@ struct NativeAudioCapturePipelineTests {
 
     @Test
     func losslessM4AWriterStoresCanonicalAudioAsAppleLossless() throws {
-        let outputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("quickmeeting-lossless-\(UUID().uuidString).m4a")
-        defer { try? FileManager.default.removeItem(at: outputURL) }
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Quick Meeting \(UUID().uuidString)", isDirectory: true)
+        let outputURL = outputDirectory.appendingPathComponent("audio file.m4a")
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
 
         let writer = try LosslessM4AAudioFileWriter(outputURL: outputURL)
         try writer.append(makePCMBuffer(samples: [0.25, -0.25]))
@@ -182,6 +183,7 @@ struct NativeAudioCapturePipelineTests {
         #expect(streamDescription.pointee.mFormatID == kAudioFormatAppleLossless)
         #expect(audioFile.processingFormat.sampleRate == 48_000)
         #expect(audioFile.processingFormat.channelCount == 2)
+        #expect(FileManager.default.fileExists(atPath: outputURL.path(percentEncoded: false)))
     }
 
     private func makePCMBuffer(samples: [Float]) throws -> AVAudioPCMBuffer {

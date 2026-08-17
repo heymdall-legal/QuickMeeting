@@ -183,6 +183,8 @@ struct QMSettingsSheet: View {
 
             modelPreparationStatus
 
+            onlineModelPreparationStatus
+
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Offline execution")
@@ -405,6 +407,56 @@ struct QMSettingsSheet: View {
                 .controlSize(.small)
             }
         }
+    }
+
+    @ViewBuilder
+    private var onlineModelPreparationStatus: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Online draft · Nemotron + Sortformer")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(QMTheme.ink)
+                switch transcriptionViewModel.onlineDraftModelState {
+                case .notPrepared:
+                    Text("Not prepared. Recording remains available, but realtime draft is disabled.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(QMTheme.tertiary)
+                case .preparing(let progress, let phase):
+                    Text("\(phase) · \(Int(progress * 100))%")
+                        .font(.system(size: 12))
+                        .foregroundStyle(QMTheme.tertiary)
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                        .frame(maxWidth: 280)
+                case .ready:
+                    Label("Ready for realtime Russian transcription", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(QMTheme.sage)
+                case .failed(let message):
+                    Text("Preparation failed: \(message)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+            switch transcriptionViewModel.onlineDraftModelState {
+            case .notPrepared, .failed:
+                Button("Prepare online") {
+                    transcriptionViewModel.prepareOnlineDraftModels()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            case .preparing:
+                ProgressView()
+                    .controlSize(.small)
+            case .ready:
+                EmptyView()
+            }
+        }
+        .padding(10)
+        .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
     }
 
     private var ctcModeMenu: some View {

@@ -63,6 +63,11 @@ struct QuickMeetingApp: App {
                 )
             )
             self.onlineDraftCoordinator = onlineDraftCoordinator
+            if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+                Task { @MainActor in
+                    await onlineDraftCoordinator.prepareModels()
+                }
+            }
             let recordingService = DefaultRecordingService(
                 audioCapturePipeline: NativeAudioCapturePipeline(onlineAudioSink: onlineAudioChannel),
                 onlineDraftCoordinator: onlineDraftCoordinator
@@ -153,7 +158,8 @@ struct QuickMeetingApp: App {
                 wrappedValue: TranscriptionSettingsViewModel(
                     settingsStore: transcriptionSettingsStore,
                     glossaryStore: transcriptionGlossaryStore,
-                    modelPreparationCenter: modelPreparationCenter
+                    modelPreparationCenter: modelPreparationCenter,
+                    onlineDraftCoordinator: onlineDraftCoordinator
                 )
             )
             _meetingSummarySettingsViewModel = StateObject(
@@ -213,7 +219,6 @@ struct QuickMeetingApp: App {
                     }
 
                     await autoRecordingSettingsViewModel.load()
-                    await onlineDraftCoordinator.prepareModels()
                     autoRecordingMonitor.start()
                 }
         }

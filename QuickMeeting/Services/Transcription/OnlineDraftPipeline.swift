@@ -44,13 +44,14 @@ actor OnlineDraftPipeline {
     }
 
     func prepare(progress: @escaping @Sendable (Double, String) -> Void) async throws {
-        async let asr: Void = asrBackend.prepare { value, phase in
+        // Load serially to avoid the peak-memory spike from compiling the
+        // ~1.5 GB Nemotron graph and Sortformer at the same time.
+        try await asrBackend.prepare { value, phase in
             progress(value * 0.5, phase)
         }
-        async let diarization: Void = diarizationBackend.prepare { value, phase in
+        try await diarizationBackend.prepare { value, phase in
             progress(0.5 + value * 0.5, phase)
         }
-        _ = try await (asr, diarization)
     }
 
     func run(
@@ -62,7 +63,6 @@ actor OnlineDraftPipeline {
         defer { isRunning = false }
 
         let sessionStart = ContinuousClock.now
-        try await prepare(progress: { _, _ in })
         async let asrStart: Void = asrBackend.beginSession(languageCode: "ru-RU")
         async let diarizationStart: Void = diarizationBackend.beginSession()
         _ = try await (asrStart, diarizationStart)

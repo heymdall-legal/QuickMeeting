@@ -36,9 +36,6 @@ actor FluidNemotronStreamingASRBackend: StreamingASRBackend {
     }
 
     func beginSession(languageCode: String) async throws {
-        if sharedModels == nil {
-            try await prepare(progress: { _, _ in })
-        }
         guard let sharedModels else {
             throw OnlineDraftPipelineError.modelsUnavailable
         }
@@ -83,9 +80,6 @@ actor FluidSortformerStreamingDiarizationBackend: StreamingDiarizationBackend {
     }
 
     func beginSession() async throws {
-        if models == nil {
-            try await prepare(progress: { _, _ in })
-        }
         guard let models else { throw OnlineDraftPipelineError.modelsUnavailable }
         let diarizer = SortformerDiarizer(config: configuration)
         diarizer.initialize(models: models)

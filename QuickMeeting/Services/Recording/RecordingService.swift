@@ -38,12 +38,12 @@ final class DefaultRecordingService: RecordingService {
     }
 
     private let audioCapturePipeline: any AudioCapturePipeline
-    private let onlineDraftCoordinator: OnlineDraftCoordinator?
+    private let onlineDraftCoordinator: (any OnlineDraftCoordinating)?
     private var state: State = .idle
 
     init(
         audioCapturePipeline: any AudioCapturePipeline,
-        onlineDraftCoordinator: OnlineDraftCoordinator? = nil
+        onlineDraftCoordinator: (any OnlineDraftCoordinating)? = nil
     ) {
         self.audioCapturePipeline = audioCapturePipeline
         self.onlineDraftCoordinator = onlineDraftCoordinator
@@ -89,8 +89,7 @@ final class DefaultRecordingService: RecordingService {
                     return
                 }
 
-                try await audioCapturePipeline.stop()
-                await onlineDraftCoordinator?.stop()
+                try await stopCaptureAndOnlineDraft()
             }
 
             state = .stopping(
@@ -106,8 +105,7 @@ final class DefaultRecordingService: RecordingService {
             )
         case .recording(let recordingToken):
             let stopTask = Task { @MainActor in
-                try await audioCapturePipeline.stop()
-                await onlineDraftCoordinator?.stop()
+                try await stopCaptureAndOnlineDraft()
             }
 
             state = .stopping(
@@ -142,6 +140,20 @@ final class DefaultRecordingService: RecordingService {
             reconcileFailedStop(for: recordingToken, failureState: failureState)
             throw error
         }
+    }
+
+    /// The source writer and the best-effort online branch are independent.
+    /// Always tear down both, but preserve the source-capture error as the
+    /// user-visible failure if capture itself did not stop cleanly.
+    private func stopCaptureAndOnlineDraft() async throws {
+        var captureError: Error?
+        do {
+            try await audioCapturePipeline.stop()
+        } catch {
+            captureError = error
+        }
+        await onlineDraftCoordinator?.stop()
+        if let captureError { throw captureError }
     }
 
     private func reconcileFailedStart(for recordingToken: UUID) {

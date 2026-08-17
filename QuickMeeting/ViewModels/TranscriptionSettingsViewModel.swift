@@ -20,20 +20,24 @@ final class TranscriptionSettingsViewModel: ObservableObject {
     @Published private(set) var glossaryTerms: [TranscriptionGlossaryTerm]
     @Published private(set) var isGlossaryLoaded: Bool
     @Published private(set) var modelPreparationState: TranscriptionModelPreparationState
+    @Published private(set) var onlineDraftModelState: OnlineDraftModelState
 
     private let settingsStore: any TranscriptionLanguageStoring
     private let glossaryStore: TranscriptionGlossaryStore
     private let modelPreparationCenter: TranscriptionModelPreparationCenter?
+    private let onlineDraftCoordinator: OnlineDraftCoordinator?
     private var cancellables = Set<AnyCancellable>()
 
     init(
         settingsStore: any TranscriptionLanguageStoring,
         glossaryStore: TranscriptionGlossaryStore = TranscriptionGlossaryStore(),
-        modelPreparationCenter: TranscriptionModelPreparationCenter? = nil
+        modelPreparationCenter: TranscriptionModelPreparationCenter? = nil,
+        onlineDraftCoordinator: OnlineDraftCoordinator? = nil
     ) {
         self.settingsStore = settingsStore
         self.glossaryStore = glossaryStore
         self.modelPreparationCenter = modelPreparationCenter
+        self.onlineDraftCoordinator = onlineDraftCoordinator
         let options = settingsStore.pipelineOptions()
         offlineASRModelID = options.offlineASRModelID
         offlineJobSchedule = options.offlineJobSchedule
@@ -45,11 +49,18 @@ final class TranscriptionSettingsViewModel: ObservableObject {
         glossaryTerms = []
         isGlossaryLoaded = false
         modelPreparationState = modelPreparationCenter?.state(for: options.offlineASRModelID) ?? .notPrepared
+        onlineDraftModelState = onlineDraftCoordinator?.modelState ?? .notPrepared
 
         modelPreparationCenter?.$stateByModel
             .sink { [weak self] states in
                 guard let self else { return }
                 self.modelPreparationState = states[self.offlineASRModelID] ?? .notPrepared
+            }
+            .store(in: &cancellables)
+
+        onlineDraftCoordinator?.$modelState
+            .sink { [weak self] state in
+                self?.onlineDraftModelState = state
             }
             .store(in: &cancellables)
     }
@@ -92,6 +103,11 @@ final class TranscriptionSettingsViewModel: ObservableObject {
 
     func prepareSelectedOfflineASRModel() {
         modelPreparationCenter?.prepare(offlineASRModelID)
+    }
+
+    func prepareOnlineDraftModels() {
+        guard let onlineDraftCoordinator else { return }
+        Task { await onlineDraftCoordinator.prepareModels() }
     }
 
     func selectCTCMode(_ mode: TranscriptionCTCMode) {

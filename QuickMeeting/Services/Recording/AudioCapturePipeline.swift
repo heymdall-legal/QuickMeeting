@@ -430,7 +430,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
 
         logger.info(
             """
-            event=\(String(describing: diagnostics.event), privacy: .public) outputURL=\(diagnostics.outputURL.path(), privacy: .public) \
+            event=\(String(describing: diagnostics.event), privacy: .public) outputURL=\(diagnostics.outputURL.path(percentEncoded: false), privacy: .public) \
             sampleBufferCount=\(diagnostics.sampleBufferCount) systemSampleBufferCount=\(diagnostics.systemSampleBufferCount) \
             microphoneSampleBufferCount=\(diagnostics.microphoneSampleBufferCount) microphoneCaptureDeviceID=\(diagnostics.microphoneCaptureDeviceID ?? "none", privacy: .public) \
             microphoneCaptureDeviceName=\(diagnostics.microphoneCaptureDeviceName ?? "none", privacy: .public) systemSourceFormat=\(diagnostics.systemSourceFormat ?? "none", privacy: .public) \
@@ -451,7 +451,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
 
     private func fileMetadata(for outputURL: URL) -> (exists: Bool, fileSizeBytes: UInt64?) {
         let fileManager = FileManager.default
-        let path = outputURL.path()
+        let path = outputURL.path(percentEncoded: false)
 
         guard fileManager.fileExists(atPath: path) else {
             return (false, nil)
@@ -509,8 +509,6 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         return CaptureTarget(width: display.width, height: display.height) { configuration, outputSink in
             try ScreenCaptureAudioStreamSession(
                 display: display,
-                displayWidth: display.width,
-                displayHeight: display.height,
                 captureConfiguration: configuration,
                 outputSink: outputSink
             )
@@ -1608,18 +1606,26 @@ private struct TimestampedPCMBuffer {
 
 private final class ScreenCaptureAudioStreamSession: NativeAudioCapturePipeline.AudioCaptureStreamSession {
     private let stream: SCStream
+    private let screenOutputQueue = DispatchQueue(
+        label: "info.akitov.QuickMeeting.NativeAudioCapturePipeline.discarded-screen-output",
+        qos: .utility
+    )
 
     init(
         display: SCDisplay,
-        displayWidth: Int,
-        displayHeight: Int,
         captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration,
         outputSink: CaptureOutputSink
     ) throws {
         let contentFilter = SCContentFilter(display: display, excludingWindows: [])
         let configuration = SCStreamConfiguration()
-        configuration.width = max(displayWidth, 2)
-        configuration.height = max(displayHeight, 2)
+        // SCStream always produces screen frames. Consume a minimal, low-rate
+        // output so an audio-only recording does not allocate full-display
+        // frames or emit "stream output NOT found" for every discarded frame.
+        configuration.width = 2
+        configuration.height = 2
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        configuration.queueDepth = 1
+        configuration.showsCursor = false
         configuration.capturesAudio = captureConfiguration.capturesSystemAudio
         configuration.sampleRate = Int(captureConfiguration.sampleRate)
         configuration.channelCount = captureConfiguration.channelCount
@@ -1631,6 +1637,12 @@ private final class ScreenCaptureAudioStreamSession: NativeAudioCapturePipeline.
             filter: contentFilter,
             configuration: configuration,
             delegate: outputSink
+        )
+
+        try stream.addStreamOutput(
+            outputSink,
+            type: .screen,
+            sampleHandlerQueue: screenOutputQueue
         )
 
         if captureConfiguration.capturesSystemAudio {
@@ -1694,7 +1706,7 @@ final class LosslessM4AAudioFileWriter: NativeAudioCapturePipeline.AudioFileWrit
             withIntermediateDirectories: true
         )
 
-        if fileManager.fileExists(atPath: outputURL.path()) {
+        if fileManager.fileExists(atPath: outputURL.path(percentEncoded: false)) {
             try fileManager.removeItem(at: outputURL)
         }
 
