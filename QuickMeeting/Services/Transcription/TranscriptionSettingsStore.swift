@@ -21,6 +21,7 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
     private let languageCodeKey = "transcription.languageCode"
     private let ctcModeKey = "transcription.ctcMode"
     private let llmCorrectionEnabledKey = "transcription.llmCorrectionEnabled"
+    private let automaticTranscriptionEnabledKey = "transcription.automaticTranscriptionEnabled"
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -44,7 +45,8 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
         return TranscriptionPipelineOptions(
             languageCode: languageCode(),
             ctcMode: mode,
-            isLLMCorrectionEnabled: userDefaults.bool(forKey: llmCorrectionEnabledKey)
+            isLLMCorrectionEnabled: userDefaults.bool(forKey: llmCorrectionEnabledKey),
+            isAutomaticTranscriptionEnabled: userDefaults.bool(forKey: automaticTranscriptionEnabledKey)
         )
     }
 
@@ -52,6 +54,7 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
         saveLanguageCode(options.languageCode)
         userDefaults.set(options.ctcMode.rawValue, forKey: ctcModeKey)
         userDefaults.set(options.isLLMCorrectionEnabled, forKey: llmCorrectionEnabledKey)
+        userDefaults.set(options.isAutomaticTranscriptionEnabled, forKey: automaticTranscriptionEnabledKey)
     }
 }
 

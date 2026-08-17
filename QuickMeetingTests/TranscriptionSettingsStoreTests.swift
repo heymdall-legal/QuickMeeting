@@ -11,8 +11,24 @@ struct TranscriptionSettingsStoreTests {
         #expect(store.pipelineOptions() == TranscriptionPipelineOptions(
             languageCode: nil,
             ctcMode: .off,
-            isLLMCorrectionEnabled: false
+            isLLMCorrectionEnabled: false,
+            isAutomaticTranscriptionEnabled: false
         ))
+    }
+
+    @Test
+    func automaticTranscriptionDefaultsToDisabled() {
+        let store = TranscriptionSettingsStore(userDefaults: makeDefaults())
+
+        #expect(store.pipelineOptions().isAutomaticTranscriptionEnabled == false)
+    }
+
+    @Test
+    func automaticTranscriptionRoundTripsWithPipelineOptions() {
+        let store = TranscriptionSettingsStore(userDefaults: makeDefaults())
+        store.savePipelineOptions(.init(isAutomaticTranscriptionEnabled: true))
+
+        #expect(store.pipelineOptions().isAutomaticTranscriptionEnabled == true)
     }
 
     @Test
@@ -24,14 +40,16 @@ struct TranscriptionSettingsStoreTests {
         store.savePipelineOptions(.init(
             languageCode: "fr",
             ctcMode: .ctc06b,
-            isLLMCorrectionEnabled: true
+            isLLMCorrectionEnabled: true,
+            isAutomaticTranscriptionEnabled: true
         ))
 
         #expect(store.languageCode() == "fr")
         #expect(store.pipelineOptions() == TranscriptionPipelineOptions(
             languageCode: "fr",
             ctcMode: .ctc06b,
-            isLLMCorrectionEnabled: true
+            isLLMCorrectionEnabled: true,
+            isAutomaticTranscriptionEnabled: true
         ))
     }
 
