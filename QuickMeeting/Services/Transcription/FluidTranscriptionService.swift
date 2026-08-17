@@ -259,6 +259,9 @@ final class FluidTranscriptionService: TranscriptionServicing {
             if !didStopMemoryTracking {
                 _ = memoryTracker.stop()
             }
+            Self.telemetryLogger.error(
+                "meeting=\(meetingID.uuidString, privacy: .public) finalizationFailed error=\(error.localizedDescription, privacy: .public)"
+            )
             try? meetingStore.failTranscription(meetingID: meetingID, updatedAt: dateProvider())
             throw map(error)
         }
@@ -507,6 +510,8 @@ final class FluidTranscriptionService: TranscriptionServicing {
 /// pipeline off the main actor. Models are loaded lazily and reused between
 /// runs to amortise the (substantial) load cost.
 actor OfflineFinalizationJob: FluidAudioTranscribing {
+    nonisolated static let offlineDiarizationNoSpeechWarning =
+        "Offline diarization detected no speaker embeddings; transcript preserved with UNKNOWN speaker."
     nonisolated private static let diarizationLogger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "QuickMeeting",
         category: "OfflineDiarization"
@@ -575,7 +580,7 @@ actor OfflineFinalizationJob: FluidAudioTranscribing {
         switch (speakerAssignment, options.offlineJobSchedule) {
         case (.diarized, .concurrent):
             async let pendingASR = asrBackend.transcribe(asrRequest, progress: asrProgress)
-            async let pendingDiarization = diarize(
+            async let pendingDiarization = diarizeAllowingNoSpeech(
                 samples: samples,
                 configuration: options.offlineDiarization,
                 progress: progress
@@ -583,7 +588,7 @@ actor OfflineFinalizationJob: FluidAudioTranscribing {
             (asrOutput, diarization) = try await (pendingASR, pendingDiarization)
         case (.diarized, .serial):
             asrOutput = try await asrBackend.transcribe(asrRequest, progress: asrProgress)
-            diarization = try await diarize(
+            diarization = try await diarizeAllowingNoSpeech(
                 samples: samples,
                 configuration: options.offlineDiarization,
                 progress: progress
@@ -635,7 +640,21 @@ actor OfflineFinalizationJob: FluidAudioTranscribing {
         }
 
         guard let diarization else {
-            throw FluidTranscriptionServiceError.pipelineFailed("Offline diarization did not produce a result.")
+            guard Self.hasRecognizedSpeech(asrOutput.transcript) else {
+                throw OfflineDiarizationError.noSpeechDetected
+            }
+            Self.diarizationLogger.notice(
+                "noSpeakerEmbeddings=true asrTextPreserved=true fallbackSpeaker=UNKNOWN"
+            )
+            let pipelineTelemetry = telemetry
+            return await MainActor.run {
+                Self.makeUnknownSpeakerFallbackResult(
+                    asrOutput: asrOutput,
+                    options: options,
+                    glossaryTermCount: glossaryTerms.count,
+                    telemetry: pipelineTelemetry
+                )
+            }
         }
         let diarizationResult = diarization.result
         if let timings = diarizationResult.timings {
@@ -725,6 +744,26 @@ actor OfflineFinalizationJob: FluidAudioTranscribing {
         return (result, modelLoadingSeconds)
     }
 
+    /// FluidAudio can reject quiet or short speech during VAD/embedding
+    /// extraction even when ASR has produced a valid transcript. Preserve that
+    /// distinction so the caller can publish the ASR result with an explicitly
+    /// unknown speaker. Every other diarization failure remains fatal.
+    private func diarizeAllowingNoSpeech(
+        samples: [Float],
+        configuration: OfflineDiarizationConfiguration,
+        progress: @escaping @Sendable (FluidTranscriptionProgress) -> Void
+    ) async throws -> (result: DiarizationResult, modelLoadingSeconds: TimeInterval)? {
+        do {
+            return try await diarize(
+                samples: samples,
+                configuration: configuration,
+                progress: progress
+            )
+        } catch OfflineDiarizationError.noSpeechDetected {
+            return nil
+        }
+    }
+
     private func loadDiarizer(
         configuration: OfflineDiarizationConfiguration
     ) async throws -> OfflineDiarizerManager {
@@ -750,6 +789,67 @@ actor OfflineFinalizationJob: FluidAudioTranscribing {
     }
 
     // MARK: Mapping
+
+    nonisolated static func hasRecognizedSpeech(_ transcription: TimedTranscript) -> Bool {
+        !transcription.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || transcription.words.contains {
+                !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+    }
+
+    @MainActor
+    static func makeUnknownSpeakerResult(
+        transcription: TimedTranscript
+    ) -> FluidTranscriptionResult {
+        let speakerID = "unknown"
+        let speaker = TranscriptSpeaker(
+            id: speakerID,
+            displayName: "UNKNOWN",
+            labelSource: .generic
+        )
+        return FluidTranscriptionResult(
+            speakers: [speaker],
+            segments: makeFixedSpeakerSegments(
+                transcription: transcription,
+                speakerID: speakerID
+            )
+        )
+    }
+
+    @MainActor
+    private static func makeUnknownSpeakerFallbackResult(
+        asrOutput: ASRBackendOutput,
+        options: TranscriptionPipelineOptions,
+        glossaryTermCount: Int,
+        telemetry: TranscriptionJobTelemetry
+    ) -> FluidTranscriptionResult {
+        let rawResult = makeUnknownSpeakerResult(transcription: asrOutput.transcript)
+        let adjustedSegments = applyCTCReplacements(asrOutput.replacements, to: rawResult.segments)
+        var warnings = asrOutput.warnings
+        if !warnings.contains(offlineDiarizationNoSpeechWarning) {
+            warnings.append(offlineDiarizationNoSpeechWarning)
+        }
+        return FluidTranscriptionResult(
+            speakers: rawResult.speakers,
+            segments: asrOutput.adjustedText == nil ? rawResult.segments : adjustedSegments,
+            rawTranscript: StoredTranscript(
+                speakers: rawResult.speakers,
+                segments: rawResult.segments
+            ),
+            metadata: TranscriptionPipelineMetadata(
+                asrModel: asrOutput.modelName,
+                backendSnapshot: asrOutput.backendSnapshot,
+                schedule: options.offlineJobSchedule,
+                languageCode: options.languageCode,
+                requestedCTCMode: options.ctcMode,
+                resolvedCTCMode: asrOutput.resolvedCTCMode,
+                glossaryTermCount: glossaryTermCount,
+                isLLMCorrectionEnabled: options.isLLMCorrectionEnabled,
+                warnings: warnings,
+                jobTelemetry: telemetry
+            )
+        )
+    }
 
     @MainActor
     static func makeFixedSpeakerResult(

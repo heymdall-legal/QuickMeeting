@@ -730,6 +730,49 @@ struct DefaultFluidAudioPipelineMappingTests {
     }
 }
 
+@MainActor
+struct OfflineDiarizationFallbackTests {
+    @Test
+    func unknownSpeakerFallbackPreservesASRTextAndRealWordTimings() throws {
+        let transcript = TimedTranscript(
+            text: "First second",
+            words: [
+                TimedWord(text: "First", startTime: 1, endTime: 1.4, confidence: 1),
+                TimedWord(text: "second", startTime: 4, endTime: 4.4, confidence: 1),
+            ]
+        )
+
+        let result = DefaultFluidAudioPipeline.makeUnknownSpeakerResult(
+            transcription: transcript
+        )
+
+        #expect(result.speakers == [
+            TranscriptSpeaker(id: "unknown", displayName: "UNKNOWN", labelSource: .generic)
+        ])
+        #expect(result.segments.map(\.text) == ["First", "second"])
+        #expect(result.segments.map(\.startTime) == [1, 4])
+        #expect(result.segments.map(\.endTime) == [1.4, 4.4])
+        #expect(result.segments.allSatisfy { $0.speakerID == "unknown" })
+    }
+
+    @Test
+    func noSpeechFallbackRequiresActualASRText() {
+        #expect(
+            DefaultFluidAudioPipeline.hasRecognizedSpeech(
+                TimedTranscript(text: "  ", words: [])
+            ) == false
+        )
+        #expect(
+            DefaultFluidAudioPipeline.hasRecognizedSpeech(
+                TimedTranscript(
+                    text: "",
+                    words: [TimedWord(text: "speech", startTime: 0, endTime: 1, confidence: 1)]
+                )
+            )
+        )
+    }
+}
+
 // MARK: - Test doubles
 
 extension FluidTranscriptionResult {
