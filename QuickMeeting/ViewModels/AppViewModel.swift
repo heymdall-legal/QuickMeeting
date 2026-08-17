@@ -186,6 +186,11 @@ final class AppViewModel: ObservableObject {
             recordingStartedAt = nil
             activeRecordingTitle = nil
             autoRecordingCoordinator?.recordingDidStop()
+            if let meeting = try? meetingStore.fetchMeeting(id: meetingID) {
+                Task { @MainActor [weak self] in
+                    await self?.transcribeMeeting(meeting)
+                }
+            }
         } catch {
             recoverableRecordingMeetingID = meetingID
             recordingState = .failed(message: error.localizedDescription)

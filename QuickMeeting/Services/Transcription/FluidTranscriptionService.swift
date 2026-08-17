@@ -189,8 +189,6 @@ final class FluidTranscriptionService: TranscriptionServicing {
             )
 
             let pipelineTranscript = StoredTranscript(speakers: result.speakers, segments: result.segments)
-            var visibleTranscript = pipelineTranscript
-            var correctedTranscript: StoredTranscript?
             var metadata = result.metadata
             var telemetry = metadata.jobTelemetry ?? TranscriptionJobTelemetry()
             telemetry.jobID = jobID
@@ -201,55 +199,61 @@ final class FluidTranscriptionService: TranscriptionServicing {
             metadata.isLLMCorrectionEnabled = options.isLLMCorrectionEnabled
             metadata.completedAt = dateProvider()
 
+            let rawTranscript = result.rawTranscript ?? pipelineTranscript
+            telemetry.totalSeconds = ProcessInfo.processInfo.systemUptime - jobStartUptime
+            telemetry.peakMemoryBytes = memoryTracker.stop()
+            didStopMemoryTracking = true
+            metadata.jobTelemetry = telemetry
+            let persistenceStart = ProcessInfo.processInfo.systemUptime
+            try meetingStore.completeTranscription(
+                meetingID: meetingID,
+                transcript: pipelineTranscript,
+                transcriptPreview: pipelineTranscript.fullText.trimmingCharacters(in: .whitespacesAndNewlines),
+                rawTranscript: rawTranscript,
+                correctedTranscript: nil,
+                pipelineMetadata: metadata,
+                updatedAt: dateProvider()
+            )
+            telemetry.persistenceSeconds = ProcessInfo.processInfo.systemUptime - persistenceStart
+
+            // Text-only LLM correction starts strictly after the immutable
+            // offline final has been committed. It cannot alter ids, speakers,
+            // timestamps, or segment boundaries.
             if options.isLLMCorrectionEnabled {
                 let llmStart = ProcessInfo.processInfo.systemUptime
-                defer {
-                    telemetry.llmSeconds = ProcessInfo.processInfo.systemUptime - llmStart
-                }
                 if let correctionService {
                     do {
                         let correction = try await correctionService.correct(
                             transcript: pipelineTranscript,
                             glossaryTerms: glossaryTerms
                         )
-                        visibleTranscript = correction.transcript
-                        correctedTranscript = correction.transcript
+                        telemetry.llmSeconds = ProcessInfo.processInfo.systemUptime - llmStart
                         metadata.llmCorrectionModel = correction.modelName
                         if correction.matchedSegmentCount == 0 {
                             metadata.warnings.append("LLM correction returned no matching segment ids.")
                         } else if correction.changedSegmentCount == 0 {
                             metadata.warnings.append("LLM correction returned no text changes.")
                         }
+                        metadata.jobTelemetry = telemetry
+                        try meetingStore.applyTranscriptCorrection(
+                            meetingID: meetingID,
+                            correctedTranscript: correction.transcript,
+                            pipelineMetadata: metadata,
+                            updatedAt: dateProvider()
+                        )
                     } catch {
                         metadata.warnings.append("LLM correction skipped: \(error.localizedDescription)")
+                        metadata.jobTelemetry = telemetry
+                        try? meetingStore.updateTranscriptionPipelineMetadata(
+                            meetingID: meetingID,
+                            metadata: metadata,
+                            updatedAt: dateProvider()
+                        )
                     }
                 } else {
                     metadata.warnings.append("LLM correction skipped: correction service is unavailable.")
                 }
             }
-
-            let rawTranscript = result.rawTranscript ?? pipelineTranscript
-            metadata.jobTelemetry = telemetry
-            let persistenceStart = ProcessInfo.processInfo.systemUptime
-            try meetingStore.completeTranscription(
-                meetingID: meetingID,
-                transcript: visibleTranscript,
-                transcriptPreview: visibleTranscript.fullText.trimmingCharacters(in: .whitespacesAndNewlines),
-                rawTranscript: rawTranscript,
-                correctedTranscript: correctedTranscript,
-                pipelineMetadata: metadata,
-                updatedAt: dateProvider()
-            )
-            telemetry.persistenceSeconds = ProcessInfo.processInfo.systemUptime - persistenceStart
-            telemetry.totalSeconds = ProcessInfo.processInfo.systemUptime - jobStartUptime
-            telemetry.peakMemoryBytes = memoryTracker.stop()
-            didStopMemoryTracking = true
-            metadata.jobTelemetry = telemetry
-            try meetingStore.updateTranscriptionPipelineMetadata(
-                meetingID: meetingID,
-                metadata: metadata,
-                updatedAt: dateProvider()
-            )
             Self.logTelemetry(telemetry, meetingID: meetingID)
         } catch {
             if !didStopMemoryTracking {
@@ -502,7 +506,7 @@ final class FluidTranscriptionService: TranscriptionServicing {
 /// Owns the FluidAudio managers and runs the transcription + diarization
 /// pipeline off the main actor. Models are loaded lazily and reused between
 /// runs to amortise the (substantial) load cost.
-actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
+actor OfflineFinalizationJob: FluidAudioTranscribing {
     nonisolated private static let diarizationLogger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "QuickMeeting",
         category: "OfflineDiarization"
@@ -518,7 +522,9 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         asrBackend: (any ASRBackend)? = nil,
         diarizerConfig: OfflineDiarizerConfig? = nil
     ) {
-        self.asrBackend = asrBackend ?? ParakeetASRBackend(version: asrVersion)
+        self.asrBackend = asrBackend ?? ASRBackendRouter(backends: [
+            .parakeetTDTv3: ParakeetASRBackend(version: asrVersion),
+        ])
         diarizerConfigOverride = diarizerConfig
     }
 
@@ -551,20 +557,44 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
             throw FluidTranscriptionServiceError.noAudioDecoded
         }
 
-        // 1) ASR. FluidAudio-specific result and CTC types stay inside the
-        // Parakeet adapter; the pipeline receives only TimedTranscript.
-        let asrOutput = try await asrBackend.transcribe(
-            ASRBackendRequest(
-                samples: samples,
-                languageCode: options.languageCode,
-                ctcMode: options.ctcMode,
-                glossaryTerms: glossaryTerms
-            )
-        ) { value in
+        let asrRequest = ASRBackendRequest(
+            modelID: options.offlineASRModelID,
+            samples: samples,
+            languageCode: options.languageCode,
+            ctcMode: options.ctcMode,
+            glossaryTerms: glossaryTerms
+        )
+        let asrProgress: @Sendable (Double) -> Void = { value in
             progress(.transcribing(value))
+        }
+
+        // Swift arrays are copy-on-write, so both concurrent branches share the
+        // one immutable analysis buffer instead of duplicating the recording.
+        let asrOutput: ASRBackendOutput
+        let diarization: (result: DiarizationResult, modelLoadingSeconds: TimeInterval)?
+        switch (speakerAssignment, options.offlineJobSchedule) {
+        case (.diarized, .concurrent):
+            async let pendingASR = asrBackend.transcribe(asrRequest, progress: asrProgress)
+            async let pendingDiarization = diarize(
+                samples: samples,
+                configuration: options.offlineDiarization,
+                progress: progress
+            )
+            (asrOutput, diarization) = try await (pendingASR, pendingDiarization)
+        case (.diarized, .serial):
+            asrOutput = try await asrBackend.transcribe(asrRequest, progress: asrProgress)
+            diarization = try await diarize(
+                samples: samples,
+                configuration: options.offlineDiarization,
+                progress: progress
+            )
+        case (.fixed, _):
+            asrOutput = try await asrBackend.transcribe(asrRequest, progress: asrProgress)
+            diarization = nil
         }
         telemetry.runKind = asrOutput.wasColdStart || needsDiarizerLoad ? .cold : .warm
         telemetry.modelLoadingSeconds = asrOutput.modelLoadingSeconds
+            + (diarization?.modelLoadingSeconds ?? 0)
         telemetry.asrSeconds = asrOutput.asrWallSeconds
         telemetry.ctcSeconds = asrOutput.ctcWallSeconds
         telemetry.fluidAudioASRProcessingSeconds = asrOutput.nativeProcessingSeconds
@@ -590,6 +620,8 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
                     ),
                     metadata: TranscriptionPipelineMetadata(
                         asrModel: asrOutput.modelName,
+                        backendSnapshot: asrOutput.backendSnapshot,
+                        schedule: options.offlineJobSchedule,
                         languageCode: options.languageCode,
                         requestedCTCMode: options.ctcMode,
                         resolvedCTCMode: asrOutput.resolvedCTCMode,
@@ -602,16 +634,10 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
             }
         }
 
-        // 2) Diarization (reuses the same samples).
-        Self.logDiarizationConfiguration(options.offlineDiarization)
-        let diarizerModelLoadStart = ProcessInfo.processInfo.systemUptime
-        let diarizer = try await loadDiarizer(configuration: options.offlineDiarization)
-        telemetry.modelLoadingSeconds += ProcessInfo.processInfo.systemUptime - diarizerModelLoadStart
-        let diarizationResult = try await diarizer.process(audio: samples) { chunksProcessed, totalChunks in
-            guard totalChunks > 0 else { return }
-            progress(.diarizing(Double(chunksProcessed) / Double(totalChunks)))
+        guard let diarization else {
+            throw FluidTranscriptionServiceError.pipelineFailed("Offline diarization did not produce a result.")
         }
-        progress(.diarizing(1))
+        let diarizationResult = diarization.result
         if let timings = diarizationResult.timings {
             telemetry.diarizationSegmentationSeconds = timings.segmentationSeconds
             telemetry.embeddingSeconds = timings.embeddingExtractionSeconds
@@ -666,6 +692,8 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
                 rawTranscript: rawTranscript,
                 metadata: TranscriptionPipelineMetadata(
                     asrModel: asrModelName,
+                    backendSnapshot: asrOutput.backendSnapshot,
+                    schedule: options.offlineJobSchedule,
                     languageCode: options.languageCode,
                     requestedCTCMode: options.ctcMode,
                     resolvedCTCMode: finalResolvedCTCMode,
@@ -676,6 +704,25 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
                 )
             )
         }
+    }
+
+    private func diarize(
+        samples: [Float],
+        configuration: OfflineDiarizationConfiguration,
+        progress: @escaping @Sendable (FluidTranscriptionProgress) -> Void
+    ) async throws -> (result: DiarizationResult, modelLoadingSeconds: TimeInterval) {
+        try Task.checkCancellation()
+        Self.logDiarizationConfiguration(configuration)
+        let modelLoadStart = ProcessInfo.processInfo.systemUptime
+        let diarizer = try await loadDiarizer(configuration: configuration)
+        let modelLoadingSeconds = ProcessInfo.processInfo.systemUptime - modelLoadStart
+        let result = try await diarizer.process(audio: samples) { chunksProcessed, totalChunks in
+            guard totalChunks > 0 else { return }
+            progress(.diarizing(Double(chunksProcessed) / Double(totalChunks)))
+        }
+        try Task.checkCancellation()
+        progress(.diarizing(1))
+        return (result, modelLoadingSeconds)
     }
 
     private func loadDiarizer(
@@ -998,10 +1045,12 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
             return [TranscriptSegment(text: text)]
         }
 
-        func speaker(at time: TimeInterval) -> String? {
-            diarizationSegments.first {
-                Double($0.startTimeSeconds) <= time && time < Double($0.endTimeSeconds)
-            }?.speakerId
+        let speakerIntervals = diarizationSegments.map {
+            SpeakerInterval(
+                speakerID: $0.speakerId,
+                startTime: Double($0.startTimeSeconds),
+                endTime: Double($0.endTimeSeconds)
+            )
         }
 
         struct Group {
@@ -1012,16 +1061,11 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         }
 
         var groups: [Group] = []
-        var lastKnownSpeaker: String?
         for word in transcription.words {
-            let resolved = speaker(at: word.startTime)
-            let speakerID: String?
-            if let resolved {
-                speakerID = resolved
-                lastKnownSpeaker = resolved
-            } else {
-                speakerID = lastKnownSpeaker
-            }
+            let speakerID = SpeakerWordAligner.speakerID(
+                for: word,
+                intervals: speakerIntervals
+            )
 
             if !groups.isEmpty,
                groups[groups.count - 1].speakerID == speakerID,
@@ -1113,6 +1157,10 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         return dot / denominator
     }
 }
+
+/// Compatibility name retained for existing callers and tests. The concrete
+/// implementation is the single offline finalization job.
+typealias DefaultFluidAudioPipeline = OfflineFinalizationJob
 
 private extension OfflineDiarizationConfiguration {
     nonisolated var fluidAudioConfiguration: OfflineDiarizerConfig {

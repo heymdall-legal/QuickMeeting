@@ -19,6 +19,8 @@ protocol TranscriptionLanguageStoring {
 nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
     private let userDefaults: UserDefaults
     private let languageCodeKey = "transcription.languageCode"
+    private let offlineASRModelKey = "transcription.offlineASRModel"
+    private let offlineJobScheduleKey = "transcription.offlineJobSchedule"
     private let ctcModeKey = "transcription.ctcMode"
     private let llmCorrectionEnabledKey = "transcription.llmCorrectionEnabled"
     private let diarizationClusteringThresholdKey = "transcription.diarization.clusteringThreshold"
@@ -33,7 +35,7 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
     }
 
     func languageCode() -> String? {
-        userDefaults.string(forKey: languageCodeKey)
+        "ru-RU"
     }
 
     func saveLanguageCode(_ code: String?) {
@@ -45,6 +47,13 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
     }
 
     func pipelineOptions() -> TranscriptionPipelineOptions {
+        let modelID = userDefaults.string(forKey: offlineASRModelKey)
+            .flatMap(OfflineASRModelID.init(rawValue:)) ?? .parakeetTDTv3
+        let selectableModelID = OfflineASRModelCatalog.selectable.contains(where: { $0.id == modelID })
+            ? modelID
+            : .parakeetTDTv3
+        let schedule = userDefaults.string(forKey: offlineJobScheduleKey)
+            .flatMap(OfflineJobSchedule.init(rawValue:)) ?? .serial
         let mode = userDefaults.string(forKey: ctcModeKey)
             .flatMap(TranscriptionCTCMode.init(rawValue:)) ?? .off
         let storedThreshold = userDefaults.object(forKey: diarizationClusteringThresholdKey) as? Double
@@ -57,7 +66,9 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
             forKey: voiceBankMinimumSpeechDurationKey
         ) as? Double
         return TranscriptionPipelineOptions(
-            languageCode: languageCode(),
+            offlineASRModelID: selectableModelID,
+            offlineJobSchedule: schedule,
+            languageCode: "ru-RU",
             ctcMode: mode,
             isLLMCorrectionEnabled: userDefaults.bool(forKey: llmCorrectionEnabledKey),
             offlineDiarization: OfflineDiarizationConfiguration(
@@ -75,7 +86,9 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
     }
 
     func savePipelineOptions(_ options: TranscriptionPipelineOptions) {
-        saveLanguageCode(options.languageCode)
+        userDefaults.set(options.offlineASRModelID.rawValue, forKey: offlineASRModelKey)
+        userDefaults.set(options.offlineJobSchedule.rawValue, forKey: offlineJobScheduleKey)
+        saveLanguageCode("ru-RU")
         userDefaults.set(options.ctcMode.rawValue, forKey: ctcModeKey)
         userDefaults.set(options.isLLMCorrectionEnabled, forKey: llmCorrectionEnabledKey)
         userDefaults.set(

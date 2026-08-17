@@ -155,6 +155,7 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
     private let captureStopTimeout: TimeInterval
     private let microphoneDeviceProvider: () -> MicrophoneDevice?
     private let diagnosticHandler: @Sendable (RecordingDiagnostics) -> Void
+    private let onlineAudioSink: (any OnlineAudioChunkSink)?
     private var state: State = .idle
     private var activeMicrophoneDevice: MicrophoneDevice?
     private let logger = Logger(subsystem: "info.akitov.QuickMeeting", category: "Recording")
@@ -170,7 +171,8 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
                 MicrophoneDevice(id: $0.uniqueID, name: $0.localizedName)
             }
         },
-        diagnosticHandler: @escaping @Sendable (RecordingDiagnostics) -> Void = { _ in }
+        diagnosticHandler: @escaping @Sendable (RecordingDiagnostics) -> Void = { _ in },
+        onlineAudioSink: (any OnlineAudioChunkSink)? = nil
     ) {
         self.shareableContentProvider = shareableContentProvider
         self.writerFactory = writerFactory
@@ -179,14 +181,16 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
         self.captureStopTimeout = captureStopTimeout
         self.microphoneDeviceProvider = microphoneDeviceProvider
         self.diagnosticHandler = diagnosticHandler
+        self.onlineAudioSink = onlineAudioSink
     }
 
-    convenience init() {
+    convenience init(onlineAudioSink: (any OnlineAudioChunkSink)? = nil) {
         self.init(
             shareableContentProvider: { try await Self.makeLiveCaptureTarget() },
             writerFactory: { try LosslessM4AAudioFileWriter(outputURL: $0) },
             isolatedTrackWriterFactory: { try LosslessM4AAudioFileWriter(outputURL: $0) },
-            captureConfiguration: CaptureConfiguration(capturesMicrophone: true)
+            captureConfiguration: CaptureConfiguration(capturesMicrophone: true),
+            onlineAudioSink: onlineAudioSink
         )
     }
 
@@ -212,7 +216,8 @@ final class NativeAudioCapturePipeline: AudioCapturePipeline {
                 writer: writers.mixedPreview,
                 systemWriter: writers.system,
                 microphoneWriter: writers.microphone,
-                captureConfiguration: resolvedCaptureConfiguration
+                captureConfiguration: resolvedCaptureConfiguration,
+                onlineAudioSink: onlineAudioSink
             )
             outputSink = createdOutputSink
             let session = try target.makeSession(resolvedCaptureConfiguration, createdOutputSink)
@@ -585,7 +590,8 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
         writer: any NativeAudioCapturePipeline.AudioFileWriting,
         systemWriter: (any NativeAudioCapturePipeline.AudioFileWriting)? = nil,
         microphoneWriter: (any NativeAudioCapturePipeline.AudioFileWriting)? = nil,
-        captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration = .init()
+        captureConfiguration: NativeAudioCapturePipeline.CaptureConfiguration = .init(),
+        onlineAudioSink: (any OnlineAudioChunkSink)? = nil
     ) {
         let measuringWriter = MeasuringAudioFileWriter(base: writer)
         self.writer = writer
@@ -595,7 +601,8 @@ final class CaptureOutputSink: NSObject, SCStreamOutput, SCStreamDelegate {
             systemWriter: systemWriter,
             microphoneWriter: microphoneWriter,
             capturesSystemAudio: captureConfiguration.capturesSystemAudio,
-            capturesMicrophone: captureConfiguration.capturesMicrophone
+            capturesMicrophone: captureConfiguration.capturesMicrophone,
+            onlineAudioSink: onlineAudioSink
         )
     }
 
@@ -951,6 +958,7 @@ private final class CapturedAudioMixer {
     private let microphoneWriter: (any NativeAudioCapturePipeline.AudioFileWriting)?
     private let capturesSystemAudio: Bool
     private let capturesMicrophone: Bool
+    private let onlineAudioSink: (any OnlineAudioChunkSink)?
     private let converter = CanonicalAudioBufferConverter()
     private var systemQueue: [TimestampedPCMBuffer] = []
     private var microphoneQueue: [TimestampedPCMBuffer] = []
@@ -962,13 +970,15 @@ private final class CapturedAudioMixer {
         systemWriter: (any NativeAudioCapturePipeline.AudioFileWriting)? = nil,
         microphoneWriter: (any NativeAudioCapturePipeline.AudioFileWriting)? = nil,
         capturesSystemAudio: Bool,
-        capturesMicrophone: Bool
+        capturesMicrophone: Bool,
+        onlineAudioSink: (any OnlineAudioChunkSink)? = nil
     ) {
         self.writer = writer
         self.systemWriter = systemWriter
         self.microphoneWriter = microphoneWriter
         self.capturesSystemAudio = capturesSystemAudio
         self.capturesMicrophone = capturesMicrophone
+        self.onlineAudioSink = onlineAudioSink
     }
 
     func append(
@@ -1002,7 +1012,14 @@ private final class CapturedAudioMixer {
         }
 
         if shouldPassthroughSoloSource(for: source) {
-            try appendSolo(canonicalBuffer, source: source)
+            try appendSolo(
+                canonicalBuffer,
+                presentationTimeSeconds: resolvedPresentationTimeSeconds(
+                    presentationTimeSeconds,
+                    source: source
+                ),
+                source: source
+            )
             return
         }
 
@@ -1122,7 +1139,11 @@ private final class CapturedAudioMixer {
                 return false
             }
 
-            try appendSolo(systemHead.buffer, source: .system)
+            try appendSolo(
+                systemHead.buffer,
+                presentationTimeSeconds: systemHead.presentationTimeSeconds,
+                source: .system
+            )
             systemQueue.removeFirst()
         case let (nil, microphoneHead?):
             guard force || canFlushSolo(
@@ -1132,7 +1153,11 @@ private final class CapturedAudioMixer {
                 return false
             }
 
-            try appendSolo(microphoneHead.buffer, source: .microphone)
+            try appendSolo(
+                microphoneHead.buffer,
+                presentationTimeSeconds: microphoneHead.presentationTimeSeconds,
+                source: .microphone
+            )
             microphoneQueue.removeFirst()
         case let (systemHead?, microphoneHead?):
             if systemHead.presentationTimeSeconds + Self.mixAlignmentToleranceSeconds
@@ -1151,10 +1176,18 @@ private final class CapturedAudioMixer {
                         return false
                     }
 
-                    try appendSolo(prefix.prefixBuffer, source: .system)
+                    try appendSolo(
+                        prefix.prefixBuffer,
+                        presentationTimeSeconds: systemHead.presentationTimeSeconds,
+                        source: .system
+                    )
                     systemQueue.removeFirst()
                 } else {
-                    try appendSolo(prefix.prefixBuffer, source: .system)
+                    try appendSolo(
+                        prefix.prefixBuffer,
+                        presentationTimeSeconds: systemHead.presentationTimeSeconds,
+                        source: .system
+                    )
                     systemQueue[0] = prefix.remainder
                 }
             } else if microphoneHead.presentationTimeSeconds + Self.mixAlignmentToleranceSeconds
@@ -1173,10 +1206,18 @@ private final class CapturedAudioMixer {
                         return false
                     }
 
-                    try appendSolo(prefix.prefixBuffer, source: .microphone)
+                    try appendSolo(
+                        prefix.prefixBuffer,
+                        presentationTimeSeconds: microphoneHead.presentationTimeSeconds,
+                        source: .microphone
+                    )
                     microphoneQueue.removeFirst()
                 } else {
-                    try appendSolo(prefix.prefixBuffer, source: .microphone)
+                    try appendSolo(
+                        prefix.prefixBuffer,
+                        presentationTimeSeconds: microphoneHead.presentationTimeSeconds,
+                        source: .microphone
+                    )
                     microphoneQueue[0] = prefix.remainder
                 }
             } else {
@@ -1187,7 +1228,11 @@ private final class CapturedAudioMixer {
                 try appendOverlap(
                     systemBuffer: systemHead.buffer,
                     microphoneBuffer: microphoneHead.buffer,
-                    frameCount: overlappedFrameCount
+                    frameCount: overlappedFrameCount,
+                    presentationTimeSeconds: max(
+                        systemHead.presentationTimeSeconds,
+                        microphoneHead.presentationTimeSeconds
+                    )
                 )
 
                 updateQueueAfterConsumingFrames(
@@ -1218,17 +1263,33 @@ private final class CapturedAudioMixer {
         case (nil, nil):
             return
         case let (systemHead?, nil):
-            try appendSolo(systemHead.buffer, source: .system)
+            try appendSolo(
+                systemHead.buffer,
+                presentationTimeSeconds: systemHead.presentationTimeSeconds,
+                source: .system
+            )
             systemQueue.removeFirst()
         case let (nil, microphoneHead?):
-            try appendSolo(microphoneHead.buffer, source: .microphone)
+            try appendSolo(
+                microphoneHead.buffer,
+                presentationTimeSeconds: microphoneHead.presentationTimeSeconds,
+                source: .microphone
+            )
             microphoneQueue.removeFirst()
         case let (systemHead?, microphoneHead?):
             if systemHead.presentationTimeSeconds <= microphoneHead.presentationTimeSeconds {
-                try appendSolo(systemHead.buffer, source: .system)
+                try appendSolo(
+                    systemHead.buffer,
+                    presentationTimeSeconds: systemHead.presentationTimeSeconds,
+                    source: .system
+                )
                 systemQueue.removeFirst()
             } else {
-                try appendSolo(microphoneHead.buffer, source: .microphone)
+                try appendSolo(
+                    microphoneHead.buffer,
+                    presentationTimeSeconds: microphoneHead.presentationTimeSeconds,
+                    source: .microphone
+                )
                 microphoneQueue.removeFirst()
             }
         }
@@ -1332,6 +1393,7 @@ private final class CapturedAudioMixer {
 
     private func appendSolo(
         _ buffer: AVAudioPCMBuffer,
+        presentationTimeSeconds: TimeInterval,
         source: CapturedAudioSource
     ) throws {
         switch source {
@@ -1353,13 +1415,17 @@ private final class CapturedAudioMixer {
         } else {
             previewBuffer = buffer
         }
-        try writer.append(previewBuffer)
+        try appendAuthoritativePreview(
+            previewBuffer,
+            presentationTimeSeconds: presentationTimeSeconds
+        )
     }
 
     private func appendOverlap(
         systemBuffer: AVAudioPCMBuffer,
         microphoneBuffer: AVAudioPCMBuffer,
-        frameCount: AVAudioFrameCount
+        frameCount: AVAudioFrameCount,
+        presentationTimeSeconds: TimeInterval
     ) throws {
         let systemPrefix = try sliceBuffer(
             systemBuffer,
@@ -1374,11 +1440,41 @@ private final class CapturedAudioMixer {
 
         try systemWriter?.append(systemPrefix)
         try microphoneWriter?.append(microphonePrefix)
-        try writer.append(
+        try appendAuthoritativePreview(
             try mix(
                 systemBuffer: systemPrefix,
                 microphoneBuffer: microphonePrefix,
                 frameCount: frameCount
+            ),
+            presentationTimeSeconds: presentationTimeSeconds
+        )
+    }
+
+    private func appendAuthoritativePreview(
+        _ buffer: AVAudioPCMBuffer,
+        presentationTimeSeconds: TimeInterval
+    ) throws {
+        // The source-of-truth write always happens before the best-effort draft
+        // branch. Backpressure can drop only the latter.
+        try writer.append(buffer)
+        guard let onlineAudioSink,
+              let channels = buffer.floatChannelData,
+              buffer.frameLength > 0 else { return }
+
+        let channelCount = max(1, Int(buffer.format.channelCount))
+        var mono = [Float](repeating: 0, count: Int(buffer.frameLength))
+        for frame in mono.indices {
+            var sum: Float = 0
+            for channel in 0..<channelCount {
+                sum += channels[channel][frame]
+            }
+            mono[frame] = sum / Float(channelCount)
+        }
+        _ = onlineAudioSink.offer(
+            TimestampedAudioChunk(
+                startTime: presentationTimeSeconds,
+                sampleRate: buffer.format.sampleRate,
+                samples: mono
             )
         )
     }

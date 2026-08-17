@@ -145,6 +145,29 @@ struct NativeAudioCapturePipelineTests {
     }
 
     @Test
+    func authoritativeWriterRunsBeforeBestEffortOnlineTee() async throws {
+        let writer = SpyAudioFileWriter()
+        let sinkProbe = OrderingOnlineAudioSink(writer: writer)
+        let sink = CaptureOutputSink(
+            writer: writer,
+            captureConfiguration: .init(capturesMicrophone: false),
+            onlineAudioSink: sinkProbe
+        )
+
+        try sink.appendForTesting(
+            makePCMBuffer(samples: [0.25, -0.25]),
+            presentationTimeSeconds: 7,
+            outputType: .audio
+        )
+        _ = try await sink.finish()
+
+        #expect(sinkProbe.writerWasCalledBeforeOffer)
+        #expect(sinkProbe.receivedChunk?.startTime == 7)
+        #expect(sinkProbe.receivedChunk?.sampleRate == 48_000)
+        #expect(sinkProbe.receivedChunk?.samples == [0.25, -0.25])
+    }
+
+    @Test
     func losslessM4AWriterStoresCanonicalAudioAsAppleLossless() throws {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("quickmeeting-lossless-\(UUID().uuidString).m4a")
@@ -219,5 +242,19 @@ private final class SpyAudioFileWriter: NativeAudioCapturePipeline.AudioFileWrit
 
     func finish() throws {
         finishCallCount += 1
+    }
+}
+
+private final class OrderingOnlineAudioSink: OnlineAudioChunkSink, @unchecked Sendable {
+    private let writer: SpyAudioFileWriter
+    private(set) var writerWasCalledBeforeOffer = false
+    private(set) var receivedChunk: TimestampedAudioChunk?
+
+    init(writer: SpyAudioFileWriter) { self.writer = writer }
+
+    func offer(_ chunk: TimestampedAudioChunk) -> Bool {
+        writerWasCalledBeforeOffer = writer.appendCallCount == 1
+        receivedChunk = chunk
+        return true
     }
 }

@@ -12,6 +12,7 @@ import SwiftData
 struct QuickMeetingApp: App {
     private let sharedModelContainer: ModelContainer
     private let autoRecordingMonitor: MeetingAppMonitor
+    private let onlineDraftCoordinator: OnlineDraftCoordinator
     @StateObject private var appViewModel: AppViewModel
     @StateObject private var calendarSettingsViewModel: CalendarSettingsViewModel
     @StateObject private var autoRecordingSettingsViewModel: AutoRecordingSettingsViewModel
@@ -52,16 +53,35 @@ struct QuickMeetingApp: App {
             try? meetingStore.resetStuckRecordingMeetings(updatedAt: Date())
             try? meetingStore.resetStuckTranscribingMeetings(updatedAt: Date())
             let meetingFileStore = MeetingFileStore()
+            let onlineAudioChannel = BoundedOnlineAudioChannel()
+            let onlineDraftCoordinator = OnlineDraftCoordinator(
+                meetingStore: meetingStore,
+                channel: onlineAudioChannel,
+                pipeline: OnlineDraftPipeline(
+                    asrBackend: FluidNemotronStreamingASRBackend(),
+                    diarizationBackend: FluidSortformerStreamingDiarizationBackend()
+                )
+            )
+            self.onlineDraftCoordinator = onlineDraftCoordinator
             let recordingService = DefaultRecordingService(
-                audioCapturePipeline: NativeAudioCapturePipeline()
+                audioCapturePipeline: NativeAudioCapturePipeline(onlineAudioSink: onlineAudioChannel),
+                onlineDraftCoordinator: onlineDraftCoordinator
             )
             let transcriptionProgressCenter = TranscriptionProgressCenter()
             let transcriptionSettingsStore = TranscriptionSettingsStore()
             let transcriptionGlossaryStore = TranscriptionGlossaryStore()
             let meetingSummarySettingsStore = MeetingSummarySettingsStore()
+            let parakeetBackend = ParakeetASRBackend()
+            let asrBackendRouter = ASRBackendRouter(backends: [
+                .parakeetTDTv3: parakeetBackend,
+            ])
+            let modelPreparationCenter = TranscriptionModelPreparationCenter(
+                preparer: asrBackendRouter
+            )
             let transcriptionService = FluidTranscriptionService(
                 meetingStore: meetingStore,
                 progressCenter: transcriptionProgressCenter,
+                pipeline: DefaultFluidAudioPipeline(asrBackend: asrBackendRouter),
                 knownSpeakerStore: knownSpeakerStore,
                 languageStore: transcriptionSettingsStore,
                 glossaryStore: transcriptionGlossaryStore,
@@ -132,7 +152,8 @@ struct QuickMeetingApp: App {
             _transcriptionSettingsViewModel = StateObject(
                 wrappedValue: TranscriptionSettingsViewModel(
                     settingsStore: transcriptionSettingsStore,
-                    glossaryStore: transcriptionGlossaryStore
+                    glossaryStore: transcriptionGlossaryStore,
+                    modelPreparationCenter: modelPreparationCenter
                 )
             )
             _meetingSummarySettingsViewModel = StateObject(
@@ -192,6 +213,7 @@ struct QuickMeetingApp: App {
                     }
 
                     await autoRecordingSettingsViewModel.load()
+                    await onlineDraftCoordinator.prepareModels()
                     autoRecordingMonitor.start()
                 }
         }

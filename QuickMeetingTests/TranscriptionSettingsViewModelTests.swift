@@ -14,7 +14,7 @@ struct TranscriptionSettingsViewModelTests {
             glossaryStore: glossaryStore
         )
 
-        viewModel.selectLanguage(code: "de")
+        viewModel.selectOfflineJobSchedule(.concurrent)
         viewModel.selectCTCMode(.ctc110m)
         viewModel.setLLMCorrectionEnabled(true)
         viewModel.selectClusteringPreset(.upstream06)
@@ -25,7 +25,9 @@ struct TranscriptionSettingsViewModelTests {
         viewModel.selectVoiceBankMinimumSpeechDuration(3)
 
         #expect(settingsStore.pipelineOptions() == TranscriptionPipelineOptions(
-            languageCode: "de",
+            offlineASRModelID: .parakeetTDTv3,
+            offlineJobSchedule: .concurrent,
+            languageCode: "ru-RU",
             ctcMode: .ctc110m,
             isLLMCorrectionEnabled: true,
             offlineDiarization: OfflineDiarizationConfiguration(

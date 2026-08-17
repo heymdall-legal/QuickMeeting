@@ -3,7 +3,7 @@ import Foundation
 
 /// FluidAudio/Parakeet adapter. No FluidAudio ASR result type crosses this
 /// boundary; the rest of the app only sees backend-neutral timed words.
-actor ParakeetASRBackend: ASRBackend {
+actor ParakeetASRBackend: ASRBackend, ASRModelPreparing {
     private let version: AsrModelVersion
     private var manager: AsrManager?
 
@@ -74,6 +74,7 @@ actor ParakeetASRBackend: ASRBackend {
             adjustedText: adjustedText,
             replacements: replacements,
             modelName: "Parakeet TDT v3",
+            backendSnapshot: Self.backendSnapshot,
             resolvedCTCMode: resolvedCTCMode,
             warnings: warnings,
             wasColdStart: wasColdStart,
@@ -83,6 +84,41 @@ actor ParakeetASRBackend: ASRBackend {
             nativeProcessingSeconds: fluidResult.processingTime
         )
     }
+
+    func prepare(
+        modelID: OfflineASRModelID,
+        progress: @escaping @Sendable (Double, String) -> Void
+    ) async throws {
+        guard modelID == .parakeetTDTv3 else {
+            throw ASRBackendRouterError.unavailable(modelID)
+        }
+        _ = try await loadManager { download in
+            let phase: String
+            switch download.phase {
+            case .listing:
+                phase = "Checking model files"
+            case .downloading:
+                phase = "Downloading model"
+            case .compiling:
+                phase = "Compiling Core ML model"
+            }
+            progress(download.fractionCompleted, phase)
+        }
+        progress(1, "Ready")
+    }
+
+    nonisolated static let backendSnapshot = ASRBackendSnapshot(
+        backendID: "fluidaudio.parakeet",
+        modelID: .parakeetTDTv3,
+        modelName: "Parakeet TDT v3",
+        modelVersion: "FluidInference/parakeet-tdt-0.6b-v3-coreml:int8",
+        runtime: "FluidAudio@c7b13a3942e79893f3bd76bfe3b1ed8d03e0bfc7/CoreML",
+        configuration: [
+            "language": "ru-RU",
+            "melChunkContext": "false",
+            "seamGapRepair": "true",
+        ]
+    )
 
     nonisolated static func makeTimedTranscript(from result: ASRResult) -> TimedTranscript {
         guard let tokens = result.tokenTimings, !tokens.isEmpty else {
@@ -125,13 +161,29 @@ actor ParakeetASRBackend: ASRBackend {
         return token.trimmingCharacters(in: .whitespaces)
     }
 
-    private func loadManager(config: ASRConfig) async throws -> AsrManager {
+    private func loadManager(
+        config: ASRConfig,
+        progressHandler: ProgressHandler? = nil
+    ) async throws -> AsrManager {
         if let manager { return manager }
-        let models = try await AsrModels.downloadAndLoad(version: version)
+        let models = try await AsrModels.downloadAndLoad(
+            version: version,
+            progressHandler: progressHandler
+        )
         let loadedManager = AsrManager(config: config)
         try await loadedManager.loadModels(models)
         manager = loadedManager
         return loadedManager
+    }
+
+    private func loadManager(
+        progressHandler: ProgressHandler? = nil
+    ) async throws -> AsrManager {
+        let configuration = ParakeetLongFormConfiguration(
+            languageCode: "ru-RU",
+            modelVersion: version
+        )
+        return try await loadManager(config: configuration.asrConfig, progressHandler: progressHandler)
     }
 
     private func applyCTCRescoring(

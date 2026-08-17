@@ -5,6 +5,17 @@ import Testing
 
 struct ASRBackendTests {
     @Test
+    func selectorContainsOnlySmokeTestedBackendAndTracksCurrentGigaAMVariants() {
+        #expect(OfflineASRModelCatalog.selectable.map(\.id) == [.parakeetTDTv3])
+        #expect(GigaAMMultilingualVariant.allCases.map(\.rawValue) == [
+            "multilingual_ssl",
+            "multilingual_large_ssl",
+            "multilingual_ctc",
+            "multilingual_large_ctc",
+        ])
+    }
+
+    @Test
     func russianV3SelectionUsesExplicitLanguageAndMultilingualLongFormConfig() {
         let selection = ParakeetLongFormConfiguration(languageCode: "ru", modelVersion: .v3)
 

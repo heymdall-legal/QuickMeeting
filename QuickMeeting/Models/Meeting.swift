@@ -45,16 +45,29 @@ final class Meeting {
     }
 
     var storedTranscript: StoredTranscript? {
-        guard !transcriptSpeakers.isEmpty || !transcriptSegments.isEmpty else {
-            return nil
+        if !transcriptSpeakers.isEmpty || !transcriptSegments.isEmpty {
+            return finalStoredTranscript
         }
 
+        return onlineDraftStoredTranscript
+    }
+
+    var finalStoredTranscript: StoredTranscript? {
+        guard !transcriptSpeakers.isEmpty || !transcriptSegments.isEmpty else { return nil }
         return StoredTranscript(
             speakers: transcriptSpeakers.map(\.value),
             segments: transcriptSegments
                 .sorted(by: Self.arePersistedTranscriptSegmentsInDisplayOrder)
                 .map(\.value)
         )
+    }
+
+    var onlineDraftStoredTranscript: StoredTranscript? {
+        transcriptArtifactEnvelope?.onlineDraft?.storedTranscript
+    }
+
+    var transcriptLifecycleState: TranscriptLifecycleState? {
+        transcriptArtifactEnvelope?.lifecycleState
     }
 
     var attendeeNames: [String] {
@@ -70,7 +83,27 @@ final class Meeting {
     }
 
     var transcriptionPipelineMetadata: TranscriptionPipelineMetadata? {
-        Self.decode(TranscriptionPipelineMetadata.self, from: transcriptionPipelineMetadataData)
+        transcriptArtifactEnvelope?.finalMetadata
+    }
+
+    private var transcriptArtifactEnvelope: TranscriptArtifactEnvelope? {
+        if let envelope = Self.decode(
+            TranscriptArtifactEnvelope.self,
+            from: transcriptionPipelineMetadataData
+        ) {
+            return envelope
+        }
+        guard let legacy = Self.decode(
+            TranscriptionPipelineMetadata.self,
+            from: transcriptionPipelineMetadataData
+        ) else {
+            return nil
+        }
+        return TranscriptArtifactEnvelope(
+            lifecycleState: .finalAvailable,
+            visibleVersion: .final,
+            finalMetadata: legacy
+        )
     }
 
     init(
@@ -137,13 +170,15 @@ final class Meeting {
     }
 
     func beginTranscription(updatedAt: Date = Date()) {
-        transcriptPreview = nil
-        transcriptSpeakers.removeAll()
-        transcriptSegments.removeAll()
-        rawTranscriptData = nil
-        correctedTranscriptData = nil
-        transcriptionPipelineMetadataData = nil
-        summaryText = nil
+        // The published final stays visible while a replacement job runs.
+        // Runtime progress represents the in-flight job; no persisted artifact
+        // is mutated until completeTranscription commits the replacement.
+        var envelope = transcriptArtifactEnvelope ?? TranscriptArtifactEnvelope(
+            lifecycleState: .finalizing,
+            visibleVersion: finalStoredTranscript == nil ? .draft : .final
+        )
+        envelope.lifecycleState = .finalizing
+        transcriptionPipelineMetadataData = Self.encode(envelope)
         touch(updatedAt: updatedAt)
     }
 
@@ -164,7 +199,14 @@ final class Meeting {
         }
         rawTranscriptData = Self.encode(rawTranscript)
         correctedTranscriptData = Self.encode(correctedTranscript)
-        transcriptionPipelineMetadataData = Self.encode(pipelineMetadata)
+        var envelope = transcriptArtifactEnvelope ?? TranscriptArtifactEnvelope(
+            lifecycleState: .finalAvailable,
+            visibleVersion: .final
+        )
+        envelope.lifecycleState = .finalAvailable
+        envelope.visibleVersion = .final
+        envelope.finalMetadata = pipelineMetadata
+        transcriptionPipelineMetadataData = Self.encode(envelope)
         summaryText = nil
         statusRawValue = MeetingStatus.completed.rawValue
         touch(updatedAt: updatedAt)
@@ -185,7 +227,95 @@ final class Meeting {
     }
 
     func failTranscription(updatedAt: Date = Date()) {
-        statusRawValue = MeetingStatus.failed.rawValue
+        var envelope = transcriptArtifactEnvelope ?? TranscriptArtifactEnvelope(
+            lifecycleState: .finalFailed,
+            visibleVersion: finalStoredTranscript == nil ? .draft : .final
+        )
+        envelope.lifecycleState = .finalFailed
+        envelope.visibleVersion = finalStoredTranscript == nil ? .draft : .final
+        transcriptionPipelineMetadataData = Self.encode(envelope)
+        statusRawValue = finalStoredTranscript == nil
+            ? MeetingStatus.failed.rawValue
+            : MeetingStatus.completed.rawValue
+        touch(updatedAt: updatedAt)
+    }
+
+    func applyTranscriptCorrection(
+        _ correctedTranscript: StoredTranscript,
+        pipelineMetadata: TranscriptionPipelineMetadata,
+        updatedAt: Date = Date()
+    ) {
+        guard let published = storedTranscript,
+              Self.hasIdenticalStructure(published, correctedTranscript) else {
+            return
+        }
+        transcriptPreview = correctedTranscript.fullText
+        transcriptSpeakers = published.speakers.map(PersistedTranscriptSpeaker.init)
+        transcriptSegments = correctedTranscript.segments.enumerated().map { index, segment in
+            PersistedTranscriptSegment(segment, sortIndex: index)
+        }
+        correctedTranscriptData = Self.encode(correctedTranscript)
+        var envelope = transcriptArtifactEnvelope ?? TranscriptArtifactEnvelope(
+            lifecycleState: .finalAvailable,
+            visibleVersion: .final
+        )
+        envelope.finalMetadata = pipelineMetadata
+        transcriptionPipelineMetadataData = Self.encode(envelope)
+        touch(updatedAt: updatedAt)
+    }
+
+    func beginOnlineDraft(updatedAt: Date = Date()) {
+        var envelope = transcriptArtifactEnvelope ?? TranscriptArtifactEnvelope(
+            lifecycleState: .recording,
+            visibleVersion: .draft,
+            onlineDraft: OnlineDraftTranscript()
+        )
+        envelope.lifecycleState = .recording
+        envelope.visibleVersion = finalStoredTranscript == nil ? .draft : .final
+        if envelope.onlineDraft == nil { envelope.onlineDraft = OnlineDraftTranscript() }
+        transcriptionPipelineMetadataData = Self.encode(envelope)
+        touch(updatedAt: updatedAt)
+    }
+
+    func upsertOnlineDraftEvent(_ event: OnlineDraftEvent, updatedAt: Date = Date()) {
+        var envelope = transcriptArtifactEnvelope ?? TranscriptArtifactEnvelope(
+            lifecycleState: .recording,
+            visibleVersion: .draft,
+            onlineDraft: OnlineDraftTranscript()
+        )
+        var draft = envelope.onlineDraft ?? OnlineDraftTranscript()
+        draft.upsert(event)
+        envelope.onlineDraft = draft
+        envelope.visibleVersion = finalStoredTranscript == nil ? .draft : .final
+        transcriptionPipelineMetadataData = Self.encode(envelope)
+        if finalStoredTranscript == nil {
+            transcriptPreview = draft.storedTranscript.fullText
+        }
+        touch(updatedAt: updatedAt)
+    }
+
+    func finishOnlineDraft(updatedAt: Date = Date()) {
+        var envelope = transcriptArtifactEnvelope ?? TranscriptArtifactEnvelope(
+            lifecycleState: .draftAvailable,
+            visibleVersion: .draft,
+            onlineDraft: OnlineDraftTranscript()
+        )
+        envelope.lifecycleState = .draftAvailable
+        envelope.visibleVersion = finalStoredTranscript == nil ? .draft : .final
+        transcriptionPipelineMetadataData = Self.encode(envelope)
+        touch(updatedAt: updatedAt)
+    }
+
+    func storeOnlineDraftTelemetry(
+        _ telemetry: OnlineDraftTelemetry,
+        updatedAt: Date = Date()
+    ) {
+        var envelope = transcriptArtifactEnvelope ?? TranscriptArtifactEnvelope(
+            lifecycleState: .draftAvailable,
+            visibleVersion: finalStoredTranscript == nil ? .draft : .final
+        )
+        envelope.onlineTelemetry = telemetry
+        transcriptionPipelineMetadataData = Self.encode(envelope)
         touch(updatedAt: updatedAt)
     }
 
@@ -193,7 +323,12 @@ final class Meeting {
         _ metadata: TranscriptionPipelineMetadata,
         updatedAt: Date = Date()
     ) {
-        transcriptionPipelineMetadataData = Self.encode(metadata)
+        var envelope = transcriptArtifactEnvelope ?? TranscriptArtifactEnvelope(
+            lifecycleState: .finalAvailable,
+            visibleVersion: .final
+        )
+        envelope.finalMetadata = metadata
+        transcriptionPipelineMetadataData = Self.encode(envelope)
         touch(updatedAt: updatedAt)
     }
 
@@ -219,6 +354,22 @@ final class Meeting {
     private static func decode<T: Decodable>(_ type: T.Type, from data: Data?) -> T? {
         guard let data else { return nil }
         return try? JSONDecoder().decode(type, from: data)
+    }
+
+    private static func hasIdenticalStructure(
+        _ published: StoredTranscript,
+        _ corrected: StoredTranscript
+    ) -> Bool {
+        guard published.speakers == corrected.speakers,
+              published.segments.count == corrected.segments.count else {
+            return false
+        }
+        return zip(published.segments, corrected.segments).allSatisfy { original, replacement in
+            original.id == replacement.id
+                && original.startTime == replacement.startTime
+                && original.endTime == replacement.endTime
+                && original.speakerID == replacement.speakerID
+        }
     }
 
     private static func arePersistedTranscriptSegmentsInDisplayOrder(

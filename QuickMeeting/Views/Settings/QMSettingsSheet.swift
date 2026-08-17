@@ -170,15 +170,30 @@ struct QMSettingsSheet: View {
 
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Default language")
+                    Text("Offline model")
                         .font(.system(size: 14.5, weight: .semibold))
                         .foregroundStyle(QMTheme.ink)
-                    Text("Auto-detect picks the language per recording.")
+                    Text("One global model for Russian meetings. Each job saves an exact backend snapshot.")
                         .font(.system(size: 12.5))
                         .foregroundStyle(QMTheme.tertiary)
                 }
                 Spacer(minLength: 0)
-                languageMenu
+                offlineASRModelMenu
+            }
+
+            modelPreparationStatus
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Offline execution")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Serial is the safe default; concurrent mode is opt-in until three warm benchmark runs prove a stable benefit.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                offlineJobScheduleMenu
             }
 
             HStack(alignment: .top, spacing: 16) {
@@ -277,7 +292,7 @@ struct QMSettingsSheet: View {
                     Text("LLM transcript correction")
                         .font(.system(size: 14.5, weight: .semibold))
                         .foregroundStyle(QMTheme.ink)
-                    Text("Runs after ASR and diarization when correction settings are complete.")
+                    Text("Runs only after the offline final is atomically published.")
                         .font(.system(size: 12.5))
                         .foregroundStyle(QMTheme.tertiary)
                 }
@@ -290,22 +305,22 @@ struct QMSettingsSheet: View {
         }
     }
 
-    private var languageMenu: some View {
+    private var offlineASRModelMenu: some View {
         Menu {
-            ForEach(transcriptionViewModel.options) { option in
+            ForEach(transcriptionViewModel.offlineASRModels) { model in
                 Button {
-                    transcriptionViewModel.selectLanguage(code: option.code)
+                    transcriptionViewModel.selectOfflineASRModel(model.id)
                 } label: {
-                    if transcriptionViewModel.languageCode == option.code {
-                        Label(option.name, systemImage: "checkmark")
+                    if transcriptionViewModel.offlineASRModelID == model.id {
+                        Label(model.displayName, systemImage: "checkmark")
                     } else {
-                        Text(option.name)
+                        Text(model.displayName)
                     }
                 }
             }
         } label: {
             HStack(spacing: 8) {
-                Text(transcriptionViewModel.selectedLanguageName)
+                Text(transcriptionViewModel.selectedOfflineASRModelName)
                     .font(.system(size: 13.5))
                     .foregroundStyle(QMTheme.ink)
                 Spacer(minLength: 0)
@@ -322,6 +337,74 @@ struct QMSettingsSheet: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    private var offlineJobScheduleMenu: some View {
+        Menu {
+            Button("Serial") {
+                transcriptionViewModel.selectOfflineJobSchedule(.serial)
+            }
+            Button("Concurrent (experimental)") {
+                transcriptionViewModel.selectOfflineJobSchedule(.concurrent)
+            }
+        } label: {
+            settingsMenuLabel(
+                transcriptionViewModel.offlineJobSchedule == .serial
+                    ? "Serial"
+                    : "Concurrent"
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private var modelPreparationStatus: some View {
+        switch transcriptionViewModel.modelPreparationState {
+        case .notPrepared:
+            HStack(spacing: 10) {
+                Text("Model will be downloaded, compiled, and cached on this Mac.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(QMTheme.tertiary)
+                Spacer()
+                Button("Prepare model") {
+                    transcriptionViewModel.prepareSelectedOfflineASRModel()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        case .preparing(let progress, let phase):
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text(phase)
+                    Spacer()
+                    Text("\(Int(progress * 100))%")
+                }
+                .font(.system(size: 12.5))
+                .foregroundStyle(QMTheme.tertiary)
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+            }
+        case .ready:
+            Label("Model is loaded and ready", systemImage: "checkmark.circle.fill")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(QMTheme.sage)
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 5) {
+                Label("Model preparation failed", systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(.red)
+                Text(message)
+                    .font(.system(size: 12))
+                    .foregroundStyle(QMTheme.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Retry") {
+                    transcriptionViewModel.prepareSelectedOfflineASRModel()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
     }
 
     private var ctcModeMenu: some View {

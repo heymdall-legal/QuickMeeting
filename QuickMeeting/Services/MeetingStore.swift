@@ -122,6 +122,38 @@ struct MeetingStore {
         try modelContext.save()
     }
 
+    func beginOnlineDraft(meetingID: UUID, updatedAt: Date) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.beginOnlineDraft(updatedAt: updatedAt)
+        try modelContext.save()
+    }
+
+    func upsertOnlineDraftEvent(
+        meetingID: UUID,
+        event: OnlineDraftEvent,
+        updatedAt: Date
+    ) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.upsertOnlineDraftEvent(event, updatedAt: updatedAt)
+        try modelContext.save()
+    }
+
+    func finishOnlineDraft(meetingID: UUID, updatedAt: Date) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.finishOnlineDraft(updatedAt: updatedAt)
+        try modelContext.save()
+    }
+
+    func storeOnlineDraftTelemetry(
+        meetingID: UUID,
+        telemetry: OnlineDraftTelemetry,
+        updatedAt: Date
+    ) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.storeOnlineDraftTelemetry(telemetry, updatedAt: updatedAt)
+        try modelContext.save()
+    }
+
     func renameMeeting(meetingID: UUID, title: String, updatedAt: Date) throws {
         let meeting = try fetchMeeting(id: meetingID)
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -408,6 +440,22 @@ struct MeetingStore {
         let meeting = try fetchMeeting(id: meetingID)
         meeting.failTranscription(updatedAt: updatedAt)
         try modelContext.save()
+    }
+
+    func applyTranscriptCorrection(
+        meetingID: UUID,
+        correctedTranscript: StoredTranscript,
+        pipelineMetadata: TranscriptionPipelineMetadata,
+        updatedAt: Date
+    ) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.applyTranscriptCorrection(
+            correctedTranscript,
+            pipelineMetadata: pipelineMetadata,
+            updatedAt: updatedAt
+        )
+        try modelContext.save()
+        syncMarkdownExportBestEffort(for: meeting)
     }
 
     func updateTranscriptionPipelineMetadata(

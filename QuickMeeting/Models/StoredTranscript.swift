@@ -37,6 +37,8 @@ nonisolated enum TranscriptionCTCMode: String, Codable, CaseIterable, Sendable {
 }
 
 nonisolated struct TranscriptionPipelineOptions: Codable, Equatable, Sendable {
+    var offlineASRModelID: OfflineASRModelID
+    var offlineJobSchedule: OfflineJobSchedule
     var languageCode: String?
     var ctcMode: TranscriptionCTCMode
     var isLLMCorrectionEnabled: Bool
@@ -44,12 +46,16 @@ nonisolated struct TranscriptionPipelineOptions: Codable, Equatable, Sendable {
     var voiceBankMatching: VoiceBankMatchingConfiguration
 
     init(
-        languageCode: String? = nil,
+        offlineASRModelID: OfflineASRModelID = .parakeetTDTv3,
+        offlineJobSchedule: OfflineJobSchedule = .serial,
+        languageCode: String? = "ru-RU",
         ctcMode: TranscriptionCTCMode = .off,
         isLLMCorrectionEnabled: Bool = false,
         offlineDiarization: OfflineDiarizationConfiguration = .legacy,
         voiceBankMatching: VoiceBankMatchingConfiguration = .default
     ) {
+        self.offlineASRModelID = offlineASRModelID
+        self.offlineJobSchedule = offlineJobSchedule
         self.languageCode = languageCode
         self.ctcMode = ctcMode
         self.isLLMCorrectionEnabled = isLLMCorrectionEnabled
@@ -131,6 +137,8 @@ nonisolated enum OfflineEmbeddingSkipStrategy: String, Codable, CaseIterable, Se
 
 nonisolated struct TranscriptionPipelineMetadata: Codable, Equatable, Sendable {
     var asrModel: String
+    var backendSnapshot: ASRBackendSnapshot?
+    var schedule: OfflineJobSchedule?
     var languageCode: String?
     var requestedCTCMode: TranscriptionCTCMode
     var resolvedCTCMode: TranscriptionCTCMode?
@@ -143,6 +151,8 @@ nonisolated struct TranscriptionPipelineMetadata: Codable, Equatable, Sendable {
 
     init(
         asrModel: String,
+        backendSnapshot: ASRBackendSnapshot? = nil,
+        schedule: OfflineJobSchedule? = nil,
         languageCode: String? = nil,
         requestedCTCMode: TranscriptionCTCMode = .off,
         resolvedCTCMode: TranscriptionCTCMode? = nil,
@@ -154,6 +164,8 @@ nonisolated struct TranscriptionPipelineMetadata: Codable, Equatable, Sendable {
         jobTelemetry: TranscriptionJobTelemetry? = nil
     ) {
         self.asrModel = asrModel
+        self.backendSnapshot = backendSnapshot
+        self.schedule = schedule
         self.languageCode = languageCode
         self.requestedCTCMode = requestedCTCMode
         self.resolvedCTCMode = resolvedCTCMode

@@ -10,6 +10,8 @@ import Foundation
 
 @MainActor
 final class TranscriptionSettingsViewModel: ObservableObject {
+    @Published private(set) var offlineASRModelID: OfflineASRModelID
+    @Published private(set) var offlineJobSchedule: OfflineJobSchedule
     @Published private(set) var languageCode: String?
     @Published private(set) var ctcMode: TranscriptionCTCMode
     @Published private(set) var isLLMCorrectionEnabled: Bool
@@ -17,17 +19,24 @@ final class TranscriptionSettingsViewModel: ObservableObject {
     @Published private(set) var voiceBankMatching: VoiceBankMatchingConfiguration
     @Published private(set) var glossaryTerms: [TranscriptionGlossaryTerm]
     @Published private(set) var isGlossaryLoaded: Bool
+    @Published private(set) var modelPreparationState: TranscriptionModelPreparationState
 
     private let settingsStore: any TranscriptionLanguageStoring
     private let glossaryStore: TranscriptionGlossaryStore
+    private let modelPreparationCenter: TranscriptionModelPreparationCenter?
+    private var cancellables = Set<AnyCancellable>()
 
     init(
         settingsStore: any TranscriptionLanguageStoring,
-        glossaryStore: TranscriptionGlossaryStore = TranscriptionGlossaryStore()
+        glossaryStore: TranscriptionGlossaryStore = TranscriptionGlossaryStore(),
+        modelPreparationCenter: TranscriptionModelPreparationCenter? = nil
     ) {
         self.settingsStore = settingsStore
         self.glossaryStore = glossaryStore
+        self.modelPreparationCenter = modelPreparationCenter
         let options = settingsStore.pipelineOptions()
+        offlineASRModelID = options.offlineASRModelID
+        offlineJobSchedule = options.offlineJobSchedule
         languageCode = options.languageCode
         ctcMode = options.ctcMode
         isLLMCorrectionEnabled = options.isLLMCorrectionEnabled
@@ -35,9 +44,18 @@ final class TranscriptionSettingsViewModel: ObservableObject {
         voiceBankMatching = options.voiceBankMatching
         glossaryTerms = []
         isGlossaryLoaded = false
+        modelPreparationState = modelPreparationCenter?.state(for: options.offlineASRModelID) ?? .notPrepared
+
+        modelPreparationCenter?.$stateByModel
+            .sink { [weak self] states in
+                guard let self else { return }
+                self.modelPreparationState = states[self.offlineASRModelID] ?? .notPrepared
+            }
+            .store(in: &cancellables)
     }
 
     var options: [TranscriptionLanguageOption] { TranscriptionLanguageOption.all }
+    var offlineASRModels: [OfflineASRModelDescriptor] { OfflineASRModelCatalog.selectable }
     var ctcOptions: [TranscriptionCTCMode] { TranscriptionCTCMode.allCases }
     var clusteringPresets: [OfflineClusteringPreset] { OfflineClusteringPreset.allCases }
     var diarizationStepRatios: [Double] { [0.15, 0.2, 0.25] }
@@ -47,14 +65,33 @@ final class TranscriptionSettingsViewModel: ObservableObject {
     var voiceBankMinimumSpeechDurations: [TimeInterval] { [1, 2, 3, 5] }
 
     var selectedLanguageName: String { TranscriptionLanguageOption.name(for: languageCode) }
+    var selectedOfflineASRModelName: String {
+        OfflineASRModelCatalog.descriptor(for: offlineASRModelID)?.displayName ?? "Unavailable model"
+    }
     var selectedClusteringName: String {
         offlineDiarization.clusteringPreset?.displayName
             ?? String(format: "Custom · %.2f", offlineDiarization.clusteringThreshold)
     }
 
     func selectLanguage(code: String?) {
-        languageCode = code
+        languageCode = "ru-RU"
         savePipelineOptions()
+    }
+
+    func selectOfflineASRModel(_ id: OfflineASRModelID) {
+        guard offlineASRModels.contains(where: { $0.id == id }) else { return }
+        offlineASRModelID = id
+        modelPreparationState = modelPreparationCenter?.state(for: id) ?? .notPrepared
+        savePipelineOptions()
+    }
+
+    func selectOfflineJobSchedule(_ schedule: OfflineJobSchedule) {
+        offlineJobSchedule = schedule
+        savePipelineOptions()
+    }
+
+    func prepareSelectedOfflineASRModel() {
+        modelPreparationCenter?.prepare(offlineASRModelID)
     }
 
     func selectCTCMode(_ mode: TranscriptionCTCMode) {
@@ -138,7 +175,9 @@ final class TranscriptionSettingsViewModel: ObservableObject {
     private func savePipelineOptions() {
         settingsStore.savePipelineOptions(
             TranscriptionPipelineOptions(
-                languageCode: languageCode,
+                offlineASRModelID: offlineASRModelID,
+                offlineJobSchedule: offlineJobSchedule,
+                languageCode: "ru-RU",
                 ctcMode: ctcMode,
                 isLLMCorrectionEnabled: isLLMCorrectionEnabled,
                 offlineDiarization: offlineDiarization,

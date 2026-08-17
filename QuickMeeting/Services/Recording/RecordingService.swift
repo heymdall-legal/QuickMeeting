@@ -38,20 +38,31 @@ final class DefaultRecordingService: RecordingService {
     }
 
     private let audioCapturePipeline: any AudioCapturePipeline
+    private let onlineDraftCoordinator: OnlineDraftCoordinator?
     private var state: State = .idle
 
-    init(audioCapturePipeline: any AudioCapturePipeline) {
+    init(
+        audioCapturePipeline: any AudioCapturePipeline,
+        onlineDraftCoordinator: OnlineDraftCoordinator? = nil
+    ) {
         self.audioCapturePipeline = audioCapturePipeline
+        self.onlineDraftCoordinator = onlineDraftCoordinator
     }
 
-    func startRecording(meeting _: Meeting, outputURL: URL) async throws {
+    func startRecording(meeting: Meeting, outputURL: URL) async throws {
         guard case .idle = state else {
             throw DefaultRecordingServiceError.recordingAlreadyActive
         }
 
         let recordingToken = UUID()
         let startTask = Task { @MainActor in
-            try await audioCapturePipeline.start(outputURL: outputURL)
+            onlineDraftCoordinator?.start(meetingID: meeting.id)
+            do {
+                try await audioCapturePipeline.start(outputURL: outputURL)
+            } catch {
+                await onlineDraftCoordinator?.stop()
+                throw error
+            }
         }
 
         state = .starting(token: recordingToken, task: startTask)
@@ -79,6 +90,7 @@ final class DefaultRecordingService: RecordingService {
                 }
 
                 try await audioCapturePipeline.stop()
+                await onlineDraftCoordinator?.stop()
             }
 
             state = .stopping(
@@ -95,6 +107,7 @@ final class DefaultRecordingService: RecordingService {
         case .recording(let recordingToken):
             let stopTask = Task { @MainActor in
                 try await audioCapturePipeline.stop()
+                await onlineDraftCoordinator?.stop()
             }
 
             state = .stopping(

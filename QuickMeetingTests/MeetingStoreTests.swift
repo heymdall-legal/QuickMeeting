@@ -306,7 +306,7 @@ struct MeetingStoreTests {
     }
 
     @Test
-    func startTranscriptionClearsExistingTranscriptMetadata() throws {
+    func startTranscriptionPreservesPublishedTranscriptUntilReplacementSucceeds() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createCompletedMeeting(
             transcript: StoredTranscript(
@@ -321,9 +321,10 @@ struct MeetingStoreTests {
 
         let reloaded = try harness.reloadMeeting(id: meeting.id)
         #expect(try reloaded.status == .completed)
-        #expect(reloaded.transcriptPreview == nil)
-        #expect(reloaded.transcriptSpeakers.isEmpty)
-        #expect(reloaded.transcriptSegments.isEmpty)
+        #expect(reloaded.transcriptPreview == "Existing transcript")
+        #expect(reloaded.transcriptSpeakers.map(\.displayName) == ["Speaker 1"])
+        #expect(reloaded.transcriptSegments.map(\.text) == ["Existing transcript"])
+        #expect(reloaded.transcriptLifecycleState == .finalizing)
         #expect(reloaded.updatedAt == updatedAt)
     }
 
@@ -434,7 +435,7 @@ struct MeetingStoreTests {
     }
 
     @Test
-    func startingOrCompletingTranscriptionClearsStoredSummary() throws {
+    func reprocessingPreservesSummaryUntilNewFinalIsPublished() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()
         let transcript = StoredTranscript(
@@ -451,7 +452,7 @@ struct MeetingStoreTests {
             meetingID: meeting.id,
             updatedAt: Date(timeIntervalSince1970: 1_715_325_060)
         )
-        #expect(try harness.store.fetchMeeting(id: meeting.id).summaryText == nil)
+        #expect(try harness.store.fetchMeeting(id: meeting.id).summaryText == "Old summary")
 
         try harness.store.completeTranscription(
             meetingID: meeting.id,
@@ -463,7 +464,7 @@ struct MeetingStoreTests {
     }
 
     @Test
-    func failTranscriptionMarksMeetingAsFailedWithoutRemovingTranscriptMetadata() throws {
+    func failedReprocessingKeepsPublishedFinalAndCompletedStatus() throws {
         let harness = try MeetingStoreHarness()
         let meeting = try harness.createRecordedMeeting()
         let transcript = StoredTranscript(
@@ -482,7 +483,8 @@ struct MeetingStoreTests {
         try harness.store.failTranscription(meetingID: meeting.id, updatedAt: failedAt)
 
         let reloaded = try harness.reloadMeeting(id: meeting.id)
-        #expect(try reloaded.status == .failed)
+        #expect(try reloaded.status == .completed)
+        #expect(reloaded.transcriptLifecycleState == .finalFailed)
         #expect(reloaded.transcriptPreview == "Existing transcript")
         #expect(reloaded.transcriptSpeakers.map(\.displayName) == ["Speaker 1"])
         #expect(reloaded.transcriptSegments.map(\.text) == ["Existing transcript"])

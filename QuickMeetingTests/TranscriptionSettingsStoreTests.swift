@@ -9,7 +9,9 @@ struct TranscriptionSettingsStoreTests {
         let store = TranscriptionSettingsStore(userDefaults: defaults)
 
         #expect(store.pipelineOptions() == TranscriptionPipelineOptions(
-            languageCode: nil,
+            offlineASRModelID: .parakeetTDTv3,
+            offlineJobSchedule: .serial,
+            languageCode: "ru-RU",
             ctcMode: .off,
             isLLMCorrectionEnabled: false
         ))
@@ -20,9 +22,10 @@ struct TranscriptionSettingsStoreTests {
         let defaults = makeDefaults()
         let store = TranscriptionSettingsStore(userDefaults: defaults)
 
-        store.saveLanguageCode("de")
         store.savePipelineOptions(.init(
-            languageCode: "fr",
+            offlineASRModelID: .parakeetTDTv3,
+            offlineJobSchedule: .concurrent,
+            languageCode: "de",
             ctcMode: .ctc06b,
             isLLMCorrectionEnabled: true,
             offlineDiarization: OfflineDiarizationConfiguration(
@@ -37,9 +40,11 @@ struct TranscriptionSettingsStoreTests {
             )
         ))
 
-        #expect(store.languageCode() == "fr")
+        #expect(store.languageCode() == "ru-RU")
         #expect(store.pipelineOptions() == TranscriptionPipelineOptions(
-            languageCode: "fr",
+            offlineASRModelID: .parakeetTDTv3,
+            offlineJobSchedule: .concurrent,
+            languageCode: "ru-RU",
             ctcMode: .ctc06b,
             isLLMCorrectionEnabled: true,
             offlineDiarization: OfflineDiarizationConfiguration(
