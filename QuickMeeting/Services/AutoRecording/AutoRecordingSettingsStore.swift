@@ -19,6 +19,7 @@ struct AutoRecordingSettingsStore: AutoRecordingSettingsStoring {
     private let legacyAppKey = "autoRecording.app"
     private let startDelayKey = "autoRecording.startDelay"
     private let stopGraceKey = "autoRecording.stopGrace"
+    private let maximumMeetingDurationKey = "autoRecording.maximumMeetingDurationHours"
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -32,7 +33,10 @@ struct AutoRecordingSettingsStore: AutoRecordingSettingsStoring {
             isEnabled: userDefaults.object(forKey: enabledKey) as? Bool ?? defaults.isEnabled,
             selectedApps: selectedApps,
             startDelay: userDefaults.object(forKey: startDelayKey) as? Double ?? defaults.startDelay,
-            stopGracePeriod: userDefaults.object(forKey: stopGraceKey) as? Double ?? defaults.stopGracePeriod
+            stopGracePeriod: userDefaults.object(forKey: stopGraceKey) as? Double ?? defaults.stopGracePeriod,
+            maximumMeetingDurationHours: userDefaults.object(forKey: maximumMeetingDurationKey) == nil
+                ? defaults.maximumMeetingDurationHours
+                : userDefaults.integer(forKey: maximumMeetingDurationKey)
         )
     }
 
@@ -42,6 +46,7 @@ struct AutoRecordingSettingsStore: AutoRecordingSettingsStoring {
         userDefaults.removeObject(forKey: legacyAppKey)
         userDefaults.set(settings.startDelay, forKey: startDelayKey)
         userDefaults.set(settings.stopGracePeriod, forKey: stopGraceKey)
+        userDefaults.set(settings.maximumMeetingDurationHours, forKey: maximumMeetingDurationKey)
     }
 
     private func loadSelectedApps() -> [AutoRecordingTarget] {

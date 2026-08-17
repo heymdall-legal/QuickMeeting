@@ -13,6 +13,7 @@ struct AutoRecordingSettingsStoreTests {
         #expect(store.load().selectedApps.isEmpty)
         #expect(store.load().startDelay == 10)
         #expect(store.load().stopGracePeriod == 60)
+        #expect(store.load().maximumMeetingDurationHours == 3)
 
         let updated = AutoRecordingSettings(
             isEnabled: true,
@@ -29,7 +30,8 @@ struct AutoRecordingSettingsStoreTests {
                 )
             ],
             startDelay: 12,
-            stopGracePeriod: 75
+            stopGracePeriod: 75,
+            maximumMeetingDurationHours: 5
         )
         store.save(updated)
 
