@@ -8,6 +8,7 @@
 
 import FluidAudio
 import Foundation
+import OSLog
 
 enum FluidTranscriptionServiceError: LocalizedError, Equatable {
     case noAudioDecoded
@@ -72,6 +73,10 @@ protocol FluidAudioTranscribing: Sendable {
 
 @MainActor
 final class FluidTranscriptionService: TranscriptionServicing {
+    private static let telemetryLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "QuickMeeting",
+        category: "TranscriptionTelemetry"
+    )
     private let meetingStore: MeetingStore
     private let progressCenter: TranscriptionProgressCenter
     private let pipeline: any FluidAudioTranscribing
@@ -127,6 +132,12 @@ final class FluidTranscriptionService: TranscriptionServicing {
             throw TranscriptionServiceError.audioFileMissing
         }
 
+        let jobID = UUID()
+        let jobStartedAt = dateProvider()
+        let jobStartUptime = ProcessInfo.processInfo.systemUptime
+        let memoryTracker = TranscriptionMemoryPeakTracker()
+        var didStopMemoryTracking = false
+
         activeMeetingID = meetingID
         try meetingStore.startTranscription(meetingID: meetingID, updatedAt: dateProvider())
         progressCenter.startTracking(meetingID: meetingID)
@@ -157,6 +168,9 @@ final class FluidTranscriptionService: TranscriptionServicing {
             var visibleTranscript = pipelineTranscript
             var correctedTranscript: StoredTranscript?
             var metadata = result.metadata
+            var telemetry = metadata.jobTelemetry ?? TranscriptionJobTelemetry()
+            telemetry.jobID = jobID
+            telemetry.startedAt = jobStartedAt
             metadata.languageCode = options.languageCode
             metadata.requestedCTCMode = options.ctcMode
             metadata.glossaryTermCount = glossaryTerms.count
@@ -164,6 +178,10 @@ final class FluidTranscriptionService: TranscriptionServicing {
             metadata.completedAt = dateProvider()
 
             if options.isLLMCorrectionEnabled {
+                let llmStart = ProcessInfo.processInfo.systemUptime
+                defer {
+                    telemetry.llmSeconds = ProcessInfo.processInfo.systemUptime - llmStart
+                }
                 if let correctionService {
                     do {
                         let correction = try await correctionService.correct(
@@ -187,6 +205,8 @@ final class FluidTranscriptionService: TranscriptionServicing {
             }
 
             let rawTranscript = result.rawTranscript ?? pipelineTranscript
+            metadata.jobTelemetry = telemetry
+            let persistenceStart = ProcessInfo.processInfo.systemUptime
             try meetingStore.completeTranscription(
                 meetingID: meetingID,
                 transcript: visibleTranscript,
@@ -196,6 +216,17 @@ final class FluidTranscriptionService: TranscriptionServicing {
                 pipelineMetadata: metadata,
                 updatedAt: dateProvider()
             )
+            telemetry.persistenceSeconds = ProcessInfo.processInfo.systemUptime - persistenceStart
+            telemetry.totalSeconds = ProcessInfo.processInfo.systemUptime - jobStartUptime
+            telemetry.peakMemoryBytes = memoryTracker.stop()
+            didStopMemoryTracking = true
+            metadata.jobTelemetry = telemetry
+            try meetingStore.updateTranscriptionPipelineMetadata(
+                meetingID: meetingID,
+                metadata: metadata,
+                updatedAt: dateProvider()
+            )
+            Self.logTelemetry(telemetry, meetingID: meetingID)
             for speaker in visibleTranscript.speakers where speaker.labelSource == .bankMatched {
                 do {
                     try await knownSpeakerEnrollmentService?.enroll(
@@ -208,6 +239,9 @@ final class FluidTranscriptionService: TranscriptionServicing {
                 }
             }
         } catch {
+            if !didStopMemoryTracking {
+                _ = memoryTracker.stop()
+            }
             try? meetingStore.failTranscription(meetingID: meetingID, updatedAt: dateProvider())
             throw map(error)
         }
@@ -253,6 +287,16 @@ final class FluidTranscriptionService: TranscriptionServicing {
         }
         return FluidTranscriptionServiceError.pipelineFailed(error.localizedDescription)
     }
+
+    private static func logTelemetry(_ telemetry: TranscriptionJobTelemetry, meetingID: UUID) {
+        guard
+            let data = try? JSONEncoder().encode(telemetry),
+            let json = String(data: data, encoding: .utf8)
+        else {
+            return
+        }
+        telemetryLogger.info("meeting=\(meetingID.uuidString, privacy: .public) telemetry=\(json, privacy: .public)")
+    }
 }
 
 // MARK: - Default FluidAudio pipeline
@@ -294,7 +338,12 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         glossaryTerms: [TranscriptionGlossaryTerm],
         progress: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult {
+        let isColdRun = asrManager == nil || diarizer == nil
+        var telemetry = TranscriptionJobTelemetry(runKind: isColdRun ? .cold : .warm)
+
+        let decodeStart = ProcessInfo.processInfo.systemUptime
         let samples = try AudioConverter().resampleAudioFile(path: audioFileURL.path)
+        telemetry.decodeResamplingSeconds = ProcessInfo.processInfo.systemUptime - decodeStart
         guard !samples.isEmpty else {
             throw FluidTranscriptionServiceError.noAudioDecoded
         }
@@ -303,7 +352,9 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         let language = options.languageCode.flatMap(Language.init(rawValue:))
 
         // 1) Transcription.
+        let asrModelLoadStart = ProcessInfo.processInfo.systemUptime
         let asrManager = try await loadASRManager()
+        telemetry.modelLoadingSeconds += ProcessInfo.processInfo.systemUptime - asrModelLoadStart
         var decoderState = try TdtDecoderState()
 
         let progressStream = await asrManager.transcriptionProgressStream
@@ -313,12 +364,15 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
             }
         }
         let transcriptionResult: ASRResult
+        let asrStart = ProcessInfo.processInfo.systemUptime
         do {
             transcriptionResult = try await asrManager.transcribe(samples, decoderState: &decoderState, language: language)
         } catch {
             transcriptionProgressTask.cancel()
             throw error
         }
+        telemetry.asrSeconds = ProcessInfo.processInfo.systemUptime - asrStart
+        telemetry.fluidAudioASRProcessingSeconds = transcriptionResult.processingTime
         transcriptionProgressTask.cancel()
         progress(.transcribing(1))
 
@@ -326,6 +380,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         var ctcReplacements: [VocabularyRescorer.RescoringResult] = []
         var warnings: [String] = []
         var resolvedCTCMode: TranscriptionCTCMode?
+        let ctcStart = ProcessInfo.processInfo.systemUptime
         if options.ctcMode != .off, !glossaryTerms.isEmpty {
             do {
                 let ctcResult = try await applyCTCRescoring(
@@ -341,14 +396,32 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
                 warnings.append("CTC vocabulary stage skipped: \(error.localizedDescription)")
             }
         }
+        telemetry.ctcSeconds = ProcessInfo.processInfo.systemUptime - ctcStart
 
         // 2) Diarization (reuses the same samples).
+        let diarizerModelLoadStart = ProcessInfo.processInfo.systemUptime
         let diarizer = try await loadDiarizer()
+        telemetry.modelLoadingSeconds += ProcessInfo.processInfo.systemUptime - diarizerModelLoadStart
         let diarizationResult = try await diarizer.process(audio: samples) { chunksProcessed, totalChunks in
             guard totalChunks > 0 else { return }
             progress(.diarizing(Double(chunksProcessed) / Double(totalChunks)))
         }
         progress(.diarizing(1))
+        if let timings = diarizationResult.timings {
+            telemetry.diarizationSegmentationSeconds = timings.segmentationSeconds
+            telemetry.embeddingSeconds = timings.embeddingExtractionSeconds
+            telemetry.clusteringSeconds = timings.speakerClusteringSeconds
+            telemetry.fluidAudioDiarizationTimings = FluidAudioDiarizationTimings(
+                modelCompilationSeconds: timings.modelCompilationSeconds,
+                audioLoadingSeconds: timings.audioLoadingSeconds,
+                segmentationSeconds: timings.segmentationSeconds,
+                embeddingExtractionSeconds: timings.embeddingExtractionSeconds,
+                speakerClusteringSeconds: timings.speakerClusteringSeconds,
+                postProcessingSeconds: timings.postProcessingSeconds,
+                totalInferenceSeconds: timings.totalInferenceSeconds,
+                totalProcessingSeconds: timings.totalProcessingSeconds
+            )
+        }
 
         // Build the app's model types on the main actor, where they are
         // isolated (the project uses MainActor-by-default isolation). The
@@ -359,21 +432,26 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         let finalCTCAdjustedText = ctcAdjustedText
         let finalResolvedCTCMode = resolvedCTCMode
         let finalWarnings = warnings
+        let pipelineTelemetry = telemetry
 
         return await MainActor.run {
-            let rawResult = Self.makeResult(
+            let mapping = Self.makeResultWithTimings(
                 transcriptionResult: transcriptionResult,
                 segments: segments,
                 speakerDatabase: speakerDatabase,
                 knownSpeakers: knownSpeakers,
                 similarityThreshold: similarityThreshold
             )
+            let rawResult = mapping.result
             let rawTranscript = StoredTranscript(speakers: rawResult.speakers, segments: rawResult.segments)
             let adjustedSegments = Self.applyCTCReplacements(
                 finalCTCReplacements,
                 to: rawResult.segments
             )
             let finalSegments = finalCTCAdjustedText == nil ? rawResult.segments : adjustedSegments
+            var completedTelemetry = pipelineTelemetry
+            completedTelemetry.alignmentSeconds = mapping.alignmentSeconds
+            completedTelemetry.voiceBankMatchingSeconds = mapping.voiceBankMatchingSeconds
             return FluidTranscriptionResult(
                 speakers: rawResult.speakers,
                 segments: finalSegments,
@@ -385,7 +463,8 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
                     resolvedCTCMode: finalResolvedCTCMode,
                     glossaryTermCount: glossaryTerms.count,
                     isLLMCorrectionEnabled: options.isLLMCorrectionEnabled,
-                    warnings: finalWarnings
+                    warnings: finalWarnings,
+                    jobTelemetry: completedTelemetry
                 )
             )
         }
@@ -476,6 +555,28 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         similarityThreshold: Float
     ) -> FluidTranscriptionResult {
+        makeResultWithTimings(
+            transcriptionResult: transcriptionResult,
+            segments: segments,
+            speakerDatabase: speakerDatabase,
+            knownSpeakers: knownSpeakers,
+            similarityThreshold: similarityThreshold
+        ).result
+    }
+
+    @MainActor
+    private static func makeResultWithTimings(
+        transcriptionResult: ASRResult,
+        segments: [TimedSpeakerSegment],
+        speakerDatabase: [String: [Float]]?,
+        knownSpeakers: [FluidKnownSpeakerSnapshot],
+        similarityThreshold: Float
+    ) -> (
+        result: FluidTranscriptionResult,
+        alignmentSeconds: TimeInterval,
+        voiceBankMatchingSeconds: TimeInterval
+    ) {
+        let voiceBankStart = ProcessInfo.processInfo.systemUptime
         let speakerEmbeddings = perSpeakerEmbeddings(segments: segments, speakerDatabase: speakerDatabase)
 
         // Diarized speaker IDs ordered by first appearance, mirroring how the
@@ -511,13 +612,20 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
                 centroid: centroidValues
             )
         }
+        let voiceBankMatchingSeconds = ProcessInfo.processInfo.systemUptime - voiceBankStart
 
+        let alignmentStart = ProcessInfo.processInfo.systemUptime
         let transcriptSegments = makeSegments(
             transcriptionResult: transcriptionResult,
             diarizationSegments: segments
         )
+        let alignmentSeconds = ProcessInfo.processInfo.systemUptime - alignmentStart
 
-        return FluidTranscriptionResult(speakers: transcriptSpeakers, segments: transcriptSegments)
+        return (
+            FluidTranscriptionResult(speakers: transcriptSpeakers, segments: transcriptSegments),
+            alignmentSeconds,
+            voiceBankMatchingSeconds
+        )
     }
 
     @MainActor

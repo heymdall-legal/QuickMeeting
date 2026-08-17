@@ -62,6 +62,7 @@ nonisolated struct TranscriptionPipelineMetadata: Codable, Equatable, Sendable {
     var llmCorrectionModel: String?
     var warnings: [String]
     var completedAt: Date?
+    var jobTelemetry: TranscriptionJobTelemetry?
 
     init(
         asrModel: String,
@@ -72,7 +73,8 @@ nonisolated struct TranscriptionPipelineMetadata: Codable, Equatable, Sendable {
         isLLMCorrectionEnabled: Bool = false,
         llmCorrectionModel: String? = nil,
         warnings: [String] = [],
-        completedAt: Date? = nil
+        completedAt: Date? = nil,
+        jobTelemetry: TranscriptionJobTelemetry? = nil
     ) {
         self.asrModel = asrModel
         self.languageCode = languageCode
@@ -83,7 +85,91 @@ nonisolated struct TranscriptionPipelineMetadata: Codable, Equatable, Sendable {
         self.llmCorrectionModel = llmCorrectionModel
         self.warnings = warnings
         self.completedAt = completedAt
+        self.jobTelemetry = jobTelemetry
     }
+}
+
+/// Stable, backend-neutral measurements for one transcription job. This is
+/// embedded in the existing pipeline metadata blob so older meetings require
+/// no data-model migration and continue to decode with `jobTelemetry == nil`.
+nonisolated struct TranscriptionJobTelemetry: Codable, Equatable, Sendable {
+    var jobID: UUID
+    var startedAt: Date
+    var runKind: TranscriptionRunKind
+    var decodeResamplingSeconds: TimeInterval
+    var modelLoadingSeconds: TimeInterval
+    var asrSeconds: TimeInterval
+    var ctcSeconds: TimeInterval
+    var diarizationSegmentationSeconds: TimeInterval
+    var embeddingSeconds: TimeInterval
+    var clusteringSeconds: TimeInterval
+    var alignmentSeconds: TimeInterval
+    var voiceBankMatchingSeconds: TimeInterval
+    var llmSeconds: TimeInterval
+    var persistenceSeconds: TimeInterval
+    var totalSeconds: TimeInterval
+    var peakMemoryBytes: UInt64
+    var fluidAudioASRProcessingSeconds: TimeInterval?
+    var fluidAudioDiarizationTimings: FluidAudioDiarizationTimings?
+
+    init(
+        jobID: UUID = UUID(),
+        startedAt: Date = Date(),
+        runKind: TranscriptionRunKind = .cold,
+        decodeResamplingSeconds: TimeInterval = 0,
+        modelLoadingSeconds: TimeInterval = 0,
+        asrSeconds: TimeInterval = 0,
+        ctcSeconds: TimeInterval = 0,
+        diarizationSegmentationSeconds: TimeInterval = 0,
+        embeddingSeconds: TimeInterval = 0,
+        clusteringSeconds: TimeInterval = 0,
+        alignmentSeconds: TimeInterval = 0,
+        voiceBankMatchingSeconds: TimeInterval = 0,
+        llmSeconds: TimeInterval = 0,
+        persistenceSeconds: TimeInterval = 0,
+        totalSeconds: TimeInterval = 0,
+        peakMemoryBytes: UInt64 = 0,
+        fluidAudioASRProcessingSeconds: TimeInterval? = nil,
+        fluidAudioDiarizationTimings: FluidAudioDiarizationTimings? = nil
+    ) {
+        self.jobID = jobID
+        self.startedAt = startedAt
+        self.runKind = runKind
+        self.decodeResamplingSeconds = decodeResamplingSeconds
+        self.modelLoadingSeconds = modelLoadingSeconds
+        self.asrSeconds = asrSeconds
+        self.ctcSeconds = ctcSeconds
+        self.diarizationSegmentationSeconds = diarizationSegmentationSeconds
+        self.embeddingSeconds = embeddingSeconds
+        self.clusteringSeconds = clusteringSeconds
+        self.alignmentSeconds = alignmentSeconds
+        self.voiceBankMatchingSeconds = voiceBankMatchingSeconds
+        self.llmSeconds = llmSeconds
+        self.persistenceSeconds = persistenceSeconds
+        self.totalSeconds = totalSeconds
+        self.peakMemoryBytes = peakMemoryBytes
+        self.fluidAudioASRProcessingSeconds = fluidAudioASRProcessingSeconds
+        self.fluidAudioDiarizationTimings = fluidAudioDiarizationTimings
+    }
+}
+
+nonisolated enum TranscriptionRunKind: String, Codable, Equatable, Sendable {
+    case cold
+    case warm
+}
+
+/// Codable mirror of FluidAudio's `PipelineTimings`. Keeping the dependency
+/// type out of persisted app models makes telemetry readable after an ASR or
+/// diarization backend is replaced.
+nonisolated struct FluidAudioDiarizationTimings: Codable, Equatable, Sendable {
+    var modelCompilationSeconds: TimeInterval
+    var audioLoadingSeconds: TimeInterval
+    var segmentationSeconds: TimeInterval
+    var embeddingExtractionSeconds: TimeInterval
+    var speakerClusteringSeconds: TimeInterval
+    var postProcessingSeconds: TimeInterval
+    var totalInferenceSeconds: TimeInterval
+    var totalProcessingSeconds: TimeInterval
 }
 
 nonisolated struct TranscriptionGlossaryTerm: Codable, Equatable, Identifiable, Sendable {

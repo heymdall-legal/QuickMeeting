@@ -410,6 +410,16 @@ struct MeetingStore {
         try modelContext.save()
     }
 
+    func updateTranscriptionPipelineMetadata(
+        meetingID: UUID,
+        metadata: TranscriptionPipelineMetadata,
+        updatedAt: Date
+    ) throws {
+        let meeting = try fetchMeeting(id: meetingID)
+        meeting.updateTranscriptionPipelineMetadata(metadata, updatedAt: updatedAt)
+        try modelContext.save()
+    }
+
     func storeWaveform(meetingID: UUID, samples: [Double]) throws {
         let meeting = try fetchMeeting(id: meetingID)
         meeting.storeWaveform(samples, updatedAt: Date())

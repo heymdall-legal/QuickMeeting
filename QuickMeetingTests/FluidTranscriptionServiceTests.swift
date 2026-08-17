@@ -126,6 +126,58 @@ struct FluidTranscriptionServiceTests {
     }
 
     @Test
+    func transcribePersistsBackendAndJobTelemetry() async throws {
+        let pipelineTelemetry = TranscriptionJobTelemetry(
+            runKind: .warm,
+            decodeResamplingSeconds: 0.11,
+            modelLoadingSeconds: 0.22,
+            asrSeconds: 0.33,
+            diarizationSegmentationSeconds: 0.44,
+            embeddingSeconds: 0.55,
+            clusteringSeconds: 0.66,
+            alignmentSeconds: 0.77,
+            voiceBankMatchingSeconds: 0.88,
+            fluidAudioASRProcessingSeconds: 0.31,
+            fluidAudioDiarizationTimings: FluidAudioDiarizationTimings(
+                modelCompilationSeconds: 0,
+                audioLoadingSeconds: 0,
+                segmentationSeconds: 0.44,
+                embeddingExtractionSeconds: 0.55,
+                speakerClusteringSeconds: 0.66,
+                postProcessingSeconds: 0.07,
+                totalInferenceSeconds: 1.65,
+                totalProcessingSeconds: 1.72
+            )
+        )
+        let harness = try FluidTranscriptionHarness(
+            outcome: .success(
+                FluidTranscriptionResult(
+                    speakers: [],
+                    segments: [],
+                    metadata: TranscriptionPipelineMetadata(
+                        asrModel: "Parakeet TDT v3",
+                        jobTelemetry: pipelineTelemetry
+                    )
+                )
+            )
+        )
+        let meeting = try harness.createRecordedMeeting()
+
+        try await harness.service.transcribe(meetingID: meeting.id)
+
+        let telemetry = try #require(
+            try harness.reloadMeeting(id: meeting.id).transcriptionPipelineMetadata?.jobTelemetry
+        )
+        #expect(telemetry.runKind == .warm)
+        #expect(telemetry.decodeResamplingSeconds == 0.11)
+        #expect(telemetry.fluidAudioASRProcessingSeconds == 0.31)
+        #expect(telemetry.fluidAudioDiarizationTimings?.totalProcessingSeconds == 1.72)
+        #expect(telemetry.persistenceSeconds >= 0)
+        #expect(telemetry.totalSeconds > 0)
+        #expect(telemetry.peakMemoryBytes > 0)
+    }
+
+    @Test
     func transcribeRecordsWarningWhenLLMCorrectionReturnsNoTextChanges() async throws {
         let segmentID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
         let transcript = StoredTranscript(

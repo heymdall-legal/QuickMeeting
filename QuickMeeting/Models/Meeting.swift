@@ -189,6 +189,14 @@ final class Meeting {
         touch(updatedAt: updatedAt)
     }
 
+    func updateTranscriptionPipelineMetadata(
+        _ metadata: TranscriptionPipelineMetadata,
+        updatedAt: Date = Date()
+    ) {
+        transcriptionPipelineMetadataData = Self.encode(metadata)
+        touch(updatedAt: updatedAt)
+    }
+
     func storeWaveform(_ samples: [Double], updatedAt: Date = Date()) {
         waveformSamples = samples
         touch(updatedAt: updatedAt)
