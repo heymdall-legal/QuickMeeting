@@ -136,6 +136,26 @@ struct AutoRecordingSettingsViewModelTests {
 
         #expect(viewModel.selectedApps == [zoom])
     }
+
+    @Test
+    func loadAndSaveExposeMaximumMeetingDurationHours() async {
+        let store = InMemoryAutoRecordingSettingsStore(
+            settings: AutoRecordingSettings(
+                isEnabled: false,
+                selectedApps: [],
+                startDelay: 10,
+                stopGracePeriod: 60,
+                maximumMeetingDurationHours: 5
+            )
+        )
+        let viewModel = AutoRecordingSettingsViewModel(settingsStore: store)
+
+        await viewModel.load()
+        #expect(viewModel.maximumMeetingDurationHours == 5)
+        viewModel.maximumMeetingDurationHours = 6
+        await viewModel.save()
+        #expect(store.settings.maximumMeetingDurationHours == 6)
+    }
 }
 
 private final class InMemoryAutoRecordingSettingsStore: AutoRecordingSettingsStoring, @unchecked Sendable {

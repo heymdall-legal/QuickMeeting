@@ -616,12 +616,18 @@ struct QMSettingsSheet: View {
                     value: $autoRecordingViewModel.stopGracePeriod,
                     range: 30...120, step: 5, unit: "seconds of silence"
                 )
+                stepperRow(
+                    title: "Maximum meeting duration",
+                    value: $autoRecordingViewModel.maximumMeetingDurationHours,
+                    range: 1...24, step: 1, unit: "hours"
+                )
                 .padding(.bottom, 8)
             }
         }
         .onChange(of: autoRecordingViewModel.isEnabled) { _, _ in save() }
         .onChange(of: autoRecordingViewModel.startDelay) { _, _ in save() }
         .onChange(of: autoRecordingViewModel.stopGracePeriod) { _, _ in save() }
+        .onChange(of: autoRecordingViewModel.maximumMeetingDurationHours) { _, _ in save() }
     }
 
     private var watchedAppsBox: some View {
@@ -717,6 +723,45 @@ struct QMSettingsSheet: View {
             .foregroundStyle(.white)
             .frame(width: 26, height: 26)
             .background(QMSpeakerPalette.style(for: app.displayName).color, in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func stepperRow(
+        title: String,
+        value: Binding<Int>,
+        range: ClosedRange<Int>,
+        step: Int,
+        unit: String
+    ) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 14))
+                .foregroundStyle(QMTheme.ink)
+            Spacer()
+            HStack(spacing: 12) {
+                HStack(spacing: 0) {
+                    stepperButton("minus") {
+                        value.wrappedValue = max(range.lowerBound, value.wrappedValue - step)
+                        save()
+                    }
+                    Text("\(value.wrappedValue)")
+                        .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(QMTheme.ink)
+                        .frame(width: 44)
+                    stepperButton("plus") {
+                        value.wrappedValue = min(range.upperBound, value.wrappedValue + step)
+                        save()
+                    }
+                }
+                .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
+
+                Text(unit)
+                    .font(.system(size: 13))
+                    .foregroundStyle(QMTheme.tertiary)
+                    .frame(width: 116, alignment: .leading)
+            }
+        }
+        .padding(.vertical, 10)
     }
 
     private func stepperRow(
