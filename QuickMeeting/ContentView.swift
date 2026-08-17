@@ -170,6 +170,11 @@ struct ContentView: View {
         .onChange(of: meetings.map(\.id)) { _, _ in
             syncSelection()
         }
+        .onChange(of: appViewModel.recordingState) { _, state in
+            if case .recording(let meetingID) = state {
+                selection = .meeting(meetingID)
+            }
+        }
         .sheet(isPresented: $isSettingsPresented) {
             QMSettingsSheet(
                 calendarViewModel: calendarSettingsViewModel,

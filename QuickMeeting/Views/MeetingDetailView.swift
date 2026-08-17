@@ -1041,51 +1041,140 @@ struct MeetingDetailView: View {
 
     private var activeRecordingView: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                PulsingDot(color: QMTheme.recording, size: 9)
-                Text(meeting.title.isEmpty ? "Untitled Meeting" : meeting.title)
-                    .font(.system(size: 23, weight: .bold))
-                    .foregroundStyle(QMTheme.ink)
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 9) {
+                        PulsingDot(color: QMTheme.recording, size: 9)
+                        Text(meeting.title.isEmpty ? "Untitled Meeting" : meeting.title)
+                            .font(.system(size: 23, weight: .bold))
+                            .foregroundStyle(QMTheme.ink)
+                    }
+
+                    HStack(spacing: 10) {
+                        Text("RECORDING")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .tracking(1.1)
+                            .foregroundStyle(QMTheme.recording)
+
+                        TimelineView(.periodic(from: .now, by: 1)) { _ in
+                            Text(elapsedLabel)
+                                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(QMTheme.secondary)
+                        }
+                    }
+                }
+
                 Spacer()
+
+                Button(action: onStop) {
+                    HStack(spacing: 8) {
+                        RoundedRectangle(cornerRadius: 2).fill(.white).frame(width: 11, height: 11)
+                        Text("Stop recording")
+                            .font(.system(size: 13.5, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 17)
+                    .padding(.vertical, 9)
+                    .background(QMTheme.recording, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 30)
             .padding(.top, 22)
             .padding(.bottom, 16)
 
-            VStack(spacing: 0) {
-                Text("RECORDING")
-                    .font(.system(size: 13, weight: .semibold))
-                    .tracking(1.3)
-                    .foregroundStyle(QMTheme.recording)
-                    .padding(.bottom, 18)
+            LiveWaveform()
+                .frame(height: 34)
+                .padding(.horizontal, 30)
+                .padding(.bottom, 13)
 
-                LiveWaveform()
-                    .frame(height: 90)
-                    .padding(.bottom, 22)
+            Rectangle()
+                .fill(QMTheme.hairline)
+                .frame(height: 1)
 
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    Text(elapsedLabel)
-                        .font(.system(size: 46, weight: .bold).monospacedDigit())
-                        .foregroundStyle(QMTheme.ink)
-                }
-                .padding(.bottom, 26)
+            liveTranscriptView
+        }
+    }
 
-                Button(action: onStop) {
-                    HStack(spacing: 9) {
-                        RoundedRectangle(cornerRadius: 3).fill(.white).frame(width: 13, height: 13)
-                        Text("Stop recording")
-                            .font(.system(size: 14, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 11)
-                    .background(QMTheme.recording, in: RoundedRectangle(cornerRadius: 11))
-                }
-                .buttonStyle(.plain)
+    @ViewBuilder
+    private var liveTranscriptView: some View {
+        if transcriptBubbles.isEmpty {
+            VStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Listening for speech…")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(QMTheme.secondary)
+                Text("The first local draft usually appears after the first model window.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(QMTheme.muted)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(30)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(transcriptBubbles) { bubble in
+                            liveSegmentBubble(bubble)
+                                .id(bubble.id)
+                        }
+                        Color.clear.frame(height: 1).id("live-transcript-bottom")
+                    }
+                    .padding(.horizontal, 30)
+                    .padding(.vertical, 18)
+                }
+                .onChange(of: meeting.updatedAt) { _, _ in
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo("live-transcript-bottom", anchor: .bottom)
+                    }
+                }
+            }
         }
+    }
+
+    private func liveSegmentBubble(_ bubble: TranscriptBubble) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 9) {
+                Button {
+                    openRename(segmentID: bubble.id, currentName: bubble.speakerName)
+                } label: {
+                    Text(bubble.speakerName)
+                        .font(.system(size: 13.5, weight: .bold))
+                        .foregroundStyle(bubble.style.color)
+                }
+                .buttonStyle(.plain)
+                .disabled(!bubble.speakerID.hasPrefix("online-speaker-"))
+                .popover(isPresented: speakerPopoverBinding(for: bubble.id), arrowEdge: .bottom) {
+                    renamePopover(speakerID: bubble.speakerID)
+                }
+
+                Text(bubble.timeLabel)
+                    .font(.system(size: 11.5).monospacedDigit())
+                    .foregroundStyle(QMTheme.muted)
+
+                if bubble.isUnnamed, bubble.speakerID.hasPrefix("online-speaker-") {
+                    Text("· click to name")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(QMTheme.sage)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            Text(bubble.text)
+                .font(.system(size: 14.5))
+                .foregroundStyle(QMTheme.ink)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .modifier(
+            MeetingBubbleShell(
+                metrics: .transcript,
+                background: bubble.style.tint,
+                borderColor: QMTheme.sage,
+                borderWidth: 0
+            )
+        )
     }
 
     // MARK: Shared header

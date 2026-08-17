@@ -74,6 +74,9 @@ actor OnlineDraftPipeline {
         var activeEventID = UUID()
         var activeStart: TimeInterval = 0
         var revision = 0
+        var lastEmittedText: String?
+        var lastEmittedSpeakerID: String?
+        var lastEmittedUtteranceID: UUID?
 
         for await chunk in stream {
             try Task.checkCancellation()
@@ -82,48 +85,72 @@ actor OnlineDraftPipeline {
             let samples16k = try Self.resampleTo16k(chunk.samples, sourceRate: chunk.sampleRate)
 
             let asrStartTime = ContinuousClock.now
-            async let text = asrBackend.process(samples16k: samples16k)
-            let diarStartTime = ContinuousClock.now
-            async let intervals = diarizationBackend.process(samples16k: samples16k)
-            let (fullText, latestIntervals) = try await (text, intervals)
+            let fullText = try await asrBackend.process(samples16k: samples16k)
             telemetry.asrWallSeconds += Self.seconds(from: asrStartTime)
-            telemetry.diarizationWallSeconds += Self.seconds(from: diarStartTime)
             telemetry.processedAudioSeconds = max(telemetry.processedAudioSeconds, relativeEnd)
-            currentIntervals = latestIntervals
 
             let activeText = Self.uncommittedSuffix(fullText: fullText, committedText: committedText)
-            guard !activeText.isEmpty else { continue }
-            revision += 1
-            let event = OnlineDraftEvent(
-                utteranceID: activeEventID,
-                revision: revision,
-                startTime: activeStart,
-                endTime: relativeEnd,
-                text: activeText,
-                onlineSpeakerClusterID: Self.speakerID(
+            if !activeText.isEmpty {
+                let currentSpeakerID = Self.speakerID(
                     startTime: activeStart,
                     endTime: relativeEnd,
                     intervals: currentIntervals
-                ),
-                isFinalWithinDraft: false,
-                source: .online
-            )
-            await eventSink(event)
-            telemetry.partialRevisionCount += 1
-            if telemetry.firstPartialLatencySeconds == nil {
-                telemetry.firstPartialLatencySeconds = Self.seconds(from: sessionStart)
+                )
+                let didDraftChange = lastEmittedUtteranceID != activeEventID
+                    || lastEmittedText != activeText
+                    || lastEmittedSpeakerID != currentSpeakerID
+
+                if didDraftChange {
+                    revision += 1
+                    await eventSink(OnlineDraftEvent(
+                        utteranceID: activeEventID,
+                        revision: revision,
+                        startTime: activeStart,
+                        endTime: relativeEnd,
+                        text: activeText,
+                        onlineSpeakerClusterID: currentSpeakerID,
+                        isFinalWithinDraft: false,
+                        source: .online
+                    ))
+                    lastEmittedUtteranceID = activeEventID
+                    lastEmittedText = activeText
+                    lastEmittedSpeakerID = currentSpeakerID
+                    telemetry.partialRevisionCount += 1
+                    if telemetry.firstPartialLatencySeconds == nil {
+                        telemetry.firstPartialLatencySeconds = Self.seconds(from: sessionStart)
+                    }
+                }
+
+                if Self.endsUtterance(activeText), relativeEnd - activeStart >= 0.6 {
+                    revision += 1
+                    await eventSink(OnlineDraftEvent(
+                        utteranceID: activeEventID,
+                        revision: revision,
+                        startTime: activeStart,
+                        endTime: relativeEnd,
+                        text: activeText,
+                        onlineSpeakerClusterID: currentSpeakerID,
+                        isFinalWithinDraft: true,
+                        source: .online
+                    ))
+                    committedText = fullText
+                    activeEventID = UUID()
+                    activeStart = relativeEnd
+                    revision = 0
+                    lastEmittedUtteranceID = nil
+                    lastEmittedText = nil
+                    lastEmittedSpeakerID = nil
+                }
             }
 
-            if Self.endsUtterance(activeText), relativeEnd - activeStart >= 0.6 {
-                var finalEvent = event
-                finalEvent.revision += 1
-                finalEvent.isFinalWithinDraft = true
-                await eventSink(finalEvent)
-                committedText = fullText
-                activeEventID = UUID()
-                activeStart = relativeEnd
-                revision = 0
-            }
+            // Keep ASR on the latency-critical path. Sortformer consumes the
+            // same chunk afterwards so CoreML models do not contend for the
+            // same compute resources, and text is never held behind speaker
+            // inference. Its latest completed timeline labels the next draft
+            // revision.
+            let diarStartTime = ContinuousClock.now
+            currentIntervals = try await diarizationBackend.process(samples16k: samples16k)
+            telemetry.diarizationWallSeconds += Self.seconds(from: diarStartTime)
         }
 
         let flushStart = ContinuousClock.now

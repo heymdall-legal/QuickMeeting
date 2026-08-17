@@ -438,7 +438,11 @@ final class AppViewModel: ObservableObject {
             )
             renameSpeakerErrorMessage = nil
 
-            if let speaker = transcript.speakers.first(where: { $0.id == speakerID }) {
+            // Online cluster labels are draft-only. Do not enroll them into
+            // the persistent voice bank before authoritative offline
+            // diarization has produced stable speaker tracks.
+            if !speakerID.hasPrefix("online-speaker-"),
+               let speaker = transcript.speakers.first(where: { $0.id == speakerID }) {
                 do {
                     try await knownSpeakerEnrollmentService?.enroll(
                         displayName: trimmedName,

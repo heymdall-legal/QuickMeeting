@@ -53,6 +53,41 @@ struct OnlineDraftPipelineTests {
         channel.finishSession()
         withExtendedLifetime(stream) {}
     }
+
+    @Test
+    func unchangedPartialDoesNotCreateOneRevisionPerAudioBuffer() async throws {
+        let asr = StubStreamingASRBackend(
+            partials: ["Привет", "Привет", "Привет"],
+            final: "Привет"
+        )
+        let pipeline = OnlineDraftPipeline(
+            asrBackend: asr,
+            diarizationBackend: StubStreamingDiarizationBackend(intervals: [])
+        )
+        let collector = OnlineDraftEventCollector()
+        let stream = AsyncStream<TimestampedAudioChunk> { continuation in
+            for second in 0..<3 {
+                continuation.yield(TimestampedAudioChunk(
+                    startTime: TimeInterval(second),
+                    sampleRate: 16_000,
+                    samples: [Float](repeating: 0.1, count: 16_000)
+                ))
+            }
+            continuation.finish()
+        }
+
+        let telemetry = try await pipeline.run(stream: stream) { event in
+            await collector.append(event)
+        }
+        let events = await collector.events
+
+        #expect(events.count == 2)
+        #expect(events.map(\.revision) == [1, 2])
+        #expect(events.first?.isFinalWithinDraft == false)
+        #expect(events.last?.isFinalWithinDraft == true)
+        #expect(telemetry.partialRevisionCount == 1)
+        #expect(await asr.processedSampleCounts.count == 3)
+    }
 }
 
 private actor OnlineDraftEventCollector {

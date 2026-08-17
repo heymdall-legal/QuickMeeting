@@ -30,6 +30,8 @@ final class OnlineDraftCoordinator: OnlineDraftCoordinating, ObservableObject {
     private var meetingID: UUID?
     private var sessionToken: UUID?
     private var processingTask: Task<OnlineDraftTelemetry, Error>?
+    private var persistedEventCount = 0
+    private var sessionStartedAt: TimeInterval?
 
     init(
         meetingStore: MeetingStore,
@@ -94,18 +96,48 @@ final class OnlineDraftCoordinator: OnlineDraftCoordinating, ObservableObject {
         let sessionToken = UUID()
         self.meetingID = meetingID
         self.sessionToken = sessionToken
-        try? meetingStore.beginOnlineDraft(meetingID: meetingID, updatedAt: Date())
+        persistedEventCount = 0
+        sessionStartedAt = ProcessInfo.processInfo.systemUptime
+        do {
+            try meetingStore.beginOnlineDraft(meetingID: meetingID, updatedAt: Date())
+        } catch {
+            Self.logger.error(
+                "Online draft could not initialize storage error=\(error.localizedDescription, privacy: .public)"
+            )
+        }
         let stream = channel.beginSession(capacity: 256)
         let pipeline = pipeline
         Self.logger.info("Online draft session started")
         processingTask = Task { [self] in
-            try await pipeline.run(stream: stream) { event in
-                guard self.sessionToken == sessionToken else { return }
-                try? self.meetingStore.upsertOnlineDraftEvent(
-                    meetingID: meetingID,
-                    event: event,
-                    updatedAt: Date()
+            do {
+                return try await pipeline.run(stream: stream) { event in
+                    guard self.sessionToken == sessionToken else { return }
+                    do {
+                        try self.meetingStore.upsertOnlineDraftEvent(
+                            meetingID: meetingID,
+                            event: event,
+                            updatedAt: Date()
+                        )
+                        self.persistedEventCount += 1
+                        if self.persistedEventCount == 1 {
+                            let latency = self.sessionStartedAt.map {
+                                ProcessInfo.processInfo.systemUptime - $0
+                            } ?? 0
+                            Self.logger.info(
+                                "Online first partial persisted latencySeconds=\(latency)"
+                            )
+                        }
+                    } catch {
+                        Self.logger.error(
+                            "Online draft event persistence failed error=\(error.localizedDescription, privacy: .public)"
+                        )
+                    }
+                }
+            } catch {
+                Self.logger.error(
+                    "Online draft pipeline failed error=\(error.localizedDescription, privacy: .public)"
                 )
+                throw error
             }
         }
     }
@@ -155,6 +187,8 @@ final class OnlineDraftCoordinator: OnlineDraftCoordinating, ObservableObject {
         sessionToken = nil
         self.processingTask = nil
         self.meetingID = nil
+        persistedEventCount = 0
+        sessionStartedAt = nil
     }
 }
 

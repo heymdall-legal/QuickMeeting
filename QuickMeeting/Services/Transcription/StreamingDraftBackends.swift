@@ -60,7 +60,10 @@ actor FluidNemotronStreamingASRBackend: StreamingASRBackend {
 }
 
 actor FluidSortformerStreamingDiarizationBackend: StreamingDiarizationBackend {
-    private let configuration = SortformerConfig.fastV2_1
+    // Nemotron emits text on a 2.24 s model window. The efficient Sortformer
+    // variant advances more audio per inference at roughly the same output
+    // cadence, avoiding needless compute pressure from the 1.04 s variant.
+    private let configuration = SortformerConfig.efficientV2_1
     private var models: SortformerModels?
     private var diarizer: SortformerDiarizer?
 

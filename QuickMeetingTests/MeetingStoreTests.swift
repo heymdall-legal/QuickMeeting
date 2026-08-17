@@ -521,6 +521,47 @@ struct MeetingStoreTests {
     }
 
     @Test
+    func renameOnlineSpeakerUpdatesDraftWithoutPublishingFinalTranscript() throws {
+        let harness = try MeetingStoreHarness()
+        let folderURL = harness.temporaryFolderURL()
+        let meeting = try harness.store.createMeeting(
+            title: "Live meeting",
+            startedAt: Date(timeIntervalSince1970: 1_234_567_890),
+            folderURL: folderURL,
+            audioFileURL: folderURL.appendingPathComponent("audio.m4a")
+        )
+        try harness.store.beginOnlineDraft(meetingID: meeting.id, updatedAt: Date())
+        try harness.store.upsertOnlineDraftEvent(
+            meetingID: meeting.id,
+            event: OnlineDraftEvent(
+                utteranceID: UUID(),
+                revision: 1,
+                startTime: 0,
+                endTime: 2,
+                text: "Привет",
+                onlineSpeakerClusterID: "online-speaker-0",
+                isFinalWithinDraft: false,
+                source: .online
+            ),
+            updatedAt: Date()
+        )
+
+        try harness.store.renameSpeaker(
+            meetingID: meeting.id,
+            speakerID: "online-speaker-0",
+            displayName: "Маша",
+            updatedAt: Date(timeIntervalSince1970: 1_234_568_200)
+        )
+
+        let reloaded = try harness.reloadMeeting(id: meeting.id)
+        let speaker = try #require(reloaded.onlineDraftStoredTranscript?.speakers.first)
+        #expect(speaker.displayName == "Маша")
+        #expect(speaker.labelSource == .userAssigned)
+        #expect(reloaded.finalStoredTranscript == nil)
+        #expect(try reloaded.status == .recording)
+    }
+
+    @Test
     func renameSpeakerSyncsMarkdownTranscriptWithUpdatedSpeakerName() throws {
         let markdownExporter = SpyMarkdownExporter()
         let harness = try MeetingStoreHarness(markdownExporter: markdownExporter)

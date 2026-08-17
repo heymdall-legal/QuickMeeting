@@ -243,14 +243,18 @@ struct MeetingStore {
             throw MeetingTranscriptStoreError.transcriptMissing
         }
 
-        guard let speaker = meeting.transcriptSpeakers.first(where: { $0.id == speakerID }) else {
+        if let speaker = meeting.transcriptSpeakers.first(where: { $0.id == speakerID }) {
+            speaker.displayName = displayName
+            speaker.labelSourceRawValue = TranscriptSpeakerLabelSource.userAssigned.rawValue
+            if speaker.matchedKnownSpeakerID != nil {
+                speaker.matchedKnownSpeakerID = nil
+            }
+        } else if !meeting.renameOnlineDraftSpeaker(
+            clusterID: speakerID,
+            displayName: displayName,
+            updatedAt: updatedAt
+        ) {
             throw MeetingTranscriptStoreError.speakerNotFound
-        }
-
-        speaker.displayName = displayName
-        speaker.labelSourceRawValue = TranscriptSpeakerLabelSource.userAssigned.rawValue
-        if speaker.matchedKnownSpeakerID != nil {
-            speaker.matchedKnownSpeakerID = nil
         }
         meeting.setStatus(try meeting.status, updatedAt: updatedAt)
         try modelContext.save()

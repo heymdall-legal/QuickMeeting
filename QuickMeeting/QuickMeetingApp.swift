@@ -63,7 +63,9 @@ struct QuickMeetingApp: App {
                 )
             )
             self.onlineDraftCoordinator = onlineDraftCoordinator
-            if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+            let isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+                || NSClassFromString("XCTestCase") != nil
+            if !isRunningTests {
                 Task { @MainActor in
                     await onlineDraftCoordinator.prepareModels()
                 }

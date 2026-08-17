@@ -294,6 +294,25 @@ final class Meeting {
         touch(updatedAt: updatedAt)
     }
 
+    func renameOnlineDraftSpeaker(
+        clusterID: String,
+        displayName: String,
+        updatedAt: Date = Date()
+    ) -> Bool {
+        guard var envelope = transcriptArtifactEnvelope,
+              var draft = envelope.onlineDraft,
+              draft.assignSpeakerName(displayName, to: clusterID) else {
+            return false
+        }
+        envelope.onlineDraft = draft
+        transcriptionPipelineMetadataData = Self.encode(envelope)
+        if finalStoredTranscript == nil {
+            transcriptPreview = draft.storedTranscript.fullText
+        }
+        touch(updatedAt: updatedAt)
+        return true
+    }
+
     func finishOnlineDraft(updatedAt: Date = Date()) {
         var envelope = transcriptArtifactEnvelope ?? TranscriptArtifactEnvelope(
             lifecycleState: .draftAvailable,

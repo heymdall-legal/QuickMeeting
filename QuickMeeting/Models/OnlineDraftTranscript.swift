@@ -19,11 +19,40 @@ nonisolated struct OnlineDraftEvent: Codable, Equatable, Identifiable, Sendable 
 
 nonisolated struct OnlineDraftTranscript: Codable, Equatable, Sendable {
     private(set) var events: [OnlineDraftEvent]
+    private(set) var assignedSpeakerNames: [String: String]
 
-    init(events: [OnlineDraftEvent] = []) {
+    init(
+        events: [OnlineDraftEvent] = [],
+        assignedSpeakerNames: [String: String] = [:]
+    ) {
         self.events = []
+        self.assignedSpeakerNames = assignedSpeakerNames
         for event in events {
             upsert(event)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case events
+        case assignedSpeakerNames
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            events: try container.decodeIfPresent([OnlineDraftEvent].self, forKey: .events) ?? [],
+            assignedSpeakerNames: try container.decodeIfPresent(
+                [String: String].self,
+                forKey: .assignedSpeakerNames
+            ) ?? [:]
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(events, forKey: .events)
+        if !assignedSpeakerNames.isEmpty {
+            try container.encode(assignedSpeakerNames, forKey: .assignedSpeakerNames)
         }
     }
 
@@ -41,15 +70,24 @@ nonisolated struct OnlineDraftTranscript: Codable, Equatable, Sendable {
         }
     }
 
+    mutating func assignSpeakerName(_ displayName: String, to clusterID: String) -> Bool {
+        guard events.contains(where: { $0.onlineSpeakerClusterID == clusterID }) else {
+            return false
+        }
+        assignedSpeakerNames[clusterID] = displayName
+        return true
+    }
+
     var storedTranscript: StoredTranscript {
         let clusterIDs = events.compactMap(\.onlineSpeakerClusterID).reduce(into: [String]()) {
             if !$0.contains($1) { $0.append($1) }
         }
         let speakers = clusterIDs.enumerated().map { index, clusterID in
-            TranscriptSpeaker(
+            let assignedName = assignedSpeakerNames[clusterID]
+            return TranscriptSpeaker(
                 id: clusterID,
-                displayName: "Speaker \(index + 1)",
-                labelSource: .generic
+                displayName: assignedName ?? "Speaker \(index + 1)",
+                labelSource: assignedName == nil ? .generic : .userAssigned
             )
         }
         let segments = events.compactMap { event -> TranscriptSegment? in
