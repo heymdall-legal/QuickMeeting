@@ -42,11 +42,14 @@ final class AppViewModel: ObservableObject {
     private let knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)?
     private let recordingPermissions: any RecordingPermissions
     private let calendarIntegration: any CalendarIntegration
+    private let autoRecordingSettingsStore: any AutoRecordingSettingsStoring
+    private let recordingDeadlineClock: any RecordingDeadlineClock
     private let dateProvider: () -> Date
     private let meetingIDProvider: () -> UUID
     private let meetingTitleFormatter: DateFormatter
     private var autoRecordingCoordinator: AutoRecordingCoordinator?
     private var recoverableRecordingMeetingID: UUID?
+    private var maximumDurationTask: (any RecordingDeadlineScheduledTask)?
     private var pendingSummaryReplacementMeetingID: UUID?
     private var cancellables = Set<AnyCancellable>()
 
@@ -62,6 +65,8 @@ final class AppViewModel: ObservableObject {
         meetingTranscriptStore: (any MeetingTranscriptStoring)? = nil,
         knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)? = nil,
         calendarIntegration: (any CalendarIntegration)? = nil,
+        autoRecordingSettingsStore: any AutoRecordingSettingsStoring = AutoRecordingSettingsStore(),
+        recordingDeadlineClock: (any RecordingDeadlineClock)? = nil,
         dateProvider: @escaping () -> Date = Date.init,
         meetingIDProvider: @escaping () -> UUID = UUID.init,
         meetingTitleFormatter: DateFormatter = AppViewModel.makeMeetingTitleFormatter()
@@ -77,6 +82,8 @@ final class AppViewModel: ObservableObject {
         self.meetingTranscriptStore = meetingTranscriptStore ?? MeetingTranscriptStore()
         self.knownSpeakerEnrollmentService = knownSpeakerEnrollmentService
         self.calendarIntegration = calendarIntegration ?? NoopCalendarIntegration()
+        self.autoRecordingSettingsStore = autoRecordingSettingsStore
+        self.recordingDeadlineClock = recordingDeadlineClock ?? TaskSleepRecordingDeadlineClock()
         self.dateProvider = dateProvider
         self.meetingIDProvider = meetingIDProvider
         self.meetingTitleFormatter = meetingTitleFormatter
@@ -136,7 +143,12 @@ final class AppViewModel: ObservableObject {
             recordingState = .recording(meetingID: meetingID)
             recordingStartedAt = dateProvider()
             activeRecordingTitle = meeting.title
+            let durationHours = autoRecordingSettingsStore.load().maximumMeetingDurationHours
+            maximumDurationTask = recordingDeadlineClock.schedule(after: Double(durationHours) * 3_600) { [weak self] in
+                await self?.stopRecording()
+            }
         } catch {
+            cancelMaximumDurationTask()
             let startupFailureMessage = error.localizedDescription
             do {
                 try await recordingService.stopRecording()
@@ -160,6 +172,8 @@ final class AppViewModel: ObservableObject {
             return
         }
 
+        cancelMaximumDurationTask()
+
         recordingState = .stopping(meetingID: meetingID)
 
         do {
@@ -181,6 +195,11 @@ final class AppViewModel: ObservableObject {
 
     func attachAutoRecordingCoordinator(_ coordinator: AutoRecordingCoordinator) {
         autoRecordingCoordinator = coordinator
+    }
+
+    private func cancelMaximumDurationTask() {
+        maximumDurationTask?.cancel()
+        maximumDurationTask = nil
     }
 
     func updateAutoRecordingPresence(_ presence: MeetingAppPresence) async {
