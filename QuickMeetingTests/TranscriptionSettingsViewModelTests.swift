@@ -17,11 +17,19 @@ struct TranscriptionSettingsViewModelTests {
         viewModel.selectLanguage(code: "de")
         viewModel.selectCTCMode(.ctc110m)
         viewModel.setLLMCorrectionEnabled(true)
+        viewModel.selectClusteringPreset(.upstream06)
+        viewModel.selectDiarizationStepRatio(0.15)
+        viewModel.selectEmbeddingSkipStrategy(.maskSimilarity095)
 
         #expect(settingsStore.pipelineOptions() == TranscriptionPipelineOptions(
             languageCode: "de",
             ctcMode: .ctc110m,
-            isLLMCorrectionEnabled: true
+            isLLMCorrectionEnabled: true,
+            offlineDiarization: OfflineDiarizationConfiguration(
+                clusteringThreshold: 0.6,
+                segmentationStepRatio: 0.15,
+                embeddingSkipStrategy: .maskSimilarity095
+            )
         ))
     }
 

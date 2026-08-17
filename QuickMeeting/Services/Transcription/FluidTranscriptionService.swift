@@ -328,30 +328,24 @@ final class FluidTranscriptionService: TranscriptionServicing {
 /// pipeline off the main actor. Models are loaded lazily and reused between
 /// runs to amortise the (substantial) load cost.
 actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
+    private static let diarizationLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "QuickMeeting",
+        category: "OfflineDiarization"
+    )
     private let asrVersion: AsrModelVersion
-    private let diarizerConfig: OfflineDiarizerConfig
+    private let diarizerConfigOverride: OfflineDiarizerConfig?
 
     private var asrManager: AsrManager?
     private var diarizer: OfflineDiarizerManager?
+    private var activeDiarizationConfiguration: OfflineDiarizationConfiguration?
 
     init(
         asrVersion: AsrModelVersion = .v3,
-        diarizerConfig: OfflineDiarizerConfig = DefaultFluidAudioPipeline.defaultDiarizerConfig
+        diarizerConfig: OfflineDiarizerConfig? = nil
     ) {
         self.asrVersion = asrVersion
-        self.diarizerConfig = diarizerConfig
+        diarizerConfigOverride = diarizerConfig
     }
-
-    nonisolated static let defaultDiarizerConfig = OfflineDiarizerConfig(
-        clustering: OfflineDiarizerConfig.Clustering(
-            threshold: 0.8,
-            warmStartFa: 0.07,
-            warmStartFb: 0.8,
-            minSpeakers: nil,
-            maxSpeakers: nil,
-            numSpeakers: nil
-        )
-    )
 
     func transcribe(
         audioFileURL: URL,
@@ -361,8 +355,11 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         glossaryTerms: [TranscriptionGlossaryTerm],
         progress: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult {
-        let isColdRun = asrManager == nil || diarizer == nil
+        let needsDiarizerLoad = diarizer == nil
+            || (diarizerConfigOverride == nil && activeDiarizationConfiguration != options.offlineDiarization)
+        let isColdRun = asrManager == nil || needsDiarizerLoad
         var telemetry = TranscriptionJobTelemetry(runKind: isColdRun ? .cold : .warm)
+        telemetry.offlineDiarizationConfiguration = options.offlineDiarization
 
         let decodeStart = ProcessInfo.processInfo.systemUptime
         let samples = try AudioConverter().resampleAudioFile(path: audioFileURL.path)
@@ -429,8 +426,9 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         telemetry.ctcSeconds = ProcessInfo.processInfo.systemUptime - ctcStart
 
         // 2) Diarization (reuses the same samples).
+        Self.logDiarizationConfiguration(options.offlineDiarization)
         let diarizerModelLoadStart = ProcessInfo.processInfo.systemUptime
-        let diarizer = try await loadDiarizer()
+        let diarizer = try await loadDiarizer(configuration: options.offlineDiarization)
         telemetry.modelLoadingSeconds += ProcessInfo.processInfo.systemUptime - diarizerModelLoadStart
         let diarizationResult = try await diarizer.process(audio: samples) { chunksProcessed, totalChunks in
             guard totalChunks > 0 else { return }
@@ -565,14 +563,28 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         return manager
     }
 
-    private func loadDiarizer() async throws -> OfflineDiarizerManager {
-        if let diarizer {
+    private func loadDiarizer(
+        configuration: OfflineDiarizationConfiguration
+    ) async throws -> OfflineDiarizerManager {
+        if let diarizer,
+           diarizerConfigOverride != nil || activeDiarizationConfiguration == configuration {
             return diarizer
         }
-        let manager = OfflineDiarizerManager(config: diarizerConfig)
+        let manager = OfflineDiarizerManager(
+            config: diarizerConfigOverride ?? configuration.fluidAudioConfiguration
+        )
         try await manager.prepareModels()
         diarizer = manager
+        activeDiarizationConfiguration = configuration
         return manager
+    }
+
+    private static func logDiarizationConfiguration(
+        _ configuration: OfflineDiarizationConfiguration
+    ) {
+        diarizationLogger.info(
+            "clusteringThreshold=\(configuration.clusteringThreshold, privacy: .public) stepRatio=\(configuration.segmentationStepRatio, privacy: .public) embeddingSkip=\(configuration.embeddingSkipStrategy.rawValue, privacy: .public)"
+        )
     }
 
     // MARK: Mapping
@@ -857,5 +869,22 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         let denominator = sqrt(normA) * sqrt(normB)
         guard denominator > 0 else { return 0 }
         return dot / denominator
+    }
+}
+
+private extension OfflineDiarizationConfiguration {
+    nonisolated var fluidAudioConfiguration: OfflineDiarizerConfig {
+        let skipStrategy: OfflineDiarizerConfig.EmbeddingSkipStrategy
+        switch embeddingSkipStrategy {
+        case .none:
+            skipStrategy = .none
+        case .maskSimilarity095:
+            skipStrategy = .maskSimilarity(threshold: 0.95)
+        }
+        return OfflineDiarizerConfig(
+            clusteringThreshold: clusteringThreshold,
+            segmentationStepRatio: segmentationStepRatio,
+            embeddingSkipStrategy: skipStrategy
+        )
     }
 }

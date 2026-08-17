@@ -40,15 +40,77 @@ nonisolated struct TranscriptionPipelineOptions: Codable, Equatable, Sendable {
     var languageCode: String?
     var ctcMode: TranscriptionCTCMode
     var isLLMCorrectionEnabled: Bool
+    var offlineDiarization: OfflineDiarizationConfiguration
 
     init(
         languageCode: String? = nil,
         ctcMode: TranscriptionCTCMode = .off,
-        isLLMCorrectionEnabled: Bool = false
+        isLLMCorrectionEnabled: Bool = false,
+        offlineDiarization: OfflineDiarizationConfiguration = .legacy
     ) {
         self.languageCode = languageCode
         self.ctcMode = ctcMode
         self.isLLMCorrectionEnabled = isLLMCorrectionEnabled
+        self.offlineDiarization = offlineDiarization
+    }
+}
+
+nonisolated struct OfflineDiarizationConfiguration: Codable, Equatable, Sendable {
+    var clusteringThreshold: Double
+    var segmentationStepRatio: Double
+    var embeddingSkipStrategy: OfflineEmbeddingSkipStrategy
+
+    static let legacy = OfflineDiarizationConfiguration(
+        clusteringThreshold: 0.8,
+        segmentationStepRatio: 0.2,
+        embeddingSkipStrategy: .none
+    )
+
+    static let upstream = OfflineDiarizationConfiguration(
+        clusteringThreshold: 0.6,
+        segmentationStepRatio: 0.2,
+        embeddingSkipStrategy: .none
+    )
+
+    var clusteringPreset: OfflineClusteringPreset? {
+        if clusteringThreshold == OfflineClusteringPreset.legacy08.threshold {
+            return .legacy08
+        }
+        if clusteringThreshold == OfflineClusteringPreset.upstream06.threshold {
+            return .upstream06
+        }
+        return nil
+    }
+}
+
+nonisolated enum OfflineClusteringPreset: String, Codable, CaseIterable, Sendable {
+    case legacy08
+    case upstream06
+
+    var threshold: Double {
+        switch self {
+        case .legacy08: return 0.8
+        case .upstream06: return 0.6
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .legacy08: return "Legacy · 0.8"
+        case .upstream06: return "Upstream · 0.6"
+        }
+    }
+}
+
+nonisolated enum OfflineEmbeddingSkipStrategy: String, Codable, CaseIterable, Sendable {
+    case none
+    case maskSimilarity095
+
+    var displayName: String {
+        switch self {
+        case .none: return "None"
+        case .maskSimilarity095: return "Mask similarity · 0.95"
+        }
     }
 }
 
@@ -111,6 +173,7 @@ nonisolated struct TranscriptionJobTelemetry: Codable, Equatable, Sendable {
     var peakMemoryBytes: UInt64
     var fluidAudioASRProcessingSeconds: TimeInterval?
     var fluidAudioDiarizationTimings: FluidAudioDiarizationTimings?
+    var offlineDiarizationConfiguration: OfflineDiarizationConfiguration?
 
     init(
         jobID: UUID = UUID(),
@@ -130,7 +193,8 @@ nonisolated struct TranscriptionJobTelemetry: Codable, Equatable, Sendable {
         totalSeconds: TimeInterval = 0,
         peakMemoryBytes: UInt64 = 0,
         fluidAudioASRProcessingSeconds: TimeInterval? = nil,
-        fluidAudioDiarizationTimings: FluidAudioDiarizationTimings? = nil
+        fluidAudioDiarizationTimings: FluidAudioDiarizationTimings? = nil,
+        offlineDiarizationConfiguration: OfflineDiarizationConfiguration? = nil
     ) {
         self.jobID = jobID
         self.startedAt = startedAt
@@ -150,6 +214,7 @@ nonisolated struct TranscriptionJobTelemetry: Codable, Equatable, Sendable {
         self.peakMemoryBytes = peakMemoryBytes
         self.fluidAudioASRProcessingSeconds = fluidAudioASRProcessingSeconds
         self.fluidAudioDiarizationTimings = fluidAudioDiarizationTimings
+        self.offlineDiarizationConfiguration = offlineDiarizationConfiguration
     }
 }
 

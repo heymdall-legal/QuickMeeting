@@ -24,14 +24,24 @@ struct TranscriptionSettingsStoreTests {
         store.savePipelineOptions(.init(
             languageCode: "fr",
             ctcMode: .ctc06b,
-            isLLMCorrectionEnabled: true
+            isLLMCorrectionEnabled: true,
+            offlineDiarization: OfflineDiarizationConfiguration(
+                clusteringThreshold: 0.6,
+                segmentationStepRatio: 0.15,
+                embeddingSkipStrategy: .maskSimilarity095
+            )
         ))
 
         #expect(store.languageCode() == "fr")
         #expect(store.pipelineOptions() == TranscriptionPipelineOptions(
             languageCode: "fr",
             ctcMode: .ctc06b,
-            isLLMCorrectionEnabled: true
+            isLLMCorrectionEnabled: true,
+            offlineDiarization: OfflineDiarizationConfiguration(
+                clusteringThreshold: 0.6,
+                segmentationStepRatio: 0.15,
+                embeddingSkipStrategy: .maskSimilarity095
+            )
         ))
     }
 

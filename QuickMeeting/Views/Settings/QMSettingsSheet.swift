@@ -196,6 +196,45 @@ struct QMSettingsSheet: View {
 
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
+                    Text("Diarization clustering")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Legacy 0.8 and upstream 0.6 are neutral A/B baselines.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                clusteringPresetMenu
+            }
+
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Diarization step ratio")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Smaller steps increase overlap and compute cost.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                diarizationStepRatioMenu
+            }
+
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Embedding skip strategy")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Optionally skip nearly identical masks at 0.95 similarity.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                embeddingSkipStrategyMenu
+            }
+
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("LLM transcript correction")
                         .font(.system(size: 14.5, weight: .semibold))
                         .foregroundStyle(QMTheme.ink)
@@ -278,6 +317,89 @@ struct QMSettingsSheet: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    private var clusteringPresetMenu: some View {
+        Menu {
+            ForEach(transcriptionViewModel.clusteringPresets, id: \.self) { preset in
+                Button {
+                    transcriptionViewModel.selectClusteringPreset(preset)
+                } label: {
+                    if transcriptionViewModel.offlineDiarization.clusteringPreset == preset {
+                        Label(preset.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(preset.displayName)
+                    }
+                }
+            }
+        } label: {
+            settingsMenuLabel(transcriptionViewModel.selectedClusteringName)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var diarizationStepRatioMenu: some View {
+        Menu {
+            ForEach(transcriptionViewModel.diarizationStepRatios, id: \.self) { ratio in
+                Button {
+                    transcriptionViewModel.selectDiarizationStepRatio(ratio)
+                } label: {
+                    let text = String(format: "%.2f", ratio)
+                    if transcriptionViewModel.offlineDiarization.segmentationStepRatio == ratio {
+                        Label(text, systemImage: "checkmark")
+                    } else {
+                        Text(text)
+                    }
+                }
+            }
+        } label: {
+            settingsMenuLabel(
+                String(format: "%.2f", transcriptionViewModel.offlineDiarization.segmentationStepRatio)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var embeddingSkipStrategyMenu: some View {
+        Menu {
+            ForEach(transcriptionViewModel.embeddingSkipStrategies, id: \.self) { strategy in
+                Button {
+                    transcriptionViewModel.selectEmbeddingSkipStrategy(strategy)
+                } label: {
+                    if transcriptionViewModel.offlineDiarization.embeddingSkipStrategy == strategy {
+                        Label(strategy.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(strategy.displayName)
+                    }
+                }
+            }
+        } label: {
+            settingsMenuLabel(transcriptionViewModel.offlineDiarization.embeddingSkipStrategy.displayName)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private func settingsMenuLabel(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            Text(text)
+                .font(.system(size: 13.5))
+                .foregroundStyle(QMTheme.ink)
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(QMTheme.muted)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(width: 170)
+        .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
     }
 
     // MARK: Glossary

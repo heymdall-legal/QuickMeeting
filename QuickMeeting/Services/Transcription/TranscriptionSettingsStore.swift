@@ -21,6 +21,9 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
     private let languageCodeKey = "transcription.languageCode"
     private let ctcModeKey = "transcription.ctcMode"
     private let llmCorrectionEnabledKey = "transcription.llmCorrectionEnabled"
+    private let diarizationClusteringThresholdKey = "transcription.diarization.clusteringThreshold"
+    private let diarizationStepRatioKey = "transcription.diarization.stepRatio"
+    private let diarizationEmbeddingSkipStrategyKey = "transcription.diarization.embeddingSkipStrategy"
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -41,10 +44,19 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
     func pipelineOptions() -> TranscriptionPipelineOptions {
         let mode = userDefaults.string(forKey: ctcModeKey)
             .flatMap(TranscriptionCTCMode.init(rawValue:)) ?? .off
+        let storedThreshold = userDefaults.object(forKey: diarizationClusteringThresholdKey) as? Double
+        let storedStepRatio = userDefaults.object(forKey: diarizationStepRatioKey) as? Double
+        let storedSkipStrategy = userDefaults.string(forKey: diarizationEmbeddingSkipStrategyKey)
+            .flatMap(OfflineEmbeddingSkipStrategy.init(rawValue:))
         return TranscriptionPipelineOptions(
             languageCode: languageCode(),
             ctcMode: mode,
-            isLLMCorrectionEnabled: userDefaults.bool(forKey: llmCorrectionEnabledKey)
+            isLLMCorrectionEnabled: userDefaults.bool(forKey: llmCorrectionEnabledKey),
+            offlineDiarization: OfflineDiarizationConfiguration(
+                clusteringThreshold: storedThreshold ?? OfflineDiarizationConfiguration.legacy.clusteringThreshold,
+                segmentationStepRatio: storedStepRatio ?? OfflineDiarizationConfiguration.legacy.segmentationStepRatio,
+                embeddingSkipStrategy: storedSkipStrategy ?? OfflineDiarizationConfiguration.legacy.embeddingSkipStrategy
+            )
         )
     }
 
@@ -52,6 +64,18 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
         saveLanguageCode(options.languageCode)
         userDefaults.set(options.ctcMode.rawValue, forKey: ctcModeKey)
         userDefaults.set(options.isLLMCorrectionEnabled, forKey: llmCorrectionEnabledKey)
+        userDefaults.set(
+            options.offlineDiarization.clusteringThreshold,
+            forKey: diarizationClusteringThresholdKey
+        )
+        userDefaults.set(
+            options.offlineDiarization.segmentationStepRatio,
+            forKey: diarizationStepRatioKey
+        )
+        userDefaults.set(
+            options.offlineDiarization.embeddingSkipStrategy.rawValue,
+            forKey: diarizationEmbeddingSkipStrategyKey
+        )
     }
 }
 

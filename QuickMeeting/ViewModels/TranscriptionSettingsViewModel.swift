@@ -13,6 +13,7 @@ final class TranscriptionSettingsViewModel: ObservableObject {
     @Published private(set) var languageCode: String?
     @Published private(set) var ctcMode: TranscriptionCTCMode
     @Published private(set) var isLLMCorrectionEnabled: Bool
+    @Published private(set) var offlineDiarization: OfflineDiarizationConfiguration
     @Published private(set) var glossaryTerms: [TranscriptionGlossaryTerm]
     @Published private(set) var isGlossaryLoaded: Bool
 
@@ -29,14 +30,22 @@ final class TranscriptionSettingsViewModel: ObservableObject {
         languageCode = options.languageCode
         ctcMode = options.ctcMode
         isLLMCorrectionEnabled = options.isLLMCorrectionEnabled
+        offlineDiarization = options.offlineDiarization
         glossaryTerms = []
         isGlossaryLoaded = false
     }
 
     var options: [TranscriptionLanguageOption] { TranscriptionLanguageOption.all }
     var ctcOptions: [TranscriptionCTCMode] { TranscriptionCTCMode.allCases }
+    var clusteringPresets: [OfflineClusteringPreset] { OfflineClusteringPreset.allCases }
+    var diarizationStepRatios: [Double] { [0.15, 0.2, 0.25] }
+    var embeddingSkipStrategies: [OfflineEmbeddingSkipStrategy] { OfflineEmbeddingSkipStrategy.allCases }
 
     var selectedLanguageName: String { TranscriptionLanguageOption.name(for: languageCode) }
+    var selectedClusteringName: String {
+        offlineDiarization.clusteringPreset?.displayName
+            ?? String(format: "Custom · %.2f", offlineDiarization.clusteringThreshold)
+    }
 
     func selectLanguage(code: String?) {
         languageCode = code
@@ -50,6 +59,21 @@ final class TranscriptionSettingsViewModel: ObservableObject {
 
     func setLLMCorrectionEnabled(_ isEnabled: Bool) {
         isLLMCorrectionEnabled = isEnabled
+        savePipelineOptions()
+    }
+
+    func selectClusteringPreset(_ preset: OfflineClusteringPreset) {
+        offlineDiarization.clusteringThreshold = preset.threshold
+        savePipelineOptions()
+    }
+
+    func selectDiarizationStepRatio(_ ratio: Double) {
+        offlineDiarization.segmentationStepRatio = ratio
+        savePipelineOptions()
+    }
+
+    func selectEmbeddingSkipStrategy(_ strategy: OfflineEmbeddingSkipStrategy) {
+        offlineDiarization.embeddingSkipStrategy = strategy
         savePipelineOptions()
     }
 
@@ -96,7 +120,8 @@ final class TranscriptionSettingsViewModel: ObservableObject {
             TranscriptionPipelineOptions(
                 languageCode: languageCode,
                 ctcMode: ctcMode,
-                isLLMCorrectionEnabled: isLLMCorrectionEnabled
+                isLLMCorrectionEnabled: isLLMCorrectionEnabled,
+                offlineDiarization: offlineDiarization
             )
         )
     }
