@@ -69,6 +69,29 @@ protocol FluidAudioTranscribing: Sendable {
     ) async throws -> FluidTranscriptionResult
 }
 
+/// Converts app-level language settings into the exact FluidAudio knobs used
+/// by Parakeet. Keeping this selection pure makes Russian/auto behaviour easy
+/// to verify without loading CoreML models.
+nonisolated struct ParakeetLongFormConfiguration: Sendable {
+    let language: Language?
+    let asrConfig: ASRConfig
+
+    init(languageCode: String?, modelVersion: AsrModelVersion) {
+        language = languageCode.flatMap(Language.init(rawValue:))
+        switch modelVersion {
+        case .v3:
+            // FluidAudio recommends no mel carry-over for multilingual v3
+            // long-form audio. Seam repair remains explicitly enabled.
+            asrConfig = ASRConfig(
+                melChunkContext: false,
+                seamGapRepair: true
+            )
+        case .v2, .tdtCtc110m, .tdtJa:
+            asrConfig = .default
+        }
+    }
+}
+
 // MARK: - Service
 
 @MainActor
@@ -349,11 +372,14 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         }
 
         // A nil code (or an unrecognised one) means auto-detect — no hint passed.
-        let language = options.languageCode.flatMap(Language.init(rawValue:))
+        let parakeetConfiguration = ParakeetLongFormConfiguration(
+            languageCode: options.languageCode,
+            modelVersion: asrVersion
+        )
 
         // 1) Transcription.
         let asrModelLoadStart = ProcessInfo.processInfo.systemUptime
-        let asrManager = try await loadASRManager()
+        let asrManager = try await loadASRManager(config: parakeetConfiguration.asrConfig)
         telemetry.modelLoadingSeconds += ProcessInfo.processInfo.systemUptime - asrModelLoadStart
         var decoderState = try TdtDecoderState()
 
@@ -366,7 +392,11 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         let transcriptionResult: ASRResult
         let asrStart = ProcessInfo.processInfo.systemUptime
         do {
-            transcriptionResult = try await asrManager.transcribe(samples, decoderState: &decoderState, language: language)
+            transcriptionResult = try await asrManager.transcribe(
+                samples,
+                decoderState: &decoderState,
+                language: parakeetConfiguration.language
+            )
         } catch {
             transcriptionProgressTask.cancel()
             throw error
@@ -524,12 +554,12 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         return (output.text, output.replacements, resolvedMode)
     }
 
-    private func loadASRManager() async throws -> AsrManager {
+    private func loadASRManager(config: ASRConfig) async throws -> AsrManager {
         if let asrManager {
             return asrManager
         }
         let models = try await AsrModels.downloadAndLoad(version: asrVersion)
-        let manager = AsrManager(config: .default)
+        let manager = AsrManager(config: config)
         try await manager.loadModels(models)
         asrManager = manager
         return manager
