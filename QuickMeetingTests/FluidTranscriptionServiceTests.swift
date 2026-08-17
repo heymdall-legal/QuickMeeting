@@ -54,7 +54,7 @@ struct FluidTranscriptionServiceTests {
         let snapshot = try #require(received.first)
         #expect(snapshot.displayName == "Alice")
         #expect(snapshot.centroids == [[0.5, 0.25]])
-        #expect(harness.pipeline.receivedThreshold == 0.73)
+        #expect(harness.pipeline.receivedVoiceBankConfiguration?.minimumScore == 0.73)
     }
 
     @Test
@@ -247,7 +247,7 @@ struct FluidTranscriptionServiceTests {
     }
 
     @Test
-    func transcribeEnrollsBankMatchedSpeakers() async throws {
+    func transcribeDoesNotEnrollAutoMatchedSpeakers() async throws {
         let harness = try FluidTranscriptionHarness(
             outcome: .success(
                 FluidTranscriptionResult(
@@ -266,43 +266,18 @@ struct FluidTranscriptionServiceTests {
             )
         )
         let meeting = try harness.createRecordedMeeting()
-
-        try await harness.service.transcribe(meetingID: meeting.id)
-
-        let calls = harness.enrollmentService.calls
-        #expect(calls.count == 1)
-        let call = try #require(calls.first)
-        #expect(call.displayName == "Alice")
-        #expect(call.speaker.id == "S1")
-        #expect(call.meetingID == meeting.id)
-    }
-
-    @Test
-    func transcribePersistsTranscriptEvenWhenEnrollmentFails() async throws {
-        let harness = try FluidTranscriptionHarness(
-            outcome: .success(
-                FluidTranscriptionResult(
-                    speakers: [
-                        TranscriptSpeaker(
-                            id: "S1",
-                            displayName: "Alice",
-                            labelSource: .bankMatched,
-                            matchedKnownSpeakerID: "known-alice",
-                            centroid: [0.1, 0.2]
-                        )
-                    ],
-                    segments: [TranscriptSegment(text: "Hi", startTime: 0, endTime: 1, speakerID: "S1")]
-                )
-            ),
-            enrollmentResult: .failure(FluidTestError.boom)
+        let knownSpeaker = try harness.knownSpeakerStore.findOrCreateSpeaker(named: "Alice", now: .now)
+        try harness.knownSpeakerStore.appendCentroid(
+            [1, 0],
+            to: knownSpeaker.id,
+            sourceMeetingID: nil,
+            sourceSpeakerID: nil,
+            now: .now
         )
-        let meeting = try harness.createRecordedMeeting()
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        let reloaded = try harness.reloadMeeting(id: meeting.id)
-        #expect(try reloaded.status == .completed)
-        #expect(harness.enrollmentService.calls.count == 1)
+        #expect(try harness.knownSpeakerStore.speaker(id: knownSpeaker.id)?.centroids.count == 1)
     }
 
     @Test
@@ -575,13 +550,11 @@ private struct FluidTranscriptionHarness {
     let fileManager: FileManager
     let meetingFileStore: MeetingFileStore
     let pipeline: StubFluidAudioPipeline
-    let enrollmentService: RecordingKnownSpeakerEnrollmentService
     let service: FluidTranscriptionService
 
     init(
         outcome: StubFluidAudioPipeline.Outcome,
         similarityThreshold: Float = 0.8,
-        enrollmentResult: Result<Void, Error> = .success(()),
         languageCode: String? = nil,
         ctcMode: TranscriptionCTCMode = .off,
         isLLMCorrectionEnabled: Bool = false,
@@ -605,13 +578,11 @@ private struct FluidTranscriptionHarness {
         try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
         meetingFileStore = MeetingFileStore(fileManager: fileManager, rootURL: rootURL)
         pipeline = StubFluidAudioPipeline(outcome: outcome)
-        enrollmentService = RecordingKnownSpeakerEnrollmentService(result: enrollmentResult)
         service = FluidTranscriptionService(
             meetingStore: meetingStore,
             progressCenter: progressCenter,
             pipeline: pipeline,
             knownSpeakerStore: knownSpeakerStore,
-            knownSpeakerEnrollmentService: enrollmentService,
             languageStore: StubTranscriptionLanguageStore(
                 code: languageCode,
                 ctcMode: ctcMode,
@@ -689,7 +660,7 @@ private final class StubFluidAudioPipeline: FluidAudioTranscribing, @unchecked S
 
     private var outcome: Outcome
     private(set) var receivedKnownSpeakers: [FluidKnownSpeakerSnapshot] = []
-    private(set) var receivedThreshold: Float?
+    private(set) var receivedVoiceBankConfiguration: VoiceBankMatchingConfiguration?
     private(set) var receivedOptions = TranscriptionPipelineOptions()
     private(set) var receivedGlossaryTerms: [TranscriptionGlossaryTerm] = []
     private var shouldSuspendNextRun = false
@@ -719,13 +690,13 @@ private final class StubFluidAudioPipeline: FluidAudioTranscribing, @unchecked S
     func transcribe(
         audioFileURL _: URL,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
-        similarityThreshold: Float,
+        voiceBankConfiguration: VoiceBankMatchingConfiguration,
         options: TranscriptionPipelineOptions,
         glossaryTerms: [TranscriptionGlossaryTerm],
         progress _: @escaping @Sendable (FluidTranscriptionProgress) -> Void
     ) async throws -> FluidTranscriptionResult {
         receivedKnownSpeakers = knownSpeakers
-        receivedThreshold = similarityThreshold
+        receivedVoiceBankConfiguration = voiceBankConfiguration
         receivedOptions = options
         receivedGlossaryTerms = glossaryTerms
 
@@ -744,29 +715,4 @@ private final class StubFluidAudioPipeline: FluidAudioTranscribing, @unchecked S
             throw error
         }
     }
-}
-
-@MainActor
-private final class RecordingKnownSpeakerEnrollmentService: KnownSpeakerEnrolling, @unchecked Sendable {
-    struct Call: Sendable {
-        let displayName: String
-        let speaker: TranscriptSpeaker
-        let meetingID: UUID
-    }
-
-    private(set) var calls = [Call]()
-    private let result: Result<Void, Error>
-
-    init(result: Result<Void, Error>) {
-        self.result = result
-    }
-
-    func enroll(displayName: String, speaker: TranscriptSpeaker, meetingID: UUID) async throws {
-        calls.append(Call(displayName: displayName, speaker: speaker, meetingID: meetingID))
-        try result.get()
-    }
-}
-
-private enum FluidTestError: Error {
-    case boom
 }

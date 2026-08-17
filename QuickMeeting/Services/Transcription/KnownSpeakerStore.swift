@@ -49,15 +49,23 @@ struct KnownSpeakerStore {
         return try modelContext.fetch(descriptor).first
     }
 
+    @discardableResult
     func appendCentroid(
         _ values: [Double],
         to speakerID: String,
         sourceMeetingID: UUID?,
         sourceSpeakerID: String?,
         now: Date
-    ) throws {
+    ) throws -> Bool {
         guard let speaker = try speaker(id: speakerID) else {
-            return
+            return false
+        }
+        let isDuplicate = speaker.centroids.contains { existing in
+            existing.values == values
+                || Self.cosineSimilarity(existing.values, values) >= 0.995
+        }
+        guard !isDuplicate else {
+            return false
         }
 
         speaker.centroids.append(
@@ -75,5 +83,21 @@ struct KnownSpeakerStore {
         }
         speaker.updatedAt = now
         try modelContext.save()
+        return true
+    }
+
+    private static func cosineSimilarity(_ lhs: [Double], _ rhs: [Double]) -> Double {
+        guard lhs.count == rhs.count, !lhs.isEmpty else { return 0 }
+        var dot = 0.0
+        var lhsNorm = 0.0
+        var rhsNorm = 0.0
+        for index in lhs.indices {
+            dot += lhs[index] * rhs[index]
+            lhsNorm += lhs[index] * lhs[index]
+            rhsNorm += rhs[index] * rhs[index]
+        }
+        let denominator = sqrt(lhsNorm) * sqrt(rhsNorm)
+        guard denominator > 0 else { return 0 }
+        return dot / denominator
     }
 }

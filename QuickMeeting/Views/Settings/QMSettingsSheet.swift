@@ -235,6 +235,45 @@ struct QMSettingsSheet: View {
 
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
+                    Text("Voice-bank minimum score")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Lower scores keep the generic Speaker N label.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                voiceBankMinimumScoreMenu
+            }
+
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Voice-bank ambiguity margin")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Best score must lead the second-best by this margin.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                voiceBankAmbiguityMarginMenu
+            }
+
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Voice-bank minimum speech")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Short speaker tracks remain unknown even with a high score.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                voiceBankMinimumSpeechMenu
+            }
+
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("LLM transcript correction")
                         .font(.system(size: 14.5, weight: .semibold))
                         .foregroundStyle(QMTheme.ink)
@@ -379,6 +418,74 @@ struct QMSettingsSheet: View {
             }
         } label: {
             settingsMenuLabel(transcriptionViewModel.offlineDiarization.embeddingSkipStrategy.displayName)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var voiceBankMinimumScoreMenu: some View {
+        Menu {
+            ForEach(transcriptionViewModel.voiceBankMinimumScores, id: \.self) { score in
+                Button {
+                    transcriptionViewModel.selectVoiceBankMinimumScore(score)
+                } label: {
+                    let text = String(format: "%.2f", score)
+                    if transcriptionViewModel.voiceBankMatching.minimumScore == score {
+                        Label(text, systemImage: "checkmark")
+                    } else {
+                        Text(text)
+                    }
+                }
+            }
+        } label: {
+            settingsMenuLabel(String(format: "%.2f", transcriptionViewModel.voiceBankMatching.minimumScore))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var voiceBankAmbiguityMarginMenu: some View {
+        Menu {
+            ForEach(transcriptionViewModel.voiceBankAmbiguityMargins, id: \.self) { margin in
+                Button {
+                    transcriptionViewModel.selectVoiceBankAmbiguityMargin(margin)
+                } label: {
+                    let text = String(format: "%.2f", margin)
+                    if transcriptionViewModel.voiceBankMatching.ambiguityMargin == margin {
+                        Label(text, systemImage: "checkmark")
+                    } else {
+                        Text(text)
+                    }
+                }
+            }
+        } label: {
+            settingsMenuLabel(String(format: "%.2f", transcriptionViewModel.voiceBankMatching.ambiguityMargin))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var voiceBankMinimumSpeechMenu: some View {
+        Menu {
+            ForEach(transcriptionViewModel.voiceBankMinimumSpeechDurations, id: \.self) { duration in
+                Button {
+                    transcriptionViewModel.selectVoiceBankMinimumSpeechDuration(duration)
+                } label: {
+                    let text = String(format: "%.0f s", duration)
+                    if transcriptionViewModel.voiceBankMatching.minimumSpeechDurationSeconds == duration {
+                        Label(text, systemImage: "checkmark")
+                    } else {
+                        Text(text)
+                    }
+                }
+            }
+        } label: {
+            settingsMenuLabel(
+                String(format: "%.0f s", transcriptionViewModel.voiceBankMatching.minimumSpeechDurationSeconds)
+            )
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)

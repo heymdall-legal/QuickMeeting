@@ -63,7 +63,6 @@ struct QuickMeetingApp: App {
                 meetingStore: meetingStore,
                 progressCenter: transcriptionProgressCenter,
                 knownSpeakerStore: knownSpeakerStore,
-                knownSpeakerEnrollmentService: knownSpeakerEnrollmentService,
                 languageStore: transcriptionSettingsStore,
                 glossaryStore: transcriptionGlossaryStore,
                 correctionService: LLMTranscriptCorrectionService(settingsStore: meetingSummarySettingsStore)

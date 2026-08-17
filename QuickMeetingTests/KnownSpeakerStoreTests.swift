@@ -27,28 +27,28 @@ struct KnownSpeakerStoreTests {
         let speaker = try harness.store.findOrCreateSpeaker(named: "Alice", now: .now)
 
         try harness.store.appendCentroid(
-            [0.1],
+            [1, 0, 0, 0],
             to: speaker.id,
             sourceMeetingID: nil,
             sourceSpeakerID: nil,
             now: Date(timeIntervalSince1970: 10)
         )
         try harness.store.appendCentroid(
-            [0.2],
+            [0, 1, 0, 0],
             to: speaker.id,
             sourceMeetingID: nil,
             sourceSpeakerID: nil,
             now: Date(timeIntervalSince1970: 20)
         )
         try harness.store.appendCentroid(
-            [0.3],
+            [0, 0, 1, 0],
             to: speaker.id,
             sourceMeetingID: nil,
             sourceSpeakerID: nil,
             now: Date(timeIntervalSince1970: 30)
         )
         try harness.store.appendCentroid(
-            [0.4],
+            [0, 0, 0, 1],
             to: speaker.id,
             sourceMeetingID: nil,
             sourceSpeakerID: nil,
@@ -56,7 +56,11 @@ struct KnownSpeakerStoreTests {
         )
 
         let reloaded = try harness.fetchKnownSpeakers().first
-        #expect(reloaded?.centroids.map(\.values) == [[0.2], [0.3], [0.4]])
+        #expect(reloaded?.centroids.map(\.values) == [
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+        ])
     }
 }
 

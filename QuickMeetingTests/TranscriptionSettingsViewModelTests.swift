@@ -20,6 +20,9 @@ struct TranscriptionSettingsViewModelTests {
         viewModel.selectClusteringPreset(.upstream06)
         viewModel.selectDiarizationStepRatio(0.15)
         viewModel.selectEmbeddingSkipStrategy(.maskSimilarity095)
+        viewModel.selectVoiceBankMinimumScore(0.85)
+        viewModel.selectVoiceBankAmbiguityMargin(0.08)
+        viewModel.selectVoiceBankMinimumSpeechDuration(3)
 
         #expect(settingsStore.pipelineOptions() == TranscriptionPipelineOptions(
             languageCode: "de",
@@ -29,6 +32,11 @@ struct TranscriptionSettingsViewModelTests {
                 clusteringThreshold: 0.6,
                 segmentationStepRatio: 0.15,
                 embeddingSkipStrategy: .maskSimilarity095
+            ),
+            voiceBankMatching: VoiceBankMatchingConfiguration(
+                minimumScore: 0.85,
+                ambiguityMargin: 0.08,
+                minimumSpeechDurationSeconds: 3
             )
         ))
     }

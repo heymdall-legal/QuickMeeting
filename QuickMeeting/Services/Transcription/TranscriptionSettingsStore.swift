@@ -24,6 +24,9 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
     private let diarizationClusteringThresholdKey = "transcription.diarization.clusteringThreshold"
     private let diarizationStepRatioKey = "transcription.diarization.stepRatio"
     private let diarizationEmbeddingSkipStrategyKey = "transcription.diarization.embeddingSkipStrategy"
+    private let voiceBankMinimumScoreKey = "transcription.voiceBank.minimumScore"
+    private let voiceBankAmbiguityMarginKey = "transcription.voiceBank.ambiguityMargin"
+    private let voiceBankMinimumSpeechDurationKey = "transcription.voiceBank.minimumSpeechDuration"
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -48,6 +51,11 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
         let storedStepRatio = userDefaults.object(forKey: diarizationStepRatioKey) as? Double
         let storedSkipStrategy = userDefaults.string(forKey: diarizationEmbeddingSkipStrategyKey)
             .flatMap(OfflineEmbeddingSkipStrategy.init(rawValue:))
+        let storedVoiceMinimumScore = userDefaults.object(forKey: voiceBankMinimumScoreKey) as? Float
+        let storedVoiceAmbiguityMargin = userDefaults.object(forKey: voiceBankAmbiguityMarginKey) as? Float
+        let storedVoiceMinimumSpeechDuration = userDefaults.object(
+            forKey: voiceBankMinimumSpeechDurationKey
+        ) as? Double
         return TranscriptionPipelineOptions(
             languageCode: languageCode(),
             ctcMode: mode,
@@ -56,6 +64,12 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
                 clusteringThreshold: storedThreshold ?? OfflineDiarizationConfiguration.legacy.clusteringThreshold,
                 segmentationStepRatio: storedStepRatio ?? OfflineDiarizationConfiguration.legacy.segmentationStepRatio,
                 embeddingSkipStrategy: storedSkipStrategy ?? OfflineDiarizationConfiguration.legacy.embeddingSkipStrategy
+            ),
+            voiceBankMatching: VoiceBankMatchingConfiguration(
+                minimumScore: storedVoiceMinimumScore ?? VoiceBankMatchingConfiguration.default.minimumScore,
+                ambiguityMargin: storedVoiceAmbiguityMargin ?? VoiceBankMatchingConfiguration.default.ambiguityMargin,
+                minimumSpeechDurationSeconds: storedVoiceMinimumSpeechDuration
+                    ?? VoiceBankMatchingConfiguration.default.minimumSpeechDurationSeconds
             )
         )
     }
@@ -75,6 +89,12 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
         userDefaults.set(
             options.offlineDiarization.embeddingSkipStrategy.rawValue,
             forKey: diarizationEmbeddingSkipStrategyKey
+        )
+        userDefaults.set(options.voiceBankMatching.minimumScore, forKey: voiceBankMinimumScoreKey)
+        userDefaults.set(options.voiceBankMatching.ambiguityMargin, forKey: voiceBankAmbiguityMarginKey)
+        userDefaults.set(
+            options.voiceBankMatching.minimumSpeechDurationSeconds,
+            forKey: voiceBankMinimumSpeechDurationKey
         )
     }
 }

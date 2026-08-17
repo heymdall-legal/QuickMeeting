@@ -41,18 +41,33 @@ nonisolated struct TranscriptionPipelineOptions: Codable, Equatable, Sendable {
     var ctcMode: TranscriptionCTCMode
     var isLLMCorrectionEnabled: Bool
     var offlineDiarization: OfflineDiarizationConfiguration
+    var voiceBankMatching: VoiceBankMatchingConfiguration
 
     init(
         languageCode: String? = nil,
         ctcMode: TranscriptionCTCMode = .off,
         isLLMCorrectionEnabled: Bool = false,
-        offlineDiarization: OfflineDiarizationConfiguration = .legacy
+        offlineDiarization: OfflineDiarizationConfiguration = .legacy,
+        voiceBankMatching: VoiceBankMatchingConfiguration = .default
     ) {
         self.languageCode = languageCode
         self.ctcMode = ctcMode
         self.isLLMCorrectionEnabled = isLLMCorrectionEnabled
         self.offlineDiarization = offlineDiarization
+        self.voiceBankMatching = voiceBankMatching
     }
+}
+
+nonisolated struct VoiceBankMatchingConfiguration: Codable, Equatable, Sendable {
+    var minimumScore: Float
+    var ambiguityMargin: Float
+    var minimumSpeechDurationSeconds: TimeInterval
+
+    static let `default` = VoiceBankMatchingConfiguration(
+        minimumScore: 0.8,
+        ambiguityMargin: 0.05,
+        minimumSpeechDurationSeconds: 2
+    )
 }
 
 nonisolated struct OfflineDiarizationConfiguration: Codable, Equatable, Sendable {
@@ -174,6 +189,7 @@ nonisolated struct TranscriptionJobTelemetry: Codable, Equatable, Sendable {
     var fluidAudioASRProcessingSeconds: TimeInterval?
     var fluidAudioDiarizationTimings: FluidAudioDiarizationTimings?
     var offlineDiarizationConfiguration: OfflineDiarizationConfiguration?
+    var voiceBankMatches: [VoiceBankMatchTelemetry]?
 
     init(
         jobID: UUID = UUID(),
@@ -194,7 +210,8 @@ nonisolated struct TranscriptionJobTelemetry: Codable, Equatable, Sendable {
         peakMemoryBytes: UInt64 = 0,
         fluidAudioASRProcessingSeconds: TimeInterval? = nil,
         fluidAudioDiarizationTimings: FluidAudioDiarizationTimings? = nil,
-        offlineDiarizationConfiguration: OfflineDiarizationConfiguration? = nil
+        offlineDiarizationConfiguration: OfflineDiarizationConfiguration? = nil,
+        voiceBankMatches: [VoiceBankMatchTelemetry]? = nil
     ) {
         self.jobID = jobID
         self.startedAt = startedAt
@@ -215,7 +232,26 @@ nonisolated struct TranscriptionJobTelemetry: Codable, Equatable, Sendable {
         self.fluidAudioASRProcessingSeconds = fluidAudioASRProcessingSeconds
         self.fluidAudioDiarizationTimings = fluidAudioDiarizationTimings
         self.offlineDiarizationConfiguration = offlineDiarizationConfiguration
+        self.voiceBankMatches = voiceBankMatches
     }
+}
+
+nonisolated struct VoiceBankMatchTelemetry: Codable, Equatable, Sendable {
+    var diarizedSpeakerID: String
+    var speechDurationSeconds: TimeInterval
+    var bestKnownSpeakerID: String?
+    var bestScore: Float?
+    var secondBestKnownSpeakerID: String?
+    var secondBestScore: Float?
+    var decision: VoiceBankMatchDecision
+}
+
+nonisolated enum VoiceBankMatchDecision: String, Codable, Equatable, Sendable {
+    case matched
+    case noCandidates
+    case belowThreshold
+    case ambiguous
+    case insufficientSpeech
 }
 
 nonisolated enum TranscriptionRunKind: String, Codable, Equatable, Sendable {

@@ -34,6 +34,11 @@ struct FluidKnownSpeakerSnapshot: Sendable, Equatable {
     let centroids: [[Float]]
 }
 
+private nonisolated struct VoiceBankMatchEvaluation: Sendable {
+    let match: FluidKnownSpeakerSnapshot?
+    let telemetry: VoiceBankMatchTelemetry
+}
+
 enum FluidTranscriptionProgress: Sendable {
     case transcribing(Double)
     case diarizing(Double)
@@ -62,7 +67,7 @@ protocol FluidAudioTranscribing: Sendable {
     func transcribe(
         audioFileURL: URL,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
-        similarityThreshold: Float,
+        voiceBankConfiguration: VoiceBankMatchingConfiguration,
         options: TranscriptionPipelineOptions,
         glossaryTerms: [TranscriptionGlossaryTerm],
         progress: @escaping @Sendable (FluidTranscriptionProgress) -> Void
@@ -104,11 +109,10 @@ final class FluidTranscriptionService: TranscriptionServicing {
     private let progressCenter: TranscriptionProgressCenter
     private let pipeline: any FluidAudioTranscribing
     private let knownSpeakerStore: KnownSpeakerStore?
-    private let knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)?
     private let languageStore: (any TranscriptionLanguageStoring)?
     private let glossaryStore: TranscriptionGlossaryStore?
     private let correctionService: (any TranscriptLLMCorrecting)?
-    private let similarityThreshold: Float
+    private let voiceBankConfigurationOverride: VoiceBankMatchingConfiguration?
     private let fileManager: FileManager
     private let dateProvider: () -> Date
     private var activeMeetingID: UUID?
@@ -118,11 +122,12 @@ final class FluidTranscriptionService: TranscriptionServicing {
         progressCenter: TranscriptionProgressCenter,
         pipeline: (any FluidAudioTranscribing)? = nil,
         knownSpeakerStore: KnownSpeakerStore? = nil,
-        knownSpeakerEnrollmentService: (any KnownSpeakerEnrolling)? = nil,
         languageStore: (any TranscriptionLanguageStoring)? = nil,
         glossaryStore: TranscriptionGlossaryStore? = nil,
         correctionService: (any TranscriptLLMCorrecting)? = nil,
-        similarityThreshold: Float = 0.8,
+        similarityThreshold: Float? = nil,
+        ambiguityMargin: Float? = nil,
+        minimumSpeakerSpeechDuration: TimeInterval? = nil,
         fileManager: FileManager = .default,
         dateProvider: @escaping () -> Date = Date.init
     ) {
@@ -130,11 +135,20 @@ final class FluidTranscriptionService: TranscriptionServicing {
         self.progressCenter = progressCenter
         self.pipeline = pipeline ?? DefaultFluidAudioPipeline()
         self.knownSpeakerStore = knownSpeakerStore
-        self.knownSpeakerEnrollmentService = knownSpeakerEnrollmentService
         self.languageStore = languageStore
         self.glossaryStore = glossaryStore
         self.correctionService = correctionService
-        self.similarityThreshold = similarityThreshold
+        if similarityThreshold != nil || ambiguityMargin != nil || minimumSpeakerSpeechDuration != nil {
+            let defaults = VoiceBankMatchingConfiguration.default
+            voiceBankConfigurationOverride = VoiceBankMatchingConfiguration(
+                minimumScore: similarityThreshold ?? defaults.minimumScore,
+                ambiguityMargin: ambiguityMargin ?? defaults.ambiguityMargin,
+                minimumSpeechDurationSeconds: minimumSpeakerSpeechDuration
+                    ?? defaults.minimumSpeechDurationSeconds
+            )
+        } else {
+            voiceBankConfigurationOverride = nil
+        }
         self.fileManager = fileManager
         self.dateProvider = dateProvider
     }
@@ -174,11 +188,12 @@ final class FluidTranscriptionService: TranscriptionServicing {
             let knownSpeakers = try makeKnownSpeakerSnapshots()
             let progressCenter = progressCenter
             let options = languageStore?.pipelineOptions() ?? TranscriptionPipelineOptions()
+            let voiceBankConfiguration = voiceBankConfigurationOverride ?? options.voiceBankMatching
             let glossaryTerms = glossaryStore?.enabledTerms() ?? []
             let result = try await pipeline.transcribe(
                 audioFileURL: audioFileURL,
                 knownSpeakers: knownSpeakers,
-                similarityThreshold: similarityThreshold,
+                voiceBankConfiguration: voiceBankConfiguration,
                 options: options,
                 glossaryTerms: glossaryTerms
             ) { update in
@@ -250,17 +265,6 @@ final class FluidTranscriptionService: TranscriptionServicing {
                 updatedAt: dateProvider()
             )
             Self.logTelemetry(telemetry, meetingID: meetingID)
-            for speaker in visibleTranscript.speakers where speaker.labelSource == .bankMatched {
-                do {
-                    try await knownSpeakerEnrollmentService?.enroll(
-                        displayName: speaker.displayName,
-                        speaker: speaker,
-                        meetingID: meetingID
-                    )
-                } catch {
-                    // Keep the successful transcript even if centroid enrollment fails.
-                }
-            }
         } catch {
             if !didStopMemoryTracking {
                 _ = memoryTracker.stop()
@@ -328,7 +332,7 @@ final class FluidTranscriptionService: TranscriptionServicing {
 /// pipeline off the main actor. Models are loaded lazily and reused between
 /// runs to amortise the (substantial) load cost.
 actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
-    private static let diarizationLogger = Logger(
+    nonisolated(unsafe) private static let diarizationLogger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "QuickMeeting",
         category: "OfflineDiarization"
     )
@@ -350,7 +354,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
     func transcribe(
         audioFileURL: URL,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
-        similarityThreshold: Float,
+        voiceBankConfiguration: VoiceBankMatchingConfiguration,
         options: TranscriptionPipelineOptions,
         glossaryTerms: [TranscriptionGlossaryTerm],
         progress: @escaping @Sendable (FluidTranscriptionProgress) -> Void
@@ -468,7 +472,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
                 segments: segments,
                 speakerDatabase: speakerDatabase,
                 knownSpeakers: knownSpeakers,
-                similarityThreshold: similarityThreshold
+                voiceBankConfiguration: voiceBankConfiguration
             )
             let rawResult = mapping.result
             let rawTranscript = StoredTranscript(speakers: rawResult.speakers, segments: rawResult.segments)
@@ -480,6 +484,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
             var completedTelemetry = pipelineTelemetry
             completedTelemetry.alignmentSeconds = mapping.alignmentSeconds
             completedTelemetry.voiceBankMatchingSeconds = mapping.voiceBankMatchingSeconds
+            completedTelemetry.voiceBankMatches = mapping.voiceBankMatches
             return FluidTranscriptionResult(
                 speakers: rawResult.speakers,
                 segments: finalSegments,
@@ -579,7 +584,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         return manager
     }
 
-    private static func logDiarizationConfiguration(
+    private nonisolated static func logDiarizationConfiguration(
         _ configuration: OfflineDiarizationConfiguration
     ) {
         diarizationLogger.info(
@@ -602,7 +607,28 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
             segments: segments,
             speakerDatabase: speakerDatabase,
             knownSpeakers: knownSpeakers,
-            similarityThreshold: similarityThreshold
+            voiceBankConfiguration: VoiceBankMatchingConfiguration(
+                minimumScore: similarityThreshold,
+                ambiguityMargin: 0,
+                minimumSpeechDurationSeconds: 0
+            )
+        ).result
+    }
+
+    @MainActor
+    static func makeResult(
+        transcriptionResult: ASRResult,
+        segments: [TimedSpeakerSegment],
+        speakerDatabase: [String: [Float]]?,
+        knownSpeakers: [FluidKnownSpeakerSnapshot],
+        voiceBankConfiguration: VoiceBankMatchingConfiguration
+    ) -> FluidTranscriptionResult {
+        makeResultWithTimings(
+            transcriptionResult: transcriptionResult,
+            segments: segments,
+            speakerDatabase: speakerDatabase,
+            knownSpeakers: knownSpeakers,
+            voiceBankConfiguration: voiceBankConfiguration
         ).result
     }
 
@@ -612,11 +638,12 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         segments: [TimedSpeakerSegment],
         speakerDatabase: [String: [Float]]?,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
-        similarityThreshold: Float
+        voiceBankConfiguration: VoiceBankMatchingConfiguration
     ) -> (
         result: FluidTranscriptionResult,
         alignmentSeconds: TimeInterval,
-        voiceBankMatchingSeconds: TimeInterval
+        voiceBankMatchingSeconds: TimeInterval,
+        voiceBankMatches: [VoiceBankMatchTelemetry]
     ) {
         let voiceBankStart = ProcessInfo.processInfo.systemUptime
         let speakerEmbeddings = perSpeakerEmbeddings(segments: segments, speakerDatabase: speakerDatabase)
@@ -629,21 +656,42 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
             }
         }
 
+        let speechDurationBySpeaker = segments.reduce(into: [String: TimeInterval]()) { durations, segment in
+            durations[segment.speakerId, default: 0] += TimeInterval(segment.durationSeconds)
+        }
+        var matchTelemetry: [VoiceBankMatchTelemetry] = []
         let transcriptSpeakers = orderedSpeakerIDs.enumerated().map { index, speakerID -> TranscriptSpeaker in
             let centroid = speakerEmbeddings[speakerID]
             let centroidValues = centroid?.map(Double.init)
-            if let centroid,
-               let match = bestMatch(
-                   for: centroid,
-                   in: knownSpeakers,
-                   threshold: similarityThreshold
-               ) {
-                return TranscriptSpeaker(
-                    id: speakerID,
-                    displayName: match.displayName,
-                    labelSource: .bankMatched,
-                    matchedKnownSpeakerID: match.id,
-                    centroid: centroidValues
+            if let centroid {
+                let evaluation = evaluateMatch(
+                    for: centroid,
+                    diarizedSpeakerID: speakerID,
+                    speechDuration: speechDurationBySpeaker[speakerID] ?? 0,
+                    in: knownSpeakers,
+                    configuration: voiceBankConfiguration
+                )
+                matchTelemetry.append(evaluation.telemetry)
+                if let match = evaluation.match {
+                    return TranscriptSpeaker(
+                        id: speakerID,
+                        displayName: match.displayName,
+                        labelSource: .bankMatched,
+                        matchedKnownSpeakerID: match.id,
+                        centroid: centroidValues
+                    )
+                }
+            } else {
+                matchTelemetry.append(
+                    VoiceBankMatchTelemetry(
+                        diarizedSpeakerID: speakerID,
+                        speechDurationSeconds: speechDurationBySpeaker[speakerID] ?? 0,
+                        bestKnownSpeakerID: nil,
+                        bestScore: nil,
+                        secondBestKnownSpeakerID: nil,
+                        secondBestScore: nil,
+                        decision: .noCandidates
+                    )
                 )
             }
             return TranscriptSpeaker(
@@ -666,7 +714,8 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         return (
             FluidTranscriptionResult(speakers: transcriptSpeakers, segments: transcriptSegments),
             alignmentSeconds,
-            voiceBankMatchingSeconds
+            voiceBankMatchingSeconds,
+            matchTelemetry
         )
     }
 
@@ -750,26 +799,60 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         return averaged
     }
 
-    private nonisolated static func bestMatch(
+    private nonisolated static func evaluateMatch(
         for centroid: [Float],
+        diarizedSpeakerID: String,
+        speechDuration: TimeInterval,
         in knownSpeakers: [FluidKnownSpeakerSnapshot],
-        threshold: Float
-    ) -> FluidKnownSpeakerSnapshot? {
-        var bestSimilarity: Float = -1
-        var bestSpeaker: FluidKnownSpeakerSnapshot?
-        for speaker in knownSpeakers {
-            for embedding in speaker.centroids {
-                let similarity = cosineSimilarity(centroid, embedding)
-                if similarity > bestSimilarity {
-                    bestSimilarity = similarity
-                    bestSpeaker = speaker
-                }
+        configuration: VoiceBankMatchingConfiguration
+    ) -> VoiceBankMatchEvaluation {
+        let ranked = knownSpeakers.compactMap { speaker -> (FluidKnownSpeakerSnapshot, Float)? in
+            guard let score = speaker.centroids
+                .map({ cosineSimilarity(centroid, $0) })
+                .max()
+            else {
+                return nil
             }
+            return (speaker, score)
         }
-        guard let bestSpeaker, bestSimilarity >= threshold else {
-            return nil
+        .sorted { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            return lhs.0.id < rhs.0.id
         }
-        return bestSpeaker
+
+        let best = ranked.first
+        let second = ranked.dropFirst().first
+        let decision: VoiceBankMatchDecision
+        let match: FluidKnownSpeakerSnapshot?
+        if best == nil {
+            decision = .noCandidates
+            match = nil
+        } else if speechDuration < configuration.minimumSpeechDurationSeconds {
+            decision = .insufficientSpeech
+            match = nil
+        } else if best!.1 < configuration.minimumScore {
+            decision = .belowThreshold
+            match = nil
+        } else if let second, best!.1 - second.1 < configuration.ambiguityMargin {
+            decision = .ambiguous
+            match = nil
+        } else {
+            decision = .matched
+            match = best!.0
+        }
+
+        return VoiceBankMatchEvaluation(
+            match: match,
+            telemetry: VoiceBankMatchTelemetry(
+                diarizedSpeakerID: diarizedSpeakerID,
+                speechDurationSeconds: speechDuration,
+                bestKnownSpeakerID: best?.0.id,
+                bestScore: best?.1,
+                secondBestKnownSpeakerID: second?.0.id,
+                secondBestScore: second?.1,
+                decision: decision
+            )
+        )
     }
 
     /// Aligns transcribed tokens to diarized speakers by timestamp. Subword

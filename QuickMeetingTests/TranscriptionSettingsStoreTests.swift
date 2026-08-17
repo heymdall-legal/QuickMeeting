@@ -29,6 +29,11 @@ struct TranscriptionSettingsStoreTests {
                 clusteringThreshold: 0.6,
                 segmentationStepRatio: 0.15,
                 embeddingSkipStrategy: .maskSimilarity095
+            ),
+            voiceBankMatching: VoiceBankMatchingConfiguration(
+                minimumScore: 0.85,
+                ambiguityMargin: 0.08,
+                minimumSpeechDurationSeconds: 3
             )
         ))
 
@@ -41,6 +46,11 @@ struct TranscriptionSettingsStoreTests {
                 clusteringThreshold: 0.6,
                 segmentationStepRatio: 0.15,
                 embeddingSkipStrategy: .maskSimilarity095
+            ),
+            voiceBankMatching: VoiceBankMatchingConfiguration(
+                minimumScore: 0.85,
+                ambiguityMargin: 0.08,
+                minimumSpeechDurationSeconds: 3
             )
         ))
     }

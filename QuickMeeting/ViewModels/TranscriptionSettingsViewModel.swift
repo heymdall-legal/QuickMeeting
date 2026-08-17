@@ -14,6 +14,7 @@ final class TranscriptionSettingsViewModel: ObservableObject {
     @Published private(set) var ctcMode: TranscriptionCTCMode
     @Published private(set) var isLLMCorrectionEnabled: Bool
     @Published private(set) var offlineDiarization: OfflineDiarizationConfiguration
+    @Published private(set) var voiceBankMatching: VoiceBankMatchingConfiguration
     @Published private(set) var glossaryTerms: [TranscriptionGlossaryTerm]
     @Published private(set) var isGlossaryLoaded: Bool
 
@@ -31,6 +32,7 @@ final class TranscriptionSettingsViewModel: ObservableObject {
         ctcMode = options.ctcMode
         isLLMCorrectionEnabled = options.isLLMCorrectionEnabled
         offlineDiarization = options.offlineDiarization
+        voiceBankMatching = options.voiceBankMatching
         glossaryTerms = []
         isGlossaryLoaded = false
     }
@@ -40,6 +42,9 @@ final class TranscriptionSettingsViewModel: ObservableObject {
     var clusteringPresets: [OfflineClusteringPreset] { OfflineClusteringPreset.allCases }
     var diarizationStepRatios: [Double] { [0.15, 0.2, 0.25] }
     var embeddingSkipStrategies: [OfflineEmbeddingSkipStrategy] { OfflineEmbeddingSkipStrategy.allCases }
+    var voiceBankMinimumScores: [Float] { [0.75, 0.8, 0.85, 0.9] }
+    var voiceBankAmbiguityMargins: [Float] { [0.03, 0.05, 0.08, 0.1] }
+    var voiceBankMinimumSpeechDurations: [TimeInterval] { [1, 2, 3, 5] }
 
     var selectedLanguageName: String { TranscriptionLanguageOption.name(for: languageCode) }
     var selectedClusteringName: String {
@@ -74,6 +79,21 @@ final class TranscriptionSettingsViewModel: ObservableObject {
 
     func selectEmbeddingSkipStrategy(_ strategy: OfflineEmbeddingSkipStrategy) {
         offlineDiarization.embeddingSkipStrategy = strategy
+        savePipelineOptions()
+    }
+
+    func selectVoiceBankMinimumScore(_ score: Float) {
+        voiceBankMatching.minimumScore = score
+        savePipelineOptions()
+    }
+
+    func selectVoiceBankAmbiguityMargin(_ margin: Float) {
+        voiceBankMatching.ambiguityMargin = margin
+        savePipelineOptions()
+    }
+
+    func selectVoiceBankMinimumSpeechDuration(_ duration: TimeInterval) {
+        voiceBankMatching.minimumSpeechDurationSeconds = duration
         savePipelineOptions()
     }
 
@@ -121,7 +141,8 @@ final class TranscriptionSettingsViewModel: ObservableObject {
                 languageCode: languageCode,
                 ctcMode: ctcMode,
                 isLLMCorrectionEnabled: isLLMCorrectionEnabled,
-                offlineDiarization: offlineDiarization
+                offlineDiarization: offlineDiarization,
+                voiceBankMatching: voiceBankMatching
             )
         )
     }
