@@ -74,29 +74,6 @@ protocol FluidAudioTranscribing: Sendable {
     ) async throws -> FluidTranscriptionResult
 }
 
-/// Converts app-level language settings into the exact FluidAudio knobs used
-/// by Parakeet. Keeping this selection pure makes Russian/auto behaviour easy
-/// to verify without loading CoreML models.
-nonisolated struct ParakeetLongFormConfiguration: Sendable {
-    let language: Language?
-    let asrConfig: ASRConfig
-
-    init(languageCode: String?, modelVersion: AsrModelVersion) {
-        language = languageCode.flatMap(Language.init(rawValue:))
-        switch modelVersion {
-        case .v3:
-            // FluidAudio recommends no mel carry-over for multilingual v3
-            // long-form audio. Seam repair remains explicitly enabled.
-            asrConfig = ASRConfig(
-                melChunkContext: false,
-                seamGapRepair: true
-            )
-        case .v2, .tdtCtc110m, .tdtJa:
-            asrConfig = .default
-        }
-    }
-}
-
 // MARK: - Service
 
 @MainActor
@@ -332,22 +309,22 @@ final class FluidTranscriptionService: TranscriptionServicing {
 /// pipeline off the main actor. Models are loaded lazily and reused between
 /// runs to amortise the (substantial) load cost.
 actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
-    nonisolated(unsafe) private static let diarizationLogger = Logger(
+    nonisolated private static let diarizationLogger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "QuickMeeting",
         category: "OfflineDiarization"
     )
-    private let asrVersion: AsrModelVersion
+    private let asrBackend: any ASRBackend
     private let diarizerConfigOverride: OfflineDiarizerConfig?
 
-    private var asrManager: AsrManager?
     private var diarizer: OfflineDiarizerManager?
     private var activeDiarizationConfiguration: OfflineDiarizationConfiguration?
 
     init(
         asrVersion: AsrModelVersion = .v3,
+        asrBackend: (any ASRBackend)? = nil,
         diarizerConfig: OfflineDiarizerConfig? = nil
     ) {
-        self.asrVersion = asrVersion
+        self.asrBackend = asrBackend ?? ParakeetASRBackend(version: asrVersion)
         diarizerConfigOverride = diarizerConfig
     }
 
@@ -361,8 +338,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
     ) async throws -> FluidTranscriptionResult {
         let needsDiarizerLoad = diarizer == nil
             || (diarizerConfigOverride == nil && activeDiarizationConfiguration != options.offlineDiarization)
-        let isColdRun = asrManager == nil || needsDiarizerLoad
-        var telemetry = TranscriptionJobTelemetry(runKind: isColdRun ? .cold : .warm)
+        var telemetry = TranscriptionJobTelemetry(runKind: .warm)
         telemetry.offlineDiarizationConfiguration = options.offlineDiarization
 
         let decodeStart = ProcessInfo.processInfo.systemUptime
@@ -372,62 +348,23 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
             throw FluidTranscriptionServiceError.noAudioDecoded
         }
 
-        // A nil code (or an unrecognised one) means auto-detect — no hint passed.
-        let parakeetConfiguration = ParakeetLongFormConfiguration(
-            languageCode: options.languageCode,
-            modelVersion: asrVersion
-        )
-
-        // 1) Transcription.
-        let asrModelLoadStart = ProcessInfo.processInfo.systemUptime
-        let asrManager = try await loadASRManager(config: parakeetConfiguration.asrConfig)
-        telemetry.modelLoadingSeconds += ProcessInfo.processInfo.systemUptime - asrModelLoadStart
-        var decoderState = try TdtDecoderState()
-
-        let progressStream = await asrManager.transcriptionProgressStream
-        let transcriptionProgressTask = Task {
-            for try await value in progressStream {
-                progress(.transcribing(value))
-            }
-        }
-        let transcriptionResult: ASRResult
-        let asrStart = ProcessInfo.processInfo.systemUptime
-        do {
-            transcriptionResult = try await asrManager.transcribe(
-                samples,
-                decoderState: &decoderState,
-                language: parakeetConfiguration.language
+        // 1) ASR. FluidAudio-specific result and CTC types stay inside the
+        // Parakeet adapter; the pipeline receives only TimedTranscript.
+        let asrOutput = try await asrBackend.transcribe(
+            ASRBackendRequest(
+                samples: samples,
+                languageCode: options.languageCode,
+                ctcMode: options.ctcMode,
+                glossaryTerms: glossaryTerms
             )
-        } catch {
-            transcriptionProgressTask.cancel()
-            throw error
+        ) { value in
+            progress(.transcribing(value))
         }
-        telemetry.asrSeconds = ProcessInfo.processInfo.systemUptime - asrStart
-        telemetry.fluidAudioASRProcessingSeconds = transcriptionResult.processingTime
-        transcriptionProgressTask.cancel()
-        progress(.transcribing(1))
-
-        var ctcAdjustedText: String?
-        var ctcReplacements: [VocabularyRescorer.RescoringResult] = []
-        var warnings: [String] = []
-        var resolvedCTCMode: TranscriptionCTCMode?
-        let ctcStart = ProcessInfo.processInfo.systemUptime
-        if options.ctcMode != .off, !glossaryTerms.isEmpty {
-            do {
-                let ctcResult = try await applyCTCRescoring(
-                    transcriptionResult: transcriptionResult,
-                    samples: samples,
-                    glossaryTerms: glossaryTerms,
-                    mode: options.ctcMode
-                )
-                ctcAdjustedText = ctcResult.text
-                ctcReplacements = ctcResult.replacements
-                resolvedCTCMode = ctcResult.resolvedMode
-            } catch {
-                warnings.append("CTC vocabulary stage skipped: \(error.localizedDescription)")
-            }
-        }
-        telemetry.ctcSeconds = ProcessInfo.processInfo.systemUptime - ctcStart
+        telemetry.runKind = asrOutput.wasColdStart || needsDiarizerLoad ? .cold : .warm
+        telemetry.modelLoadingSeconds = asrOutput.modelLoadingSeconds
+        telemetry.asrSeconds = asrOutput.asrWallSeconds
+        telemetry.ctcSeconds = asrOutput.ctcWallSeconds
+        telemetry.fluidAudioASRProcessingSeconds = asrOutput.nativeProcessingSeconds
 
         // 2) Diarization (reuses the same samples).
         Self.logDiarizationConfiguration(options.offlineDiarization)
@@ -460,15 +397,17 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         // mapping itself is light, pure CPU work over the pipeline output.
         let segments = diarizationResult.segments
         let speakerDatabase = diarizationResult.speakerDatabase
-        let finalCTCReplacements = ctcReplacements
-        let finalCTCAdjustedText = ctcAdjustedText
-        let finalResolvedCTCMode = resolvedCTCMode
-        let finalWarnings = warnings
+        let finalCTCReplacements = asrOutput.replacements
+        let finalCTCAdjustedText = asrOutput.adjustedText
+        let finalResolvedCTCMode = asrOutput.resolvedCTCMode
+        let finalWarnings = asrOutput.warnings
+        let timedTranscript = asrOutput.transcript
+        let asrModelName = asrOutput.modelName
         let pipelineTelemetry = telemetry
 
         return await MainActor.run {
             let mapping = Self.makeResultWithTimings(
-                transcriptionResult: transcriptionResult,
+                transcription: timedTranscript,
                 segments: segments,
                 speakerDatabase: speakerDatabase,
                 knownSpeakers: knownSpeakers,
@@ -490,7 +429,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
                 segments: finalSegments,
                 rawTranscript: rawTranscript,
                 metadata: TranscriptionPipelineMetadata(
-                    asrModel: "Parakeet TDT v3",
+                    asrModel: asrModelName,
                     languageCode: options.languageCode,
                     requestedCTCMode: options.ctcMode,
                     resolvedCTCMode: finalResolvedCTCMode,
@@ -501,71 +440,6 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
                 )
             )
         }
-    }
-
-    private func applyCTCRescoring(
-        transcriptionResult: ASRResult,
-        samples: [Float],
-        glossaryTerms: [TranscriptionGlossaryTerm],
-        mode: TranscriptionCTCMode
-    ) async throws -> (
-        text: String,
-        replacements: [VocabularyRescorer.RescoringResult],
-        resolvedMode: TranscriptionCTCMode
-    ) {
-        guard let tokenTimings = transcriptionResult.tokenTimings, !tokenTimings.isEmpty else {
-            return (transcriptionResult.text, [], .off)
-        }
-
-        let resolvedMode: TranscriptionCTCMode = mode == .auto ? .ctc110m : mode
-        let variant: CtcModelVariant = resolvedMode == .ctc06b ? .ctc06b : .ctc110m
-        let models = try await CtcModels.downloadAndLoad(variant: variant)
-        let tokenizer = try await CtcTokenizer.load(from: CtcModels.defaultCacheDirectory(for: variant))
-        let tokenizedTerms = glossaryTerms.compactMap { term -> CustomVocabularyTerm? in
-            let text = term.normalizedText
-            guard !text.isEmpty else { return nil }
-            let tokenIDs = tokenizer.encode(text)
-            guard !tokenIDs.isEmpty else { return nil }
-            return CustomVocabularyTerm(
-                text: text,
-                weight: term.weight,
-                aliases: term.normalizedAliases.isEmpty ? nil : term.normalizedAliases,
-                ctcTokenIds: tokenIDs
-            )
-        }
-        guard !tokenizedTerms.isEmpty else {
-            return (transcriptionResult.text, [], resolvedMode)
-        }
-
-        let vocabulary = CustomVocabularyContext(terms: tokenizedTerms)
-        let spotter = CtcKeywordSpotter(models: models)
-        let spotted = try await spotter.spotKeywordsWithLogProbs(
-            audioSamples: samples,
-            customVocabulary: vocabulary
-        )
-        let rescorer = try await VocabularyRescorer.create(
-            spotter: spotter,
-            vocabulary: vocabulary,
-            ctcModelDirectory: CtcModels.defaultCacheDirectory(for: variant)
-        )
-        let output = rescorer.ctcTokenRescore(
-            transcript: transcriptionResult.text,
-            tokenTimings: tokenTimings,
-            logProbs: spotted.logProbs,
-            frameDuration: spotted.frameDuration
-        )
-        return (output.text, output.replacements, resolvedMode)
-    }
-
-    private func loadASRManager(config: ASRConfig) async throws -> AsrManager {
-        if let asrManager {
-            return asrManager
-        }
-        let models = try await AsrModels.downloadAndLoad(version: asrVersion)
-        let manager = AsrManager(config: config)
-        try await manager.loadModels(models)
-        asrManager = manager
-        return manager
     }
 
     private func loadDiarizer(
@@ -596,14 +470,14 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
 
     @MainActor
     static func makeResult(
-        transcriptionResult: ASRResult,
+        transcription: TimedTranscript,
         segments: [TimedSpeakerSegment],
         speakerDatabase: [String: [Float]]?,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         similarityThreshold: Float
     ) -> FluidTranscriptionResult {
         makeResultWithTimings(
-            transcriptionResult: transcriptionResult,
+            transcription: transcription,
             segments: segments,
             speakerDatabase: speakerDatabase,
             knownSpeakers: knownSpeakers,
@@ -617,14 +491,14 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
 
     @MainActor
     static func makeResult(
-        transcriptionResult: ASRResult,
+        transcription: TimedTranscript,
         segments: [TimedSpeakerSegment],
         speakerDatabase: [String: [Float]]?,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
         voiceBankConfiguration: VoiceBankMatchingConfiguration
     ) -> FluidTranscriptionResult {
         makeResultWithTimings(
-            transcriptionResult: transcriptionResult,
+            transcription: transcription,
             segments: segments,
             speakerDatabase: speakerDatabase,
             knownSpeakers: knownSpeakers,
@@ -634,7 +508,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
 
     @MainActor
     private static func makeResultWithTimings(
-        transcriptionResult: ASRResult,
+        transcription: TimedTranscript,
         segments: [TimedSpeakerSegment],
         speakerDatabase: [String: [Float]]?,
         knownSpeakers: [FluidKnownSpeakerSnapshot],
@@ -706,7 +580,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
 
         let alignmentStart = ProcessInfo.processInfo.systemUptime
         let transcriptSegments = makeSegments(
-            transcriptionResult: transcriptionResult,
+            transcription: transcription,
             diarizationSegments: segments
         )
         let alignmentSeconds = ProcessInfo.processInfo.systemUptime - alignmentStart
@@ -721,7 +595,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
 
     @MainActor
     private static func applyCTCReplacements(
-        _ replacements: [VocabularyRescorer.RescoringResult],
+        _ replacements: [ASRTextReplacement],
         to segments: [TranscriptSegment]
     ) -> [TranscriptSegment] {
         guard !replacements.isEmpty else {
@@ -731,10 +605,9 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         return segments.map { segment in
             var text = segment.text
             for replacement in replacements where replacement.shouldReplace {
-                guard let replacementWord = replacement.replacementWord else { continue }
                 text = replacePhrase(
-                    replacement.originalWord,
-                    with: replacementWord,
+                    replacement.originalText,
+                    with: replacement.replacementText,
                     in: text
                 )
             }
@@ -855,36 +728,17 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
         )
     }
 
-    /// Aligns transcribed tokens to diarized speakers by timestamp. Subword
-    /// tokens are grouped into words first so a split word is attributed to the
-    /// speaker who started it, then consecutive same-speaker words are merged
-    /// into a single segment.
+    /// Aligns backend-neutral timed words to diarized speakers by timestamp,
+    /// then merges consecutive same-speaker words into transcript segments.
     @MainActor
     private static func makeSegments(
-        transcriptionResult: ASRResult,
+        transcription: TimedTranscript,
         diarizationSegments: [TimedSpeakerSegment]
     ) -> [TranscriptSegment] {
-        guard let tokens = transcriptionResult.tokenTimings, !tokens.isEmpty else {
-            let text = transcriptionResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !transcription.words.isEmpty else {
+            let text = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return [] }
             return [TranscriptSegment(text: text)]
-        }
-
-        struct Word {
-            var text: String
-            var startTime: TimeInterval
-            var endTime: TimeInterval
-        }
-
-        var words: [Word] = []
-        for token in tokens {
-            let isWordStart = token.token.hasPrefix(" ") || token.token.hasPrefix("\u{2581}") || words.isEmpty
-            if isWordStart {
-                words.append(Word(text: token.token, startTime: token.startTime, endTime: token.endTime))
-            } else {
-                words[words.count - 1].text += token.token
-                words[words.count - 1].endTime = token.endTime
-            }
         }
 
         func speaker(at time: TimeInterval) -> String? {
@@ -902,7 +756,7 @@ actor DefaultFluidAudioPipeline: FluidAudioTranscribing {
 
         var groups: [Group] = []
         var lastKnownSpeaker: String?
-        for word in words {
+        for word in transcription.words {
             let resolved = speaker(at: word.startTime)
             let speakerID: String?
             if let resolved {

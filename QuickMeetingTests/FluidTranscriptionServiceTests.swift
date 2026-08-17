@@ -352,7 +352,7 @@ struct DefaultFluidAudioPipelineMappingTests {
     @Test
     func orderSpeakersByFirstAppearanceWithGenericLabels() throws {
         let result = DefaultFluidAudioPipeline.makeResult(
-            transcriptionResult: makeASRResult(
+            transcription: makeTimedTranscript(
                 text: "hi yo",
                 tokens: [
                     token(" hi", start: 0.1, end: 0.4),
@@ -382,7 +382,7 @@ struct DefaultFluidAudioPipelineMappingTests {
             centroids: [[1, 0]]
         )
         let result = DefaultFluidAudioPipeline.makeResult(
-            transcriptionResult: makeASRResult(text: "hi", tokens: [token(" hi", start: 0.1, end: 0.4)]),
+            transcription: makeTimedTranscript(text: "hi", tokens: [token(" hi", start: 0.1, end: 0.4)]),
             segments: [segment(speaker: "S1", embedding: [0, 0], start: 0, end: 1)],
             speakerDatabase: ["S1": [1, 0]],
             knownSpeakers: [known],
@@ -404,7 +404,7 @@ struct DefaultFluidAudioPipelineMappingTests {
             centroids: [[1, 0]]
         )
         let result = DefaultFluidAudioPipeline.makeResult(
-            transcriptionResult: makeASRResult(text: "hi", tokens: [token(" hi", start: 0.1, end: 0.4)]),
+            transcription: makeTimedTranscript(text: "hi", tokens: [token(" hi", start: 0.1, end: 0.4)]),
             segments: [segment(speaker: "S1", embedding: [0, 0], start: 0, end: 1)],
             // Orthogonal to the known centroid -> cosine similarity 0.
             speakerDatabase: ["S1": [0, 1]],
@@ -421,7 +421,7 @@ struct DefaultFluidAudioPipelineMappingTests {
     @Test
     func groupTokensIntoSpeakerSegmentsAndJoinSubwords() throws {
         let result = DefaultFluidAudioPipeline.makeResult(
-            transcriptionResult: makeASRResult(
+            transcription: makeTimedTranscript(
                 text: "Hello Kostyakov",
                 tokens: [
                     token(" Hello", start: 0.10, end: 0.40),
@@ -447,7 +447,7 @@ struct DefaultFluidAudioPipelineMappingTests {
     @Test
     func fallBackToPreviousSpeakerForUnknownGaps() throws {
         let result = DefaultFluidAudioPipeline.makeResult(
-            transcriptionResult: makeASRResult(
+            transcription: makeTimedTranscript(
                 text: "Hi there",
                 tokens: [
                     token(" Hi", start: 0.20, end: 0.40),
@@ -470,7 +470,7 @@ struct DefaultFluidAudioPipelineMappingTests {
     @Test
     func produceSingleSegmentWhenTokenTimingsMissing() throws {
         let result = DefaultFluidAudioPipeline.makeResult(
-            transcriptionResult: makeASRResult(text: "Full text here", tokens: nil),
+            transcription: makeTimedTranscript(text: "Full text here", tokens: nil),
             segments: [],
             speakerDatabase: nil,
             knownSpeakers: [],
@@ -488,7 +488,7 @@ struct DefaultFluidAudioPipelineMappingTests {
     @Test
     func averageSegmentEmbeddingsWhenNoSpeakerDatabase() throws {
         let result = DefaultFluidAudioPipeline.makeResult(
-            transcriptionResult: makeASRResult(text: "a b", tokens: [token(" a", start: 0.1, end: 0.2)]),
+            transcription: makeTimedTranscript(text: "a b", tokens: [token(" a", start: 0.1, end: 0.2)]),
             segments: [
                 segment(speaker: "S1", embedding: [0, 2], start: 0, end: 1),
                 segment(speaker: "S1", embedding: [2, 0], start: 1, end: 2),
@@ -504,13 +504,15 @@ struct DefaultFluidAudioPipelineMappingTests {
 
     // MARK: Fixtures
 
-    private func makeASRResult(text: String, tokens: [TokenTiming]?) -> ASRResult {
-        ASRResult(
-            text: text,
-            confidence: 1,
-            duration: 2,
-            processingTime: 1,
-            tokenTimings: tokens
+    private func makeTimedTranscript(text: String, tokens: [TokenTiming]?) -> TimedTranscript {
+        ParakeetASRBackend.makeTimedTranscript(
+            from: ASRResult(
+                text: text,
+                confidence: 1,
+                duration: 2,
+                processingTime: 1,
+                tokenTimings: tokens
+            )
         )
     }
 
