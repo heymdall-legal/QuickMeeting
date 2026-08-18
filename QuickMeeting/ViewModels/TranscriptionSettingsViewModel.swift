@@ -10,6 +10,7 @@ import Foundation
 
 @MainActor
 final class TranscriptionSettingsViewModel: ObservableObject {
+    @Published private(set) var microphoneSpeakerDisplayName: String
     @Published private(set) var offlineASRModelID: OfflineASRModelID
     @Published private(set) var offlineJobSchedule: OfflineJobSchedule
     @Published private(set) var languageCode: String?
@@ -39,6 +40,7 @@ final class TranscriptionSettingsViewModel: ObservableObject {
         self.modelPreparationCenter = modelPreparationCenter
         self.onlineDraftCoordinator = onlineDraftCoordinator
         let options = settingsStore.pipelineOptions()
+        microphoneSpeakerDisplayName = settingsStore.microphoneSpeakerDisplayName()
         offlineASRModelID = options.offlineASRModelID
         offlineJobSchedule = options.offlineJobSchedule
         languageCode = options.languageCode
@@ -82,6 +84,11 @@ final class TranscriptionSettingsViewModel: ObservableObject {
     var selectedClusteringName: String {
         offlineDiarization.clusteringPreset?.displayName
             ?? String(format: "Custom · %.2f", offlineDiarization.clusteringThreshold)
+    }
+
+    func setMicrophoneSpeakerDisplayName(_ displayName: String) {
+        microphoneSpeakerDisplayName = displayName
+        settingsStore.saveMicrophoneSpeakerDisplayName(displayName)
     }
 
     func selectLanguage(code: String?) {

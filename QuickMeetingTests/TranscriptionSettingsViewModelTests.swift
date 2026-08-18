@@ -5,6 +5,32 @@ import Testing
 @MainActor
 struct TranscriptionSettingsViewModelTests {
     @Test
+    func microphoneSpeakerNameDefaultsToPlaceholderAndPersistsCustomName() {
+        let defaults = makeDefaults()
+        let settingsStore = TranscriptionSettingsStore(userDefaults: defaults)
+        let viewModel = TranscriptionSettingsViewModel(settingsStore: settingsStore)
+
+        #expect(viewModel.microphoneSpeakerDisplayName == "Microphone Owner")
+
+        viewModel.setMicrophoneSpeakerDisplayName("  Maria Petrova  ")
+
+        #expect(viewModel.microphoneSpeakerDisplayName == "  Maria Petrova  ")
+        #expect(settingsStore.microphoneSpeakerDisplayName() == "Maria Petrova")
+    }
+
+    @Test
+    func clearingMicrophoneSpeakerNameRestoresPlaceholder() {
+        let defaults = makeDefaults()
+        let settingsStore = TranscriptionSettingsStore(userDefaults: defaults)
+        settingsStore.saveMicrophoneSpeakerDisplayName("Maria Petrova")
+        let viewModel = TranscriptionSettingsViewModel(settingsStore: settingsStore)
+
+        viewModel.setMicrophoneSpeakerDisplayName("   ")
+
+        #expect(settingsStore.microphoneSpeakerDisplayName() == "Microphone Owner")
+    }
+
+    @Test
     func savesPipelineOptionsWhenControlsChange() {
         let defaults = makeDefaults()
         let settingsStore = TranscriptionSettingsStore(userDefaults: defaults)

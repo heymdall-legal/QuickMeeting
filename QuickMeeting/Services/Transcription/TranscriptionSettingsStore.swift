@@ -8,12 +8,26 @@
 
 import Foundation
 
+nonisolated enum TranscriptionSettingsDefaults {
+    static let microphoneSpeakerDisplayName = "Microphone Owner"
+}
+
 protocol TranscriptionLanguageStoring {
     /// The persisted language code, or `nil` for auto-detect.
     func languageCode() -> String?
     func saveLanguageCode(_ code: String?)
     func pipelineOptions() -> TranscriptionPipelineOptions
     func savePipelineOptions(_ options: TranscriptionPipelineOptions)
+    func microphoneSpeakerDisplayName() -> String
+    func saveMicrophoneSpeakerDisplayName(_ displayName: String)
+}
+
+extension TranscriptionLanguageStoring {
+    func microphoneSpeakerDisplayName() -> String {
+        TranscriptionSettingsDefaults.microphoneSpeakerDisplayName
+    }
+
+    func saveMicrophoneSpeakerDisplayName(_: String) {}
 }
 
 nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
@@ -29,6 +43,7 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
     private let voiceBankMinimumScoreKey = "transcription.voiceBank.minimumScore"
     private let voiceBankAmbiguityMarginKey = "transcription.voiceBank.ambiguityMargin"
     private let voiceBankMinimumSpeechDurationKey = "transcription.voiceBank.minimumSpeechDuration"
+    private let microphoneSpeakerDisplayNameKey = "transcription.microphoneSpeakerDisplayName"
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -43,6 +58,25 @@ nonisolated struct TranscriptionSettingsStore: TranscriptionLanguageStoring {
             userDefaults.set(code, forKey: languageCodeKey)
         } else {
             userDefaults.removeObject(forKey: languageCodeKey)
+        }
+    }
+
+    func microphoneSpeakerDisplayName() -> String {
+        guard let storedName = userDefaults.string(forKey: microphoneSpeakerDisplayNameKey) else {
+            return TranscriptionSettingsDefaults.microphoneSpeakerDisplayName
+        }
+        let normalizedName = storedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalizedName.isEmpty
+            ? TranscriptionSettingsDefaults.microphoneSpeakerDisplayName
+            : normalizedName
+    }
+
+    func saveMicrophoneSpeakerDisplayName(_ displayName: String) {
+        let normalizedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedName.isEmpty {
+            userDefaults.removeObject(forKey: microphoneSpeakerDisplayNameKey)
+        } else {
+            userDefaults.set(normalizedName, forKey: microphoneSpeakerDisplayNameKey)
         }
     }
 

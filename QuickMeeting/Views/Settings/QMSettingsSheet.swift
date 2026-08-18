@@ -170,6 +170,33 @@ struct QMSettingsSheet: View {
 
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
+                    Text("Your speaker name")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(QMTheme.ink)
+                    Text("Used for speech captured from this Mac's microphone.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(QMTheme.tertiary)
+                }
+                Spacer(minLength: 0)
+                TextField(
+                    TranscriptionSettingsDefaults.microphoneSpeakerDisplayName,
+                    text: Binding(
+                        get: { transcriptionViewModel.microphoneSpeakerDisplayName },
+                        set: { transcriptionViewModel.setMicrophoneSpeakerDisplayName($0) }
+                    )
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
+                .foregroundStyle(QMTheme.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(width: 170)
+                .background(QMTheme.card, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(QMTheme.fieldBorder, lineWidth: 1))
+            }
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Offline model")
                         .font(.system(size: 14.5, weight: .semibold))
                         .foregroundStyle(QMTheme.ink)

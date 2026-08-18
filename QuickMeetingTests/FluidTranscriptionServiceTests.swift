@@ -106,15 +106,29 @@ struct FluidTranscriptionServiceTests {
     }
 
     @Test
-    func transcribeFallsBackToMixedTrackWhenConfiguredMicrophoneSpeakerIsMissing() async throws {
+    func transcribeKeepsMicrophoneTrackSeparateWhenConfiguredSpeakerIsNotEnrolled() async throws {
         let harness = try FluidTranscriptionHarness(outcome: .success(.empty))
         let meeting = try harness.createRecordedMeeting()
         try harness.createSeparatedTracks(for: meeting)
 
         try await harness.service.transcribe(meetingID: meeting.id)
 
-        #expect(harness.pipeline.calls.map(\.audioFileURL.path) == [meeting.audioFilePath])
+        #expect(harness.pipeline.calls.map(\.audioFileURL.lastPathComponent) == [
+            MeetingArtifacts.systemAudioFilename,
+            MeetingArtifacts.microphoneAudioFilename,
+        ])
         #expect(harness.pipeline.calls.first?.speakerAssignment == .diarized)
+        #expect(
+            harness.pipeline.calls.last?.speakerAssignment == .fixed(
+                transcriptSpeakerID: "microphone-owner",
+                knownSpeaker: FluidKnownSpeakerSnapshot(
+                    id: "owner",
+                    displayName: "Microphone Owner",
+                    centroids: [],
+                    isKnownSpeaker: false
+                )
+            )
+        )
     }
 
     @Test
@@ -694,6 +708,30 @@ struct DefaultFluidAudioPipelineMappingTests {
         #expect(result.segments.map(\.text) == ["First", "second"])
         #expect(result.segments.map(\.startTime) == [1, 4])
         #expect(result.segments.allSatisfy { $0.speakerID == "microphone-known-lev" })
+    }
+
+    @Test
+    func fixedMicrophoneOwnerWithoutVoiceProfileIsNotMarkedAsBankMatched() throws {
+        let microphoneOwner = FluidKnownSpeakerSnapshot(
+            id: "owner",
+            displayName: "Maria Petrova",
+            centroids: [],
+            isKnownSpeaker: false
+        )
+
+        let result = DefaultFluidAudioPipeline.makeFixedSpeakerResult(
+            transcription: TimedTranscript(text: "Hello", words: []),
+            transcriptSpeakerID: "microphone-owner",
+            knownSpeaker: microphoneOwner
+        )
+
+        #expect(result.speakers == [
+            TranscriptSpeaker(
+                id: "microphone-owner",
+                displayName: "Maria Petrova",
+                labelSource: .userAssigned
+            )
+        ])
     }
 
     // MARK: Fixtures

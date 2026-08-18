@@ -32,6 +32,19 @@ struct FluidKnownSpeakerSnapshot: Sendable, Equatable {
     let id: String
     let displayName: String
     let centroids: [[Float]]
+    let isKnownSpeaker: Bool
+
+    init(
+        id: String,
+        displayName: String,
+        centroids: [[Float]],
+        isKnownSpeaker: Bool = true
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.centroids = centroids
+        self.isKnownSpeaker = isKnownSpeaker
+    }
 }
 
 enum FluidSpeakerAssignment: Sendable, Equatable {
@@ -84,7 +97,8 @@ protocol FluidAudioTranscribing: Sendable {
 
 @MainActor
 final class FluidTranscriptionService: TranscriptionServicing {
-    nonisolated static let defaultMicrophoneSpeakerDisplayName = "Немировский Лев Дмитриевич"
+    nonisolated static let defaultMicrophoneSpeakerDisplayName =
+        TranscriptionSettingsDefaults.microphoneSpeakerDisplayName
 
     private static let telemetryLogger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "QuickMeeting",
@@ -98,7 +112,7 @@ final class FluidTranscriptionService: TranscriptionServicing {
     private let glossaryStore: TranscriptionGlossaryStore?
     private let correctionService: (any TranscriptLLMCorrecting)?
     private let voiceBankConfigurationOverride: VoiceBankMatchingConfiguration?
-    private let microphoneSpeakerDisplayName: String
+    private let microphoneSpeakerDisplayNameOverride: String?
     private let fileManager: FileManager
     private let dateProvider: () -> Date
     private var activeMeetingID: UUID?
@@ -114,7 +128,7 @@ final class FluidTranscriptionService: TranscriptionServicing {
         similarityThreshold: Float? = nil,
         ambiguityMargin: Float? = nil,
         minimumSpeakerSpeechDuration: TimeInterval? = nil,
-        microphoneSpeakerDisplayName: String = FluidTranscriptionService.defaultMicrophoneSpeakerDisplayName,
+        microphoneSpeakerDisplayName: String? = nil,
         fileManager: FileManager = .default,
         dateProvider: @escaping () -> Date = Date.init
     ) {
@@ -136,7 +150,7 @@ final class FluidTranscriptionService: TranscriptionServicing {
         } else {
             voiceBankConfigurationOverride = nil
         }
-        self.microphoneSpeakerDisplayName = microphoneSpeakerDisplayName
+        microphoneSpeakerDisplayNameOverride = microphoneSpeakerDisplayName
         self.fileManager = fileManager
         self.dateProvider = dateProvider
     }
@@ -351,18 +365,24 @@ final class FluidTranscriptionService: TranscriptionServicing {
     }
 
     private func makeMicrophoneSpeakerSnapshot() throws -> FluidKnownSpeakerSnapshot? {
-        guard
-            let speaker = try knownSpeakerStore?.findSpeaker(exactName: microphoneSpeakerDisplayName)
-        else {
-            return nil
+        let displayName = microphoneSpeakerDisplayNameOverride
+            ?? languageStore?.microphoneSpeakerDisplayName()
+            ?? Self.defaultMicrophoneSpeakerDisplayName
+        if let speaker = try knownSpeakerStore?.findSpeaker(exactName: displayName) {
+            return FluidKnownSpeakerSnapshot(
+                id: speaker.id,
+                displayName: speaker.displayName,
+                centroids: speaker.centroids
+                    .sorted { $0.createdAt < $1.createdAt }
+                    .map { $0.values.map(Float.init) }
+            )
         }
 
         return FluidKnownSpeakerSnapshot(
-            id: speaker.id,
-            displayName: speaker.displayName,
-            centroids: speaker.centroids
-                .sorted { $0.createdAt < $1.createdAt }
-                .map { $0.values.map(Float.init) }
+            id: "owner",
+            displayName: displayName,
+            centroids: [],
+            isKnownSpeaker: false
         )
     }
 
@@ -860,8 +880,8 @@ actor OfflineFinalizationJob: FluidAudioTranscribing {
         let speaker = TranscriptSpeaker(
             id: transcriptSpeakerID,
             displayName: knownSpeaker.displayName,
-            labelSource: .bankMatched,
-            matchedKnownSpeakerID: knownSpeaker.id
+            labelSource: knownSpeaker.isKnownSpeaker ? .bankMatched : .userAssigned,
+            matchedKnownSpeakerID: knownSpeaker.isKnownSpeaker ? knownSpeaker.id : nil
         )
         return FluidTranscriptionResult(
             speakers: [speaker],
