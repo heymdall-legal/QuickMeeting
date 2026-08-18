@@ -15,7 +15,6 @@ final class AutoRecordingSettingsViewModel: ObservableObject {
     @Published var selectedApp: AutoRecordingApp = .tolk
     @Published var startDelay: Double = 10
     @Published var stopGracePeriod: Double = 60
-    @Published var maximumMeetingDurationHours = 3
     @Published private(set) var errorMessage: String?
 
     private let settingsStore: any AutoRecordingSettingsStoring
@@ -36,7 +35,6 @@ final class AutoRecordingSettingsViewModel: ObservableObject {
         selectedApp = settings.selectedApp
         startDelay = settings.startDelay
         stopGracePeriod = settings.stopGracePeriod
-        maximumMeetingDurationHours = settings.maximumMeetingDurationHours
         errorMessage = nil
     }
 
@@ -46,8 +44,7 @@ final class AutoRecordingSettingsViewModel: ObservableObject {
                 isEnabled: isEnabled,
                 selectedApps: selectedApps,
                 startDelay: startDelay,
-                stopGracePeriod: stopGracePeriod,
-                maximumMeetingDurationHours: maximumMeetingDurationHours
+                stopGracePeriod: stopGracePeriod
             )
         )
     }
