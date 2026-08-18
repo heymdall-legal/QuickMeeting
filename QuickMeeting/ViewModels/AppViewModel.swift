@@ -36,7 +36,6 @@ final class AppViewModel: ObservableObject {
     private let meetingFileStore: MeetingFileStore
     private let recordingService: any RecordingService
     private let transcriptionService: any TranscriptionServicing
-    private let transcriptionSettingsStore: any TranscriptionLanguageStoring
     private let meetingSummaryService: any MeetingSummaryServicing
     private let meetingSummarySettingsStore: any MeetingSummarySettingsStoring
     private let meetingTranscriptStore: any MeetingTranscriptStoring
@@ -59,7 +58,6 @@ final class AppViewModel: ObservableObject {
         meetingFileStore: MeetingFileStore,
         recordingService: any RecordingService,
         transcriptionService: (any TranscriptionServicing)? = nil,
-        transcriptionSettingsStore: any TranscriptionLanguageStoring = TranscriptionSettingsStore(),
         meetingSummaryService: (any MeetingSummaryServicing)? = nil,
         meetingSummarySettingsStore: (any MeetingSummarySettingsStoring)? = nil,
         transcriptionProgressCenter: TranscriptionProgressCenter? = nil,
@@ -78,7 +76,6 @@ final class AppViewModel: ObservableObject {
         self.meetingFileStore = meetingFileStore
         self.recordingService = recordingService
         self.transcriptionService = transcriptionService ?? NoopTranscriptionService()
-        self.transcriptionSettingsStore = transcriptionSettingsStore
         self.meetingSummaryService = meetingSummaryService ?? NoopMeetingSummaryService()
         self.meetingSummarySettingsStore = meetingSummarySettingsStore ?? MeetingSummarySettingsStore()
         self.recordingPermissions = recordingPermissions ?? NativeRecordingPermissions()
@@ -190,15 +187,6 @@ final class AppViewModel: ObservableObject {
             recordingStartedAt = nil
             activeRecordingTitle = nil
             autoRecordingCoordinator?.recordingDidStop()
-
-            if transcriptionSettingsStore.pipelineOptions().isAutomaticTranscriptionEnabled {
-                Task { @MainActor [weak self] in
-                    guard let self, let meeting = try? self.meetingStore.fetchMeeting(id: meetingID) else {
-                        return
-                    }
-                    await self.transcribeMeeting(meeting)
-                }
-            }
         } catch {
             recoverableRecordingMeetingID = meetingID
             recordingState = .failed(message: error.localizedDescription)

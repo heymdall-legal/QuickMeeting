@@ -6,78 +6,6 @@ import Testing
 @MainActor
 struct AppViewModelTests {
     @Test
-    func finishingRecordingStartsTranscriptionWhenEnabled() async throws {
-        let transcriptionService = StubTranscriptionService()
-        let settingsStore = makeTranscriptionSettingsStore(isAutomaticEnabled: true)
-        let harness = try AppViewModelHarness(
-            transcriptionService: transcriptionService,
-            transcriptionSettingsStore: settingsStore
-        )
-
-        await harness.viewModel.startRecording()
-        let meetingID = try #require(harness.viewModel.activeOrRecoverableMeetingID)
-        await harness.viewModel.stopRecording()
-        await Task.yield()
-
-        #expect(transcriptionService.meetingIDs == [meetingID])
-        #expect(harness.viewModel.recordingState == .idle)
-    }
-
-    @Test
-    func automaticallyFinishingRecordingStartsTranscriptionWhenEnabled() async throws {
-        let transcriptionService = StubTranscriptionService()
-        let settingsStore = makeTranscriptionSettingsStore(isAutomaticEnabled: true)
-        let harness = try AppViewModelHarness(
-            transcriptionService: transcriptionService,
-            transcriptionSettingsStore: settingsStore
-        )
-
-        await harness.viewModel.requestAutoRecordingStart()
-        let meetingID = try #require(harness.viewModel.activeOrRecoverableMeetingID)
-        await harness.viewModel.requestAutoRecordingStop()
-        await Task.yield()
-
-        #expect(transcriptionService.meetingIDs == [meetingID])
-        #expect(harness.viewModel.recordingState == .idle)
-    }
-
-    @Test
-    func finishingRecordingDoesNotStartTranscriptionWhenDisabled() async throws {
-        let transcriptionService = StubTranscriptionService()
-        let harness = try AppViewModelHarness(
-            transcriptionService: transcriptionService,
-            transcriptionSettingsStore: makeTranscriptionSettingsStore(isAutomaticEnabled: false)
-        )
-
-        await harness.viewModel.startRecording()
-        await harness.viewModel.stopRecording()
-        await Task.yield()
-
-        #expect(transcriptionService.meetingIDs.isEmpty)
-        #expect(harness.viewModel.recordingState == .idle)
-    }
-
-    @Test
-    func failedRecordingStopDoesNotStartTranscription() async throws {
-        let transcriptionService = StubTranscriptionService()
-        let harness = try AppViewModelHarness(
-            recordingService: ThrowingStopRecordingService(),
-            transcriptionService: transcriptionService,
-            transcriptionSettingsStore: makeTranscriptionSettingsStore(isAutomaticEnabled: true)
-        )
-
-        await harness.viewModel.startRecording()
-        await harness.viewModel.stopRecording()
-        await Task.yield()
-
-        #expect(transcriptionService.meetingIDs.isEmpty)
-        guard case .failed = harness.viewModel.recordingState else {
-            Issue.record("Expected a failed recording state")
-            return
-        }
-    }
-
-    @Test
     func startRecordingPersistsMatchedCalendarEventID() async throws {
         let startedAt = Date(timeIntervalSince1970: 1_234_567_890)
         let matchingEvent = UpcomingCalendarEvent(
@@ -429,9 +357,6 @@ private struct AppViewModelHarness {
         autoRecordingSettingsStore: any AutoRecordingSettingsStoring = StaticAutoRecordingSettingsStore(settings: .default),
         deadlineClock: (any RecordingDeadlineClock)? = nil,
         recorder: StubRecordingService? = nil,
-        recordingService: (any RecordingService)? = nil,
-        transcriptionService: (any TranscriptionServicing)? = nil,
-        transcriptionSettingsStore: any TranscriptionLanguageStoring = TranscriptionSettingsStore(),
         dateProvider: @escaping () -> Date = Date.init
     ) throws {
         let schema = Schema([
@@ -458,9 +383,7 @@ private struct AppViewModelHarness {
         viewModel = AppViewModel(
             meetingStore: meetingStore,
             meetingFileStore: meetingFileStore,
-            recordingService: recordingService ?? recorder,
-            transcriptionService: transcriptionService,
-            transcriptionSettingsStore: transcriptionSettingsStore,
+            recordingService: recorder,
             meetingSummaryService: summaryService,
             meetingSummarySettingsStore: summarySettingsStore,
             recordingPermissions: recordingPermissions,
@@ -640,24 +563,6 @@ private final class StubRecordingService: RecordingService {
     }
 }
 
-@MainActor
-private final class ThrowingStopRecordingService: RecordingService {
-    func startRecording(meeting _: Meeting, outputURL _: URL) async throws {}
-
-    func stopRecording() async throws {
-        throw TestError.failed
-    }
-}
-
-@MainActor
-private final class StubTranscriptionService: TranscriptionServicing {
-    private(set) var meetingIDs = [UUID]()
-
-    func transcribe(meetingID: UUID) async throws {
-        meetingIDs.append(meetingID)
-    }
-}
-
 private struct StaticAutoRecordingSettingsStore: AutoRecordingSettingsStoring {
     let settings: AutoRecordingSettings
 
@@ -704,13 +609,4 @@ private final class TestDeadlineTask: RecordingDeadlineScheduledTask, @unchecked
 
 private enum TestError: Error {
     case failed
-}
-
-private func makeTranscriptionSettingsStore(isAutomaticEnabled: Bool) -> TranscriptionSettingsStore {
-    let suiteName = "AppViewModelTests.TranscriptionSettings.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defaults.removePersistentDomain(forName: suiteName)
-    let store = TranscriptionSettingsStore(userDefaults: defaults)
-    store.savePipelineOptions(.init(isAutomaticTranscriptionEnabled: isAutomaticEnabled))
-    return store
 }
