@@ -1394,17 +1394,20 @@ private final class CapturedAudioMixer {
         presentationTimeSeconds: TimeInterval,
         source: CapturedAudioSource
     ) throws {
+        let onlineDraftBuffer: AVAudioPCMBuffer
         switch source {
         case .system:
             try systemWriter?.append(buffer)
             if let microphoneWriter {
                 try microphoneWriter.append(try silentBuffer(frameCount: buffer.frameLength))
             }
+            onlineDraftBuffer = buffer
         case .microphone:
             if let systemWriter {
                 try systemWriter.append(try silentBuffer(frameCount: buffer.frameLength))
             }
             try microphoneWriter?.append(buffer)
+            onlineDraftBuffer = try silentBuffer(frameCount: buffer.frameLength)
         }
 
         let previewBuffer: AVAudioPCMBuffer
@@ -1415,6 +1418,7 @@ private final class CapturedAudioMixer {
         }
         try appendAuthoritativePreview(
             previewBuffer,
+            onlineDraftBuffer: onlineDraftBuffer,
             presentationTimeSeconds: presentationTimeSeconds
         )
     }
@@ -1444,23 +1448,25 @@ private final class CapturedAudioMixer {
                 microphoneBuffer: microphonePrefix,
                 frameCount: frameCount
             ),
+            onlineDraftBuffer: systemPrefix,
             presentationTimeSeconds: presentationTimeSeconds
         )
     }
 
     private func appendAuthoritativePreview(
-        _ buffer: AVAudioPCMBuffer,
+        _ previewBuffer: AVAudioPCMBuffer,
+        onlineDraftBuffer: AVAudioPCMBuffer,
         presentationTimeSeconds: TimeInterval
     ) throws {
         // The source-of-truth write always happens before the best-effort draft
         // branch. Backpressure can drop only the latter.
-        try writer.append(buffer)
+        try writer.append(previewBuffer)
         guard let onlineAudioSink,
-              let channels = buffer.floatChannelData,
-              buffer.frameLength > 0 else { return }
+              let channels = onlineDraftBuffer.floatChannelData,
+              onlineDraftBuffer.frameLength > 0 else { return }
 
-        let channelCount = max(1, Int(buffer.format.channelCount))
-        var mono = [Float](repeating: 0, count: Int(buffer.frameLength))
+        let channelCount = max(1, Int(onlineDraftBuffer.format.channelCount))
+        var mono = [Float](repeating: 0, count: Int(onlineDraftBuffer.frameLength))
         for frame in mono.indices {
             var sum: Float = 0
             for channel in 0..<channelCount {
@@ -1471,7 +1477,7 @@ private final class CapturedAudioMixer {
         _ = onlineAudioSink.offer(
             TimestampedAudioChunk(
                 startTime: presentationTimeSeconds,
-                sampleRate: buffer.format.sampleRate,
+                sampleRate: onlineDraftBuffer.format.sampleRate,
                 samples: mono
             )
         )

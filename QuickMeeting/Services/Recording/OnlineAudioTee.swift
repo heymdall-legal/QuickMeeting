@@ -11,8 +11,10 @@ nonisolated struct TimestampedAudioChunk: Equatable, Sendable {
 }
 
 nonisolated protocol OnlineAudioChunkSink: Sendable {
-    /// Must return immediately. `false` means the draft branch dropped an
-    /// update; it never indicates loss in the authoritative file writer.
+    /// Receives the system-audio timeline only. Microphone-only regions are
+    /// represented by silence so draft timestamps stay aligned to the recording.
+    /// Must return immediately. `false` means the draft branch dropped an update;
+    /// it never indicates loss in the authoritative file writer.
     @discardableResult
     func offer(_ chunk: TimestampedAudioChunk) -> Bool
 }

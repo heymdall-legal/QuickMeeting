@@ -168,6 +168,59 @@ struct NativeAudioCapturePipelineTests {
     }
 
     @Test
+    func onlineDraftReceivesSystemAudioInsteadOfMixedPreview() async throws {
+        let previewWriter = SpyAudioFileWriter()
+        let onlineSink = RecordingOnlineAudioSink()
+        let sink = CaptureOutputSink(
+            writer: previewWriter,
+            systemWriter: SpyAudioFileWriter(),
+            microphoneWriter: SpyAudioFileWriter(),
+            captureConfiguration: .init(capturesMicrophone: true),
+            onlineAudioSink: onlineSink
+        )
+
+        try sink.appendForTesting(
+            makePCMBuffer(samples: [0.8, 0.8]),
+            presentationTimeSeconds: 0,
+            outputType: .audio
+        )
+        try sink.appendForTesting(
+            makePCMBuffer(samples: [0.2, 0.2]),
+            presentationTimeSeconds: 0,
+            outputType: .microphone
+        )
+
+        _ = try await sink.finish()
+
+        #expect(previewWriter.firstChannelFirstSamples == [0.5])
+        #expect(onlineSink.receivedChunks.map(\.samples) == [[0.8, 0.8]])
+    }
+
+    @Test
+    func onlineDraftReplacesMicrophoneOnlyRegionsWithSilence() async throws {
+        let onlineSink = RecordingOnlineAudioSink()
+        let sink = CaptureOutputSink(
+            writer: SpyAudioFileWriter(),
+            systemWriter: SpyAudioFileWriter(),
+            microphoneWriter: SpyAudioFileWriter(),
+            captureConfiguration: .init(capturesMicrophone: true),
+            onlineAudioSink: onlineSink
+        )
+
+        try sink.appendForTesting(
+            makePCMBuffer(samples: [0.2, 0.2]),
+            presentationTimeSeconds: 3,
+            outputType: .microphone
+        )
+
+        _ = try await sink.finish()
+
+        #expect(onlineSink.receivedChunks.count == 1)
+        #expect(onlineSink.receivedChunks.first?.startTime == 3)
+        #expect(onlineSink.receivedChunks.first?.samples == [0, 0])
+    }
+
+    @Test
     func losslessM4AWriterStoresCanonicalAudioAsAppleLossless() throws {
         let outputDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("Quick Meeting \(UUID().uuidString)", isDirectory: true)
@@ -257,6 +310,15 @@ private final class OrderingOnlineAudioSink: OnlineAudioChunkSink, @unchecked Se
     func offer(_ chunk: TimestampedAudioChunk) -> Bool {
         writerWasCalledBeforeOffer = writer.appendCallCount == 1
         receivedChunk = chunk
+        return true
+    }
+}
+
+private final class RecordingOnlineAudioSink: OnlineAudioChunkSink, @unchecked Sendable {
+    private(set) var receivedChunks: [TimestampedAudioChunk] = []
+
+    func offer(_ chunk: TimestampedAudioChunk) -> Bool {
+        receivedChunks.append(chunk)
         return true
     }
 }
