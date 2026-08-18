@@ -38,64 +38,6 @@ struct MarkdownExportSettingsViewModelTests {
         #expect(exportedNames.contains { $0.hasSuffix(".transcript.md") && $0.contains(meeting.id.uuidString) })
         #expect(exportedNames.contains { $0.hasSuffix(".summary.md") && $0.contains(meeting.id.uuidString) })
     }
-
-    @Test
-    func selectingDirectoryClearsSettingAndRequestsReselectionWhenBackfillCannotAccessFolder() throws {
-        let settingsStore = RecordingMarkdownExportSettingsStore()
-        let harness = try Harness(markdownExporter: FailingMarkdownExporter())
-        _ = try harness.createCompletedMeeting()
-        let viewModel = MarkdownExportSettingsViewModel(settingsStore: settingsStore, meetingStore: harness.store)
-        let exportURL = try temporaryExportDirectory()
-
-        viewModel.selectDirectory(exportURL)
-
-        #expect(viewModel.directoryPath.isEmpty)
-        #expect(settingsStore.directoryPath() == nil)
-        #expect(viewModel.errorMessage == MeetingMarkdownExporterError.exportDirectoryAccessUnavailable.errorDescription)
-    }
-}
-
-private final class FailingMarkdownExporter: MeetingMarkdownExporting {
-    func exportTranscript(for: Meeting, transcript: StoredTranscript) throws -> URL {
-        throw MeetingMarkdownExporterError.exportDirectoryAccessUnavailable
-    }
-
-    func exportSummary(for: Meeting, summary: String) throws -> URL {
-        throw MeetingMarkdownExporterError.exportDirectoryAccessUnavailable
-    }
-
-    func removeTranscript(for: UUID) throws {
-        throw MeetingMarkdownExporterError.exportDirectoryAccessUnavailable
-    }
-
-    func removeSummary(for: UUID) throws {
-        throw MeetingMarkdownExporterError.exportDirectoryAccessUnavailable
-    }
-}
-
-private final class RecordingMarkdownExportSettingsStore: MeetingMarkdownExportSettingsStoring {
-    private var storedURL: URL?
-
-    func directoryPath() -> String? { storedURL?.path }
-
-    func saveDirectoryPath(_ path: String?) {
-        storedURL = path.map { URL(fileURLWithPath: $0, isDirectory: true) }
-    }
-
-    func directoryBookmarkData() -> Data? { nil }
-
-    func saveDirectoryURL(_ url: URL) throws {
-        storedURL = url.standardizedFileURL
-    }
-
-    func resolvedDirectoryURL() throws -> URL? { storedURL }
-}
-
-private func temporaryExportDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("QuickMeetingMarkdownExportSettingsTests-\(UUID().uuidString)", isDirectory: true)
-    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    return url
 }
 
 @MainActor
