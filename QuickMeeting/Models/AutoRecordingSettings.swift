@@ -51,20 +51,17 @@ nonisolated struct AutoRecordingSettings: Equatable, Sendable {
     var selectedApps: [AutoRecordingTarget]
     var startDelay: TimeInterval
     var stopGracePeriod: TimeInterval
-    var maximumMeetingDurationHours: Int
 
     init(
         isEnabled: Bool,
         selectedApps: [AutoRecordingTarget],
         startDelay: TimeInterval,
-        stopGracePeriod: TimeInterval,
-        maximumMeetingDurationHours: Int = 3
+        stopGracePeriod: TimeInterval
     ) {
         self.isEnabled = isEnabled
         self.selectedApps = selectedApps
         self.startDelay = startDelay
         self.stopGracePeriod = stopGracePeriod
-        self.maximumMeetingDurationHours = maximumMeetingDurationHours
     }
 
     init(
@@ -77,8 +74,7 @@ nonisolated struct AutoRecordingSettings: Equatable, Sendable {
             isEnabled: isEnabled,
             selectedApps: [selectedApp.defaultTarget],
             startDelay: startDelay,
-            stopGracePeriod: stopGracePeriod,
-            maximumMeetingDurationHours: 3
+            stopGracePeriod: stopGracePeriod
         )
     }
 
@@ -90,7 +86,6 @@ nonisolated struct AutoRecordingSettings: Equatable, Sendable {
         isEnabled: false,
         selectedApps: [],
         startDelay: 10,
-        stopGracePeriod: 60,
-        maximumMeetingDurationHours: 3
+        stopGracePeriod: 60
     )
 }
