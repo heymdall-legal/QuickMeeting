@@ -86,8 +86,7 @@ struct QuickMeetingApp: App {
                 transcriptionProgressCenter: transcriptionProgressCenter,
                 meetingTranscriptStore: meetingTranscriptStore,
                 knownSpeakerEnrollmentService: knownSpeakerEnrollmentService,
-                calendarIntegration: calendarIntegration,
-                autoRecordingSettingsStore: autoRecordingSettingsStore
+                calendarIntegration: calendarIntegration
             )
             let autoRecordingSettings = autoRecordingSettingsStore.load()
             let autoRecordingCoordinator = AutoRecordingCoordinator(

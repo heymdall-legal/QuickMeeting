@@ -31,57 +31,6 @@ struct AppViewModelTests {
     }
 
     @Test
-    func recordingStopsWhenMaximumDurationExpires() async throws {
-        let clock = TestRecordingDeadlineClock()
-        let recorder = StubRecordingService()
-        let harness = try AppViewModelHarness(
-            autoRecordingSettingsStore: StaticAutoRecordingSettingsStore(
-                settings: AutoRecordingSettings(
-                    isEnabled: false,
-                    selectedApps: [],
-                    startDelay: 10,
-                    stopGracePeriod: 60,
-                    maximumMeetingDurationHours: 3
-                )
-            ),
-            deadlineClock: clock,
-            recorder: recorder
-        )
-
-        await harness.viewModel.startRecording()
-        await clock.advance(by: 10_799)
-        #expect(recorder.stopCalls == 0)
-        await clock.advance(by: 1)
-        #expect(recorder.stopCalls == 1)
-        #expect(harness.viewModel.recordingState == .idle)
-    }
-
-    @Test
-    func stoppingBeforeMaximumDurationCancelsDeadline() async throws {
-        let clock = TestRecordingDeadlineClock()
-        let recorder = StubRecordingService()
-        let harness = try AppViewModelHarness(deadlineClock: clock, recorder: recorder)
-
-        await harness.viewModel.startRecording()
-        await harness.viewModel.stopRecording()
-        await clock.advance(by: 10_800)
-
-        #expect(recorder.stopCalls == 1)
-    }
-
-    @Test
-    func automaticRecordingStopsWhenMaximumDurationExpires() async throws {
-        let clock = TestRecordingDeadlineClock()
-        let recorder = StubRecordingService()
-        let harness = try AppViewModelHarness(deadlineClock: clock, recorder: recorder)
-
-        await harness.viewModel.requestAutoRecordingStart()
-        await clock.advance(by: 10_800)
-
-        #expect(recorder.stopCalls == 1)
-    }
-
-    @Test
     func selectCalendarEventPersistsTitleAttendeesAndCalendarEventID() async throws {
         let harness = try AppViewModelHarness()
         let meeting = try harness.createCompletedMeeting(summaryText: nil)
@@ -339,7 +288,6 @@ private struct AppViewModelHarness {
     let enrollmentService: StubKnownSpeakerEnrollmentService
     let summaryService: StubMeetingSummaryService
     let summarySettingsStore: StubMeetingSummarySettingsStore
-    let recorder: StubRecordingService
     let viewModel: AppViewModel
     let meetingFileStore: MeetingFileStore
 
@@ -354,9 +302,6 @@ private struct AppViewModelHarness {
         ),
         calendarIntegration: any CalendarIntegration = NoopCalendarIntegration(),
         recordingPermissions: any RecordingPermissions = GrantedRecordingPermissions(),
-        autoRecordingSettingsStore: any AutoRecordingSettingsStoring = StaticAutoRecordingSettingsStore(settings: .default),
-        deadlineClock: (any RecordingDeadlineClock)? = nil,
-        recorder: StubRecordingService? = nil,
         dateProvider: @escaping () -> Date = Date.init
     ) throws {
         let schema = Schema([
@@ -374,8 +319,6 @@ private struct AppViewModelHarness {
         enrollmentService = StubKnownSpeakerEnrollmentService(result: enrollmentResult)
         summaryService = StubMeetingSummaryService()
         summarySettingsStore = StubMeetingSummarySettingsStore(settingsValue: summarySettings)
-        let recorder = recorder ?? StubRecordingService()
-        self.recorder = recorder
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
@@ -383,15 +326,13 @@ private struct AppViewModelHarness {
         viewModel = AppViewModel(
             meetingStore: meetingStore,
             meetingFileStore: meetingFileStore,
-            recordingService: recorder,
+            recordingService: StubRecordingService(),
             meetingSummaryService: summaryService,
             meetingSummarySettingsStore: summarySettingsStore,
             recordingPermissions: recordingPermissions,
             meetingTranscriptStore: meetingTranscriptStore,
             knownSpeakerEnrollmentService: enrollmentService,
             calendarIntegration: calendarIntegration,
-            autoRecordingSettingsStore: autoRecordingSettingsStore,
-            recordingDeadlineClock: deadlineClock,
             dateProvider: dateProvider
         )
     }
@@ -555,56 +496,8 @@ private struct StubMeetingSummarySettingsStore: MeetingSummarySettingsStoring {
 
 @MainActor
 private final class StubRecordingService: RecordingService {
-    private(set) var stopCalls = 0
-
     func startRecording(meeting _: Meeting, outputURL _: URL) async throws {}
-    func stopRecording() async throws {
-        stopCalls += 1
-    }
-}
-
-private struct StaticAutoRecordingSettingsStore: AutoRecordingSettingsStoring {
-    let settings: AutoRecordingSettings
-
-    func load() -> AutoRecordingSettings {
-        settings
-    }
-
-    func save(_: AutoRecordingSettings) {}
-}
-
-@MainActor
-private final class TestRecordingDeadlineClock: RecordingDeadlineClock {
-    private var now: TimeInterval = 0
-    private var operations: [
-        (deadline: TimeInterval, task: TestDeadlineTask, operation: @MainActor @Sendable () async -> Void)
-    ] = []
-
-    func schedule(
-        after seconds: TimeInterval,
-        operation: @escaping @MainActor @Sendable () async -> Void
-    ) -> any RecordingDeadlineScheduledTask {
-        let task = TestDeadlineTask()
-        operations.append((now + seconds, task, operation))
-        return task
-    }
-
-    func advance(by seconds: TimeInterval) async {
-        now += seconds
-        let ready = operations.filter { $0.deadline <= now }
-        operations.removeAll { $0.deadline <= now }
-        for item in ready where !item.task.isCancelled {
-            await item.operation()
-        }
-    }
-}
-
-private final class TestDeadlineTask: RecordingDeadlineScheduledTask, @unchecked Sendable {
-    private(set) var isCancelled = false
-
-    func cancel() {
-        isCancelled = true
-    }
+    func stopRecording() async throws {}
 }
 
 private enum TestError: Error {
