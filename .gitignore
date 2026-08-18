@@ -1,4 +1,6 @@
 .worktrees/
+.swiftpm/
+.derivedData/
 .derived-data-*/
 QuickRecorder
 .idea
@@ -8,5 +10,5 @@ python/.venv/
 python/lib/
 python/**/__pycache__/
 python/.pytest_cache/
-
+.offline-asr-runtime/
 .DS_Store

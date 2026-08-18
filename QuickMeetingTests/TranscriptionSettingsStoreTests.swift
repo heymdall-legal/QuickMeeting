@@ -61,6 +61,20 @@ struct TranscriptionSettingsStoreTests {
     }
 
     @Test
+    func nativeBackendsRemainSelectableAfterPersistenceRoundTrip() {
+        for modelID in [OfflineASRModelID.qwen3ASR17B, .gigaAMV3] {
+            let defaults = makeDefaults()
+            let store = TranscriptionSettingsStore(userDefaults: defaults)
+            var options = store.pipelineOptions()
+            options.offlineASRModelID = modelID
+
+            store.savePipelineOptions(options)
+
+            #expect(store.pipelineOptions().offlineASRModelID == modelID)
+        }
+    }
+
+    @Test
     func glossaryTermsRoundTripAndEnabledTermsFilterEmptyDisabledEntries() {
         let defaults = makeDefaults()
         let store = TranscriptionGlossaryStore(userDefaults: defaults)

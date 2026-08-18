@@ -70,6 +70,26 @@ struct TranscriptionSettingsViewModelTests {
     }
 
     @Test
+    func selectingNativeModelPersistsItAndStartsPreparation() async throws {
+        let defaults = makeDefaults()
+        let settingsStore = TranscriptionSettingsStore(userDefaults: defaults)
+        let center = TranscriptionModelPreparationCenter(preparer: StubSettingsModelPreparer())
+        let viewModel = TranscriptionSettingsViewModel(
+            settingsStore: settingsStore,
+            modelPreparationCenter: center
+        )
+
+        viewModel.selectOfflineASRModel(.gigaAMV3)
+
+        #expect(settingsStore.pipelineOptions().offlineASRModelID == .gigaAMV3)
+        #expect(viewModel.modelPreparationState.progress != nil)
+        for _ in 0..<20 where viewModel.modelPreparationState != .ready {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(viewModel.modelPreparationState == .ready)
+    }
+
+    @Test
     func addGlossaryTermPersistsTrimmedEnabledTerm() {
         let defaults = makeDefaults()
         let viewModel = TranscriptionSettingsViewModel(
@@ -125,5 +145,16 @@ struct TranscriptionSettingsViewModelTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
+    }
+}
+
+private struct StubSettingsModelPreparer: ASRModelPreparing {
+    func prepare(
+        modelID: OfflineASRModelID,
+        progress: @escaping @Sendable (Double, String) -> Void
+    ) async throws {
+        progress(0.5, "Downloading \(modelID.rawValue)")
+        try await Task.sleep(for: .milliseconds(10))
+        progress(1, "Ready")
     }
 }

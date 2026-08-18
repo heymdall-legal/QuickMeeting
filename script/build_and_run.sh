@@ -18,6 +18,7 @@ xcodebuild \
   -configuration Debug \
   -destination 'platform=macOS' \
   -derivedDataPath "$DERIVED_DATA" \
+  -skipPackagePluginValidation \
   -quiet \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \

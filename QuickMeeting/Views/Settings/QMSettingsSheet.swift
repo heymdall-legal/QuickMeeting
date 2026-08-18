@@ -200,7 +200,7 @@ struct QMSettingsSheet: View {
                     Text("Offline model")
                         .font(.system(size: 14.5, weight: .semibold))
                         .foregroundStyle(QMTheme.ink)
-                    Text("One global model for Russian meetings. Each job saves an exact backend snapshot.")
+                    Text("Parakeet runs in Fluid Audio; Qwen3 uses MLX/Metal and GigaAM uses transcribe.cpp/Metal. No Python runtime is required. Each job saves an exact backend snapshot.")
                         .font(.system(size: 12.5))
                         .foregroundStyle(QMTheme.tertiary)
                 }
@@ -392,7 +392,7 @@ struct QMSettingsSheet: View {
         switch transcriptionViewModel.modelPreparationState {
         case .notPrepared:
             HStack(spacing: 10) {
-                Text("Model will be downloaded, compiled, and cached on this Mac.")
+                Text("Model files will be downloaded and cached on this Mac. Preparation starts automatically after selection.")
                     .font(.system(size: 12.5))
                     .foregroundStyle(QMTheme.tertiary)
                 Spacer()
@@ -415,7 +415,7 @@ struct QMSettingsSheet: View {
                     .progressViewStyle(.linear)
             }
         case .ready:
-            Label("Model is loaded and ready", systemImage: "checkmark.circle.fill")
+            Label("Model is downloaded and ready", systemImage: "checkmark.circle.fill")
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(QMTheme.sage)
         case .failed(let message):

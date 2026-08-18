@@ -3,11 +3,13 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 100;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		4BC1217C2FDD582400E215D3 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 4BC1217B2FDD582400E215D3 /* FluidAudio */; };
+		4BC1217E2FDD582400E215D3 /* Qwen3ASR in Frameworks */ = {isa = PBXBuildFile; productRef = 4BC121822FDD582400E215D3 /* Qwen3ASR */; };
+		4BC1217F2FDD582400E215D3 /* NativeTranscribeRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = 4BC121832FDD582400E215D3 /* NativeTranscribeRuntime */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -41,18 +43,16 @@
 /* Begin PBXFrameworksBuildPhase section */
 		4BD129682FA9197200DC589F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
+				4BC1217F2FDD582400E215D3 /* NativeTranscribeRuntime in Frameworks */,
+				4BC1217E2FDD582400E215D3 /* Qwen3ASR in Frameworks */,
 				4BC1217C2FDD582400E215D3 /* FluidAudio in Frameworks */,
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 		4BD12A042FA91C3400DC589F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
@@ -88,14 +88,14 @@
 			);
 			buildRules = (
 			);
-			dependencies = (
-			);
 			fileSystemSynchronizedGroups = (
 				4BD1296D2FA9197200DC589F /* QuickMeeting */,
 			);
 			name = QuickMeeting;
 			packageProductDependencies = (
 				4BC1217B2FDD582400E215D3 /* FluidAudio */,
+				4BC121822FDD582400E215D3 /* Qwen3ASR */,
+				4BC121832FDD582400E215D3 /* NativeTranscribeRuntime */,
 			);
 			productName = QuickMeeting;
 			productReference = 4BD1296B2FA9197200DC589F /* QuickMeeting.app */;
@@ -118,8 +118,6 @@
 				4BD12A082FA91C3400DC589F /* QuickMeetingTests */,
 			);
 			name = QuickMeetingTests;
-			packageProductDependencies = (
-			);
 			productName = QuickMeetingTests;
 			productReference = 4BD12A092FA91C3400DC589F /* QuickMeetingTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -130,7 +128,7 @@
 		4BD129632FA9197200DC589F /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				BuildIndependentTargetsInParallel = 1;
+				BuildIndependentTargetsInParallel = NO;
 				LastSwiftUpdateCheck = 2610;
 				LastUpgradeCheck = 2610;
 				TargetAttributes = {
@@ -154,8 +152,10 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				4BC1217A2FDD582400E215D3 /* XCRemoteSwiftPackageReference "FluidAudio" */,
+				4BC121802FDD582400E215D3 /* XCRemoteSwiftPackageReference "speech-swift" */,
+				4BC121812FDD582400E215D3 /* XCLocalSwiftPackageReference "Vendor/NativeTranscribe" */,
 			);
-			preferredProjectObjectVersion = 77;
+			preferredProjectObjectVersion = 100;
 			productRefGroup = 4BD1296C2FA9197200DC589F /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -169,34 +169,26 @@
 /* Begin PBXResourcesBuildPhase section */
 		4BD129692FA9197200DC589F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 		4BD12A052FA91C3400DC589F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		4BD129672FA9197200DC589F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 		4BD12A032FA91C3400DC589F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
@@ -209,7 +201,7 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		4BD129762FA9197400DC589F /* Debug */ = {
+		4BD129762FA9197400DC589F /* Debug configuration for PBXProject "QuickMeeting" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -275,7 +267,7 @@
 			};
 			name = Debug;
 		};
-		4BD129772FA9197400DC589F /* Release */ = {
+		4BD129772FA9197400DC589F /* Release configuration for PBXProject "QuickMeeting" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -334,7 +326,7 @@
 			};
 			name = Release;
 		};
-		4BD129792FA9197400DC589F /* Debug */ = {
+		4BD129792FA9197400DC589F /* Debug configuration for PBXNativeTarget "QuickMeeting" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -358,6 +350,7 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
@@ -381,7 +374,7 @@
 			};
 			name = Debug;
 		};
-		4BD1297A2FA9197400DC589F /* Release */ = {
+		4BD1297A2FA9197400DC589F /* Release configuration for PBXNativeTarget "QuickMeeting" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -405,6 +398,7 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
@@ -428,7 +422,7 @@
 			};
 			name = Release;
 		};
-		4BD12A102FA91C3400DC589F /* Debug */ = {
+		4BD12A102FA91C3400DC589F /* Debug configuration for PBXNativeTarget "QuickMeetingTests" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -448,7 +442,7 @@
 			};
 			name = Debug;
 		};
-		4BD12A112FA91C3400DC589F /* Release */ = {
+		4BD12A112FA91C3400DC589F /* Release configuration for PBXNativeTarget "QuickMeetingTests" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -474,31 +468,35 @@
 		4BD129662FA9197200DC589F /* Build configuration list for PBXProject "QuickMeeting" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				4BD129762FA9197400DC589F /* Debug */,
-				4BD129772FA9197400DC589F /* Release */,
+				4BD129762FA9197400DC589F /* Debug configuration for PBXProject "QuickMeeting" */,
+				4BD129772FA9197400DC589F /* Release configuration for PBXProject "QuickMeeting" */,
 			);
-			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		4BD129782FA9197400DC589F /* Build configuration list for PBXNativeTarget "QuickMeeting" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				4BD129792FA9197400DC589F /* Debug */,
-				4BD1297A2FA9197400DC589F /* Release */,
+				4BD129792FA9197400DC589F /* Debug configuration for PBXNativeTarget "QuickMeeting" */,
+				4BD1297A2FA9197400DC589F /* Release configuration for PBXNativeTarget "QuickMeeting" */,
 			);
-			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		4BD12A122FA91C3400DC589F /* Build configuration list for PBXNativeTarget "QuickMeetingTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				4BD12A102FA91C3400DC589F /* Debug */,
-				4BD12A112FA91C3400DC589F /* Release */,
+				4BD12A102FA91C3400DC589F /* Debug configuration for PBXNativeTarget "QuickMeetingTests" */,
+				4BD12A112FA91C3400DC589F /* Release configuration for PBXNativeTarget "QuickMeetingTests" */,
 			);
-			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		4BC121812FDD582400E215D3 /* XCLocalSwiftPackageReference "Vendor/NativeTranscribe" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/NativeTranscribe;
+		};
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
 		4BC1217A2FDD582400E215D3 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
@@ -509,6 +507,14 @@
 				kind = branch;
 			};
 		};
+		4BC121802FDD582400E215D3 /* XCRemoteSwiftPackageReference "speech-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/soniqo/speech-swift.git";
+			requirement = {
+				kind = revision;
+				revision = f9af2f34d196eacca85d13fe508d8ed71919671f;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -516,6 +522,15 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4BC1217A2FDD582400E215D3 /* XCRemoteSwiftPackageReference "FluidAudio" */;
 			productName = FluidAudio;
+		};
+		4BC121822FDD582400E215D3 /* Qwen3ASR */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4BC121802FDD582400E215D3 /* XCRemoteSwiftPackageReference "speech-swift" */;
+			productName = Qwen3ASR;
+		};
+		4BC121832FDD582400E215D3 /* NativeTranscribeRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NativeTranscribeRuntime;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

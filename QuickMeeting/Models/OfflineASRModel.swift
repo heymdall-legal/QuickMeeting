@@ -4,20 +4,13 @@ import Foundation
 /// on concrete ASR-library model enums.
 nonisolated enum OfflineASRModelID: String, Codable, CaseIterable, Sendable {
     case parakeetTDTv3 = "parakeet-tdt-v3"
-    case gigaAMMultilingualLargeCTC = "gigaam-multilingual-large-ctc"
+    case gigaAMV3 = "gigaam-v3-e2e-rnnt"
     case qwen3ASR17B = "qwen3-asr-1.7b"
 }
 
 nonisolated enum OfflineJobSchedule: String, Codable, CaseIterable, Sendable {
     case serial
     case concurrent
-}
-
-nonisolated enum GigaAMMultilingualVariant: String, Codable, CaseIterable, Sendable {
-    case ssl = "multilingual_ssl"
-    case largeSSL = "multilingual_large_ssl"
-    case ctc = "multilingual_ctc"
-    case largeCTC = "multilingual_large_ctc"
 }
 
 nonisolated struct ASRBackendSnapshot: Codable, Equatable, Sendable {
@@ -47,8 +40,8 @@ nonisolated struct OfflineASRModelDescriptor: Identifiable, Equatable, Sendable 
 }
 
 nonisolated enum OfflineASRModelCatalog {
-    /// Candidate catalog is intentionally broader than the selector. A model is
-    /// selectable only after a real in-process backend exists and is smoke-tested.
+    /// Models available to the offline finalization pipeline. Native model
+    /// weights are kept in the app's Application Support container.
     static let candidates: [OfflineASRModelDescriptor] = [
         OfflineASRModelDescriptor(
             id: .parakeetTDTv3,
@@ -57,20 +50,16 @@ nonisolated enum OfflineASRModelCatalog {
             availability: .available
         ),
         OfflineASRModelDescriptor(
-            id: .gigaAMMultilingualLargeCTC,
-            displayName: "GigaAM Multilingual Large",
-            exactVariant: "multilingual_large_ctc",
-            availability: .unavailable(
-                reason: "The official GigaAM release supplies PyTorch/ONNX runtimes, but no ship-ready native Swift/CoreML runtime with its word-timestamp alignment path."
-            )
+            id: .qwen3ASR17B,
+            displayName: "Qwen3-ASR 1.7B + ForcedAligner",
+            exactVariant: "aufklarer/Qwen3-ASR-1.7B-MLX-5bit + Qwen3-ForcedAligner-0.6B-8bit",
+            availability: .available
         ),
         OfflineASRModelDescriptor(
-            id: .qwen3ASR17B,
-            displayName: "Qwen3-ASR 1.7B",
-            exactVariant: "Qwen/Qwen3-ASR-1.7B + Qwen3-ForcedAligner-0.6B",
-            availability: .unavailable(
-                reason: "The official runtime is Python-first; the pinned FluidAudio build does not expose a production Qwen3 ASR backend, and an audited Swift forced-alignment adapter is not installed."
-            )
+            id: .gigaAMV3,
+            displayName: "GigaAM v3 · e2e_rnnt",
+            exactVariant: "handy-computer/gigaam-v3-e2e-rnnt-gguf · e2e_rnnt · Q8_0",
+            availability: .available
         ),
     ]
 

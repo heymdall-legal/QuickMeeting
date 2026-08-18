@@ -101,6 +101,7 @@ final class TranscriptionSettingsViewModel: ObservableObject {
         offlineASRModelID = id
         modelPreparationState = modelPreparationCenter?.state(for: id) ?? .notPrepared
         savePipelineOptions()
+        modelPreparationCenter?.prepare(id)
     }
 
     func selectOfflineJobSchedule(_ schedule: OfflineJobSchedule) {

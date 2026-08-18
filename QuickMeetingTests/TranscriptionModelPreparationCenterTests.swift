@@ -16,7 +16,7 @@ struct TranscriptionModelPreparationCenterTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(center.state(for: .parakeetTDTv3) == .ready)
-        #expect(center.state(for: .gigaAMMultilingualLargeCTC) == .failed(message: "Backend is unavailable"))
+        #expect(center.state(for: .gigaAMV3) == .notPrepared)
     }
 }
 

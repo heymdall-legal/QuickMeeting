@@ -81,6 +81,8 @@ struct QuickMeetingApp: App {
             let parakeetBackend = ParakeetASRBackend()
             let asrBackendRouter = ASRBackendRouter(backends: [
                 .parakeetTDTv3: parakeetBackend,
+                .qwen3ASR17B: NativeQwenASRBackend(),
+                .gigaAMV3: NativeGigaAMASRBackend(),
             ])
             let modelPreparationCenter = TranscriptionModelPreparationCenter(
                 preparer: asrBackendRouter
