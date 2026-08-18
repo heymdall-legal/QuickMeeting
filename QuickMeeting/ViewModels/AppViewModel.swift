@@ -138,10 +138,14 @@ final class AppViewModel: ObservableObject {
                 meeting: meeting,
                 outputURL: artifacts.audioFileURL
             )
+            // Offline transcript timestamps start at the first captured audio.
+            // Anchor screen evidence after capture has started instead of to
+            // the earlier database-record creation time.
+            let evidenceTimelineStartedAt = dateProvider()
             await screenObservationCapturer?.start(
                 meetingID: meetingID,
                 meetingFolderURL: artifacts.meetingFolderURL,
-                startedAt: startedAt
+                startedAt: evidenceTimelineStartedAt
             )
 
             recordingState = .recording(meetingID: meetingID)
@@ -304,6 +308,7 @@ final class AppViewModel: ObservableObject {
 
         do {
             try await transcriptionService.transcribe(meetingID: meeting.id)
+            await speakerSuggestionService?.recomputeSuggestions(for: meeting.id)
         } catch {
             transcriptionErrorMessage = error.localizedDescription
         }

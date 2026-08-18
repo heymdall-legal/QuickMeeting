@@ -67,7 +67,17 @@ struct ScreenObservationStoreTests {
             speakerID: "speaker-2",
             proposedName: "Olga",
             confidence: .high,
-            reason: "Seen in active tile",
+            confidenceScore: 0.87,
+            evidenceSummary: SpeakerIdentityEvidenceSummary(
+                observationIDs: [UUID(), UUID(), UUID()],
+                supportingObservationCount: 3,
+                supportingDuration: 6.5,
+                candidateShare: 0.81,
+                averageVisualConfidence: 0.9,
+                runnerUpName: "Ilya",
+                runnerUpShare: 0.19
+            ),
+            reason: "Active speaker evidence",
             evidenceImageRelativePath: "screen-observations/0003.jpg",
             evidenceThumbnailRelativePath: nil,
             observationID: UUID(),
@@ -81,6 +91,15 @@ struct ScreenObservationStoreTests {
         #expect(suggestions.map(\.proposedName).sorted() == ["Masha", "Olga"])
         #expect(suggestions.first(where: { $0.proposedName == "Masha" })?.status == .accepted)
         #expect(suggestions.first(where: { $0.proposedName == "Olga" })?.status == .pending)
+        #expect(suggestions.first(where: { $0.proposedName == "Olga" })?.confidencePercent == 87)
+        #expect(
+            suggestions.first(where: { $0.proposedName == "Olga" })?
+                .evidenceSummary.supportingObservationCount == 3
+        )
+        #expect(
+            suggestions.first(where: { $0.proposedName == "Olga" })?
+                .evidenceSummary.runnerUpName == "Ilya"
+        )
     }
 
     @Test

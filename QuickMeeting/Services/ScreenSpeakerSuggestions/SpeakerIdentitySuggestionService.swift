@@ -14,6 +14,56 @@ protocol SpeakerSuggestionRecomputing: AnyObject {
 }
 
 struct SpeakerIdentitySuggestionService {
+    struct Configuration: Equatable, Sendable {
+        var observationWindowRadius: TimeInterval = 1
+        var minimumSpeakerDominance = 0.65
+        var minimumAttributionMargin = 0.20
+        var minimumSupportingObservations = 2
+        var minimumSupportingDuration: TimeInterval = 2
+        var minimumCandidateShare = 0.65
+        var minimumCandidateMargin = 0.20
+        var minimumConfidenceScore = 0.60
+        var fullDurationSupport: TimeInterval = 6
+        var fullObservationSupport = 4
+    }
+
+    private struct EvidenceKey: Hashable {
+        let speakerID: String
+        let attendeeName: String
+    }
+
+    private struct AttributedObservation {
+        let observation: ScreenObservation
+        let overlapDuration: TimeInterval
+        let visualConfidence: Double
+        let weight: Double
+    }
+
+    private struct EvidenceAggregate {
+        var observations: [AttributedObservation] = []
+        var weight: Double = 0
+        var supportingDuration: TimeInterval = 0
+        var visualConfidenceTotal: Double = 0
+
+        mutating func append(_ evidence: AttributedObservation) {
+            observations.append(evidence)
+            weight += evidence.weight
+            supportingDuration += evidence.overlapDuration
+            visualConfidenceTotal += evidence.visualConfidence
+        }
+
+        var averageVisualConfidence: Double {
+            guard !observations.isEmpty else { return 0 }
+            return visualConfidenceTotal / Double(observations.count)
+        }
+    }
+
+    private let configuration: Configuration
+
+    init(configuration: Configuration = Configuration()) {
+        self.configuration = configuration
+    }
+
     func suggestions(
         meetingID: UUID,
         attendeeNames: [String],
@@ -35,36 +85,126 @@ struct SpeakerIdentitySuggestionService {
             return []
         }
 
-        var suggestionsBySpeaker = [String: SpeakerIdentitySuggestion]()
+        let eligibleSpeakerIDs = Set(
+            transcript.speakers
+                .filter { $0.labelSource == .generic }
+                .map(\.id)
+        )
+        guard !eligibleSpeakerIDs.isEmpty else {
+            return []
+        }
 
+        var evidenceByCandidate = [EvidenceKey: EvidenceAggregate]()
         for observation in observations.sorted(by: { $0.capturedAtOffset < $1.capturedAtOffset }) {
             guard let activeTile = observation.activeTile,
                   let matchedName = activeTile.matchedName?.trimmingCharacters(in: .whitespacesAndNewlines),
                   let attendeeName = attendeeLookup[matchedName.localizedLowercase],
-                  let speakerID = speakerIDSpeaking(at: observation.capturedAtOffset, in: transcript)
+                  let attribution = speakerAttribution(
+                    at: observation.capturedAtOffset,
+                    in: transcript,
+                    eligibleSpeakerIDs: eligibleSpeakerIDs
+                  )
             else {
                 continue
             }
 
-            let key = SpeakerIdentitySuggestionKey(speakerID: speakerID, proposedName: attendeeName)
-            guard !dismissed.contains(key), suggestionsBySpeaker[speakerID] == nil else {
+            let visualConfidence = min(max(activeTile.highlightScore, 0), 1)
+            let evidence = AttributedObservation(
+                observation: observation,
+                overlapDuration: attribution.overlapDuration,
+                visualConfidence: visualConfidence,
+                weight: attribution.overlapDuration * visualConfidence * attribution.dominance
+            )
+            let key = EvidenceKey(speakerID: attribution.speakerID, attendeeName: attendeeName)
+            evidenceByCandidate[key, default: EvidenceAggregate()].append(evidence)
+        }
+
+        let aggregatesBySpeaker = Dictionary(grouping: evidenceByCandidate) { entry in
+            entry.key.speakerID
+        }
+        var suggestions = [SpeakerIdentitySuggestion]()
+
+        for (speakerID, entries) in aggregatesBySpeaker {
+            let ranked = entries.sorted {
+                if $0.value.weight != $1.value.weight {
+                    return $0.value.weight > $1.value.weight
+                }
+                return $0.key.attendeeName < $1.key.attendeeName
+            }
+            guard let best = ranked.first else { continue }
+            let runnerUp = ranked.dropFirst().first
+            let totalWeight = ranked.reduce(0) { $0 + $1.value.weight }
+            guard totalWeight > 0 else { continue }
+
+            let candidateShare = best.value.weight / totalWeight
+            let runnerUpShare = runnerUp.map { $0.value.weight / totalWeight }
+            let candidateMargin = runnerUp.map {
+                (best.value.weight - $0.value.weight) / max(best.value.weight, 0.000_001)
+            } ?? 1
+            guard best.value.observations.count >= configuration.minimumSupportingObservations,
+                  best.value.supportingDuration >= configuration.minimumSupportingDuration,
+                  candidateShare >= configuration.minimumCandidateShare,
+                  candidateMargin >= configuration.minimumCandidateMargin
+            else {
                 continue
             }
 
-            suggestionsBySpeaker[speakerID] = SpeakerIdentitySuggestion(
+            let repeatability = min(
+                Double(best.value.observations.count)
+                    / Double(max(1, configuration.fullObservationSupport)),
+                1
+            )
+            let durationSupport = min(
+                best.value.supportingDuration / max(0.001, configuration.fullDurationSupport),
+                1
+            )
+            let rawConfidence = 0.40 * candidateShare
+                + 0.25 * candidateMargin
+                + 0.20 * best.value.averageVisualConfidence
+                + 0.15 * repeatability
+            let confidenceScore = min(
+                max(rawConfidence * (0.55 + 0.45 * durationSupport), 0),
+                1
+            )
+            guard confidenceScore >= configuration.minimumConfidenceScore else { continue }
+
+            let suggestionKey = SpeakerIdentitySuggestionKey(
+                speakerID: speakerID,
+                proposedName: best.key.attendeeName
+            )
+            guard !dismissed.contains(suggestionKey),
+                  let primaryEvidence = best.value.observations.max(by: {
+                    $0.weight < $1.weight
+                  })?.observation
+            else {
+                continue
+            }
+
+            let evidenceSummary = SpeakerIdentityEvidenceSummary(
+                observationIDs: best.value.observations.map(\.observation.id),
+                supportingObservationCount: best.value.observations.count,
+                supportingDuration: best.value.supportingDuration,
+                candidateShare: candidateShare,
+                averageVisualConfidence: best.value.averageVisualConfidence,
+                runnerUpName: runnerUp?.key.attendeeName,
+                runnerUpShare: runnerUpShare
+            )
+            suggestions.append(SpeakerIdentitySuggestion(
                 meetingID: meetingID,
                 speakerID: speakerID,
-                proposedName: attendeeName,
-                confidence: confidence(for: activeTile),
-                reason: "Seen in active tile",
-                evidenceImageRelativePath: observation.imageRelativePath,
-                evidenceThumbnailRelativePath: observation.thumbnailRelativePath,
-                observationID: observation.id,
-                capturedAtOffset: observation.capturedAtOffset
-            )
+                proposedName: best.key.attendeeName,
+                confidence: confidence(for: confidenceScore),
+                confidenceScore: confidenceScore,
+                evidenceSummary: evidenceSummary,
+                reason: "Active speaker evidence",
+                evidenceImageRelativePath: primaryEvidence.imageRelativePath,
+                evidenceThumbnailRelativePath: primaryEvidence.thumbnailRelativePath,
+                observationID: primaryEvidence.id,
+                capturedAtOffset: primaryEvidence.capturedAtOffset
+            ))
         }
 
-        return suggestionsBySpeaker.values.sorted {
+        return suggestions.sorted {
             if $0.capturedAtOffset != $1.capturedAtOffset {
                 return $0.capturedAtOffset < $1.capturedAtOffset
             }
@@ -72,20 +212,52 @@ struct SpeakerIdentitySuggestionService {
         }
     }
 
-    private func speakerIDSpeaking(at offset: TimeInterval, in transcript: StoredTranscript) -> String? {
-        transcript.segments.first { segment in
-            guard let start = segment.startTime, let end = segment.endTime else {
-                return false
+    private func speakerAttribution(
+        at offset: TimeInterval,
+        in transcript: StoredTranscript,
+        eligibleSpeakerIDs: Set<String>
+    ) -> (speakerID: String, overlapDuration: TimeInterval, dominance: Double)? {
+        let windowStart = max(0, offset - configuration.observationWindowRadius)
+        let windowEnd = offset + configuration.observationWindowRadius
+        var overlapBySpeaker = [String: TimeInterval]()
+
+        for segment in transcript.segments {
+            guard let speakerID = segment.speakerID,
+                  eligibleSpeakerIDs.contains(speakerID),
+                  let rawStart = segment.startTime,
+                  let rawEnd = segment.endTime else {
+                continue
             }
-            return offset >= start && offset <= end
-        }?.speakerID
+            let start = min(rawStart, rawEnd)
+            let end = max(rawStart, rawEnd)
+            let overlap = max(0, min(windowEnd, end) - max(windowStart, start))
+            if overlap > 0 {
+                overlapBySpeaker[speakerID, default: 0] += overlap
+            }
+        }
+
+        let ranked = overlapBySpeaker.sorted {
+            if $0.value != $1.value { return $0.value > $1.value }
+            return $0.key < $1.key
+        }
+        guard let best = ranked.first else { return nil }
+        let total = ranked.reduce(0) { $0 + $1.value }
+        guard total > 0 else { return nil }
+        let dominance = best.value / total
+        let runnerUp = ranked.dropFirst().first?.value ?? 0
+        let margin = (best.value - runnerUp) / max(best.value, 0.000_001)
+        guard dominance >= configuration.minimumSpeakerDominance,
+              margin >= configuration.minimumAttributionMargin else {
+            return nil
+        }
+        return (best.key, best.value, dominance)
     }
 
-    private func confidence(for activeTile: ScreenTileObservation) -> SpeakerIdentitySuggestionConfidence {
-        if activeTile.highlightScore >= 0.85 {
+    private func confidence(for score: Double) -> SpeakerIdentitySuggestionConfidence {
+        if score >= 0.85 {
             return .high
         }
-        if activeTile.highlightScore >= 0.65 {
+        if score >= 0.70 {
             return .medium
         }
         return .low

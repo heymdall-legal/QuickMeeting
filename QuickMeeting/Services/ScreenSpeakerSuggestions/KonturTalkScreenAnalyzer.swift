@@ -6,7 +6,8 @@
 import Foundation
 
 struct KonturTalkScreenAnalyzer: MeetingScreenAnalyzing {
-    private let minimumHighlightScore = 0.75
+    private let minimumHighlightScore = 0.55
+    private let minimumLeadOverRunnerUp = 0.08
 
     func matchesContext(sourceWindowTitle: String?, textBoxes: [ScreenTextObservation]) -> Bool {
         if sourceWindowTitle?.localizedCaseInsensitiveContains("kontur") == true {
@@ -26,26 +27,34 @@ struct KonturTalkScreenAnalyzer: MeetingScreenAnalyzing {
         textBoxes: [ScreenTextObservation],
         attendeeNames: [String]
     ) -> ScreenTileObservation? {
-        guard let candidate = candidates.max(by: { $0.highlightScore < $1.highlightScore }),
-              candidate.highlightScore >= minimumHighlightScore else {
-            return nil
-        }
-
         let attendeeLookup = attendeeNames
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        let matchedName = textBoxes
-            .filter { candidate.boundingBox.contains(centerOf: $0.boundingBox) }
-            .compactMap { textBox in
-                attendeeLookup.first {
-                    textBox.text.localizedCaseInsensitiveContains($0)
-                        || $0.localizedCaseInsensitiveContains(textBox.text)
+        let eligible = candidates.compactMap { candidate -> (CandidateScreenTile, String)? in
+            let matchedName = textBoxes
+                .filter { candidate.boundingBox.contains(centerOf: $0.boundingBox) }
+                .compactMap { textBox in
+                    attendeeLookup.first {
+                        textBox.text.localizedCaseInsensitiveContains($0)
+                            || $0.localizedCaseInsensitiveContains(textBox.text)
+                    }
                 }
+                .first
+            return matchedName.map { (candidate, $0) }
+        }.sorted {
+            if $0.0.highlightScore != $1.0.highlightScore {
+                return $0.0.highlightScore > $1.0.highlightScore
             }
-            .first
+            return $0.1 < $1.1
+        }
 
-        guard let matchedName else {
+        guard let (candidate, matchedName) = eligible.first,
+              candidate.highlightScore >= minimumHighlightScore else {
+            return nil
+        }
+        if let runnerUp = eligible.dropFirst().first,
+           candidate.highlightScore - runnerUp.0.highlightScore < minimumLeadOverRunnerUp {
             return nil
         }
 

@@ -80,6 +80,22 @@ struct AppViewModelTests {
     }
 
     @Test
+    func successfulOfflineTranscriptionRecomputesSpeakerSuggestions() async throws {
+        let recomputeService = StubSpeakerSuggestionRecomputeService()
+        let harness = try AppViewModelHarness(speakerSuggestionRecomputeService: recomputeService)
+        let meeting = try harness.createMeetingWithTranscript(
+            StoredTranscript(
+                speakers: [TranscriptSpeaker(id: "speaker-1", displayName: "Speaker 1")],
+                segments: [TranscriptSegment(text: "Hello", startTime: 1, endTime: 4, speakerID: "speaker-1")]
+            )
+        )
+
+        await harness.viewModel.transcribeMeeting(meeting)
+
+        #expect(recomputeService.calls == [meeting.id])
+    }
+
+    @Test
     func pendingSuggestionsForMeetingAreLoadedFromSuggestionService() throws {
         let service = StubSpeakerSuggestionRecomputeService()
         let suggestion = SpeakerIdentitySuggestion(

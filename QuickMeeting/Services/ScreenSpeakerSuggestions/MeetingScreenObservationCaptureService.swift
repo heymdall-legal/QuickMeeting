@@ -54,7 +54,7 @@ actor MeetingScreenObservationCaptureService {
     init(
         recorder: any ScreenSnapshotRecording,
         observationSink: any ScreenObservationSinking,
-        interval: TimeInterval = 12
+        interval: TimeInterval = 2
     ) {
         self.recorder = recorder
         self.observationSink = observationSink

@@ -797,10 +797,14 @@ struct MeetingDetailView: View {
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(QMTheme.ink)
                         .lineLimit(2)
-                    Text("\(suggestion.reason) · \(speakerSuggestionConfidenceText(suggestion.confidence))")
+                    Text("\(suggestion.confidencePercent)% · \(speakerSuggestionConfidenceText(suggestion.confidence)) confidence")
                         .font(.system(size: 11.5))
                         .foregroundStyle(QMTheme.secondary)
                         .lineLimit(2)
+                    Text("\(suggestion.evidenceSummary.supportingObservationCount) observations · \(suggestion.evidenceSummary.supportingDuration, specifier: "%.1f") s overlap")
+                        .font(.system(size: 11))
+                        .foregroundStyle(QMTheme.tertiary)
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: 0)
@@ -2083,9 +2087,20 @@ private struct SpeakerSuggestionPreviewWindow: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(QMTheme.ink)
 
-            Text("\(suggestion.reason) · \(speakerSuggestionConfidenceText(suggestion.confidence))")
+            Text("\(suggestion.confidencePercent)% · \(speakerSuggestionConfidenceText(suggestion.confidence)) confidence")
                 .font(.system(size: 12))
                 .foregroundStyle(QMTheme.secondary)
+
+            Text("\(suggestion.evidenceSummary.supportingObservationCount) observations · \(suggestion.evidenceSummary.supportingDuration, specifier: "%.1f") s overlap · \(Int((suggestion.evidenceSummary.candidateShare * 100).rounded()))% of named evidence")
+                .font(.system(size: 12))
+                .foregroundStyle(QMTheme.secondary)
+
+            if let runnerUpName = suggestion.evidenceSummary.runnerUpName,
+               let runnerUpShare = suggestion.evidenceSummary.runnerUpShare {
+                Text("Runner-up: \(runnerUpName) · \(Int((runnerUpShare * 100).rounded()))%")
+                    .font(.system(size: 12))
+                    .foregroundStyle(QMTheme.tertiary)
+            }
 
             previewContent
         }

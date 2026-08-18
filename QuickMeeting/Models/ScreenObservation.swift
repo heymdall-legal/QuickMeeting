@@ -77,6 +77,34 @@ nonisolated enum SpeakerIdentitySuggestionStatus: String, Codable, Equatable, Se
     case superseded
 }
 
+nonisolated struct SpeakerIdentityEvidenceSummary: Codable, Equatable, Sendable {
+    let observationIDs: [UUID]
+    let supportingObservationCount: Int
+    let supportingDuration: TimeInterval
+    let candidateShare: Double
+    let averageVisualConfidence: Double
+    let runnerUpName: String?
+    let runnerUpShare: Double?
+
+    init(
+        observationIDs: [UUID],
+        supportingObservationCount: Int,
+        supportingDuration: TimeInterval,
+        candidateShare: Double,
+        averageVisualConfidence: Double,
+        runnerUpName: String? = nil,
+        runnerUpShare: Double? = nil
+    ) {
+        self.observationIDs = observationIDs
+        self.supportingObservationCount = supportingObservationCount
+        self.supportingDuration = supportingDuration
+        self.candidateShare = candidateShare
+        self.averageVisualConfidence = averageVisualConfidence
+        self.runnerUpName = runnerUpName
+        self.runnerUpShare = runnerUpShare
+    }
+}
+
 nonisolated struct SpeakerIdentitySuggestionKey: Hashable, Sendable {
     let speakerID: String
     let proposedName: String
@@ -88,6 +116,8 @@ nonisolated struct SpeakerIdentitySuggestion: Identifiable, Equatable, Sendable 
     let speakerID: String
     let proposedName: String
     let confidence: SpeakerIdentitySuggestionConfidence
+    let confidenceScore: Double
+    let evidenceSummary: SpeakerIdentityEvidenceSummary
     let reason: String
     let evidenceImageRelativePath: String
     let evidenceThumbnailRelativePath: String?
@@ -101,6 +131,8 @@ nonisolated struct SpeakerIdentitySuggestion: Identifiable, Equatable, Sendable 
         speakerID: String,
         proposedName: String,
         confidence: SpeakerIdentitySuggestionConfidence,
+        confidenceScore: Double? = nil,
+        evidenceSummary: SpeakerIdentityEvidenceSummary? = nil,
         reason: String,
         evidenceImageRelativePath: String,
         evidenceThumbnailRelativePath: String?,
@@ -113,6 +145,17 @@ nonisolated struct SpeakerIdentitySuggestion: Identifiable, Equatable, Sendable 
         self.speakerID = speakerID
         self.proposedName = proposedName
         self.confidence = confidence
+        self.confidenceScore = min(max(
+            confidenceScore ?? Self.defaultScore(for: confidence),
+            0
+        ), 1)
+        self.evidenceSummary = evidenceSummary ?? SpeakerIdentityEvidenceSummary(
+            observationIDs: [observationID],
+            supportingObservationCount: 1,
+            supportingDuration: 0,
+            candidateShare: 1,
+            averageVisualConfidence: Self.defaultScore(for: confidence)
+        )
         self.reason = reason
         self.evidenceImageRelativePath = evidenceImageRelativePath
         self.evidenceThumbnailRelativePath = evidenceThumbnailRelativePath
@@ -123,5 +166,19 @@ nonisolated struct SpeakerIdentitySuggestion: Identifiable, Equatable, Sendable 
 
     var key: SpeakerIdentitySuggestionKey {
         SpeakerIdentitySuggestionKey(speakerID: speakerID, proposedName: proposedName)
+    }
+
+    var confidencePercent: Int {
+        Int((confidenceScore * 100).rounded())
+    }
+
+    private static func defaultScore(
+        for confidence: SpeakerIdentitySuggestionConfidence
+    ) -> Double {
+        switch confidence {
+        case .low: 0.6
+        case .medium: 0.75
+        case .high: 0.9
+        }
     }
 }
