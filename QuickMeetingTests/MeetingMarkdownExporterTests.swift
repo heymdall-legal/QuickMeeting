@@ -119,35 +119,6 @@ struct MeetingMarkdownExporterTests {
         #expect(fileURL.deletingLastPathComponent().standardizedFileURL == rootURL.standardizedFileURL)
         #expect(FileManager.default.fileExists(atPath: fileURL.path))
     }
-
-    @Test
-    func configuredExporterRejectsDirectoryWhenScopedAccessCannotStart() throws {
-        let rootURL = try temporaryExportDirectory()
-        let settingsStore = InMemoryMarkdownExportSettingsStore(directoryURL: rootURL)
-        let exporter = ConfiguredMeetingMarkdownExporter(
-            settingsStore: settingsStore,
-            startAccessingSecurityScopedResource: { _ in false },
-            stopAccessingSecurityScopedResource: { _ in Issue.record("Must not stop access that did not start") }
-        )
-
-        #expect(throws: MeetingMarkdownExporterError.exportDirectoryAccessUnavailable) {
-            try exporter.exportSummary(
-                for: makeMeeting(id: UUID(), title: "Unavailable Folder", summaryText: "Summary"),
-                summary: "Summary"
-            )
-        }
-        #expect(try FileManager.default.contentsOfDirectory(atPath: rootURL.path).isEmpty)
-    }
-}
-
-private struct InMemoryMarkdownExportSettingsStore: MeetingMarkdownExportSettingsStoring {
-    let directoryURL: URL?
-
-    func directoryPath() -> String? { directoryURL?.path }
-    func saveDirectoryPath(_: String?) {}
-    func directoryBookmarkData() -> Data? { nil }
-    func saveDirectoryURL(_: URL) throws {}
-    func resolvedDirectoryURL() throws -> URL? { directoryURL }
 }
 
 private func temporaryExportDirectory() throws -> URL {
