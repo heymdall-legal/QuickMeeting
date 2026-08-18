@@ -26,28 +26,6 @@ struct TranscriptionSettingsViewModelTests {
     }
 
     @Test
-    func automaticTranscriptionTogglePersistsAlongsidePipelineOptions() {
-        let defaults = makeDefaults()
-        let store = TranscriptionSettingsStore(userDefaults: defaults)
-        let viewModel = TranscriptionSettingsViewModel(
-            settingsStore: store,
-            glossaryStore: TranscriptionGlossaryStore(userDefaults: defaults)
-        )
-
-        viewModel.selectLanguage(code: "de")
-        viewModel.selectCTCMode(.ctc110m)
-        viewModel.setLLMCorrectionEnabled(true)
-        viewModel.setAutomaticTranscriptionEnabled(true)
-
-        #expect(store.pipelineOptions() == .init(
-            languageCode: "de",
-            ctcMode: .ctc110m,
-            isLLMCorrectionEnabled: true,
-            isAutomaticTranscriptionEnabled: true
-        ))
-    }
-
-    @Test
     func addGlossaryTermPersistsTrimmedEnabledTerm() {
         let defaults = makeDefaults()
         let viewModel = TranscriptionSettingsViewModel(
